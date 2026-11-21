@@ -97,7 +97,6 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private filtered = new Set<string>();
   private filters?: XRFilterSummary;
   private vehicles: XRVehicleData[] = [];
-  private telemetry = new Map<string, [number | null, number]>();
   private activeStop?: string;
   private place?: XRPlaceData;
   private manifest: XRManifestData | null = null;
@@ -175,7 +174,6 @@ export class PlayCanvasApp implements FareSightSceneEngine {
       this.setPlaces(this.places, this.filtered);
       this.map.setVehicles(this.vehicles);
       if (this.filters) this.station.setFilters(this.filters);
-      for (const [id, data] of this.telemetry) this.station.setTelemetry(id, ...data);
       this.venue.setWillWeFit(...this.fit);
       this.applyScene('map');
       this.placeDesktopScenes();
@@ -274,11 +272,6 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   setLiveVehicles(vehicles: XRVehicleData[]): void {
     this.vehicles = vehicles;
     this.map?.setVehicles(vehicles);
-  }
-
-  setStationTelemetry(stopId: string, nextArrivalMin: number | null, matchingCount: number): void {
-    this.telemetry.set(stopId, [nextArrivalMin, matchingCount]);
-    this.station?.setTelemetry(stopId, nextArrivalMin, matchingCount);
   }
 
   async setScene(mode: SceneMode): Promise<void> {
