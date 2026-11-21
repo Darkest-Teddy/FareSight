@@ -8,7 +8,7 @@ export function attribution(openModeration: () => void) {
     ['OpenStreetMap contributors (ODbL)', 'https://www.openstreetmap.org/copyright'],
     ['MBTA V3 API and GTFS', 'https://www.mbta.com/developers'],
     ['PlayCanvas', 'https://playcanvas.com/'],
-    ['World Labs Marble 1.1', 'https://www.worldlabs.ai/blog/announcing-the-world-api'],
+    ['World Labs Atlas', 'https://docs.atlas.worldlabs.ai/'],
     ['Replicate TRELLIS', 'https://replicate.com/firtoz/trellis'],
     ['Google Gemini', 'https://ai.google.dev/'],
     ['SplatTransform', 'https://github.com/playcanvas/splat-transform'],

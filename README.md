@@ -13,9 +13,9 @@
   - `POST /api/uploads` — Multipart/base64 image upload, orientation/dimension parsing, SHA-256 deduplication, original archival.
   - `POST /api/intake` — **Gemini `gemini-4-hydrogen`** structured JSON reference photo selection (with manual override and heuristic fallback).
   - `POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/:id`, `POST /api/jobs/:id/retry` — Resumable `queued -> generating -> downloading -> converting -> needs_review -> ready` pipeline:
-    - **Rooms**: World Labs **Marble 1.1** multi-image reconstruction (`reconstruct_images: true`, up to 8 images) + free synchronous `100k` Gaussian PLY export.
+    - **Rooms** use [World Labs Atlas Developer API v2](https://docs.atlas.worldlabs.ai/) with 2–32 overlapping photos. Atlas first estimates camera poses and depth (`images2PosedRGBD`), then generates an SPZ Gaussian splat (`posedImages2Splats`). Choose `atlas-draft` (default, about 30 seconds for the splat step) or `atlas-refined` (about 15–21 minutes for the splat step). The worker saves both operation IDs and retries the same requests using stable idempotency keys.
     - **Dishes**: Replicate pinned `firtoz/trellis` (`e8f6c45206993f297372f5436b90350817bd9b4a0d52d2a76df50c1c8afa2b3c`) with immediate download of `output.gaussian_ply` and foreground preview before Replicate's 1-hour expiry.
-    - **Asset processing**: `@playcanvas/splat-transform` simplification & `.sog` compression (retaining original PLY) + 5th–95th percentile automatic dish scaling.
+    - **Asset processing** uses `@playcanvas/splat-transform` to decimate and compress splats to `.sog`. Originals are retained as `.spz` for Atlas and `.ply` for TRELLIS and demo jobs. If conversion is unavailable, Atlas serves the original SPZ and PLY jobs serve the normalized PLY. Dish scaling uses the 5th–95th percentile of the splat bounds.
   - `POST /api/assets/:id/publish`, `GET /api/restaurants`, `GET /api/restaurants/:id/manifest`
   - `POST /api/restaurants/:id/reviews`, `GET/POST /api/admin/moderation`, `POST/GET /api/debug/logs`
   - `GET /api/mbta/{vehicles,predictions,alerts,schedules,trip}` — Cached MBTA V3 proxy (10s / 60s / 1h TTL) with realistic Boston simulation fallback.
@@ -26,12 +26,14 @@
 
 ```bash
 pnpm install
-cp .env.example .env      # Optional: add GEMINI_API_KEY, WORLDLABS_API_KEY, REPLICATE_API_TOKEN, MBTA_API_KEY
+cp .env.example .env      # Optional: add GEMINI_API_KEY, WLT_API_KEY, REPLICATE_API_TOKEN, MBTA_API_KEY
 pnpm assets:sync          # Sync modeling/output/* into web/public/assets-demo/
 pnpm dev                  # Starts Fastify server (:3001) + Vite web app (:5173)
 ```
 
 - Open `http://localhost:5173` on desktop/mobile (or deploy over HTTPS for Meta Quest 3 WebXR).
+- An Atlas project API key needs `tasks.create`, `operations.read`, `assets.create`, and `assets.read`. Set `WLT_API_KEY` or leave it unset and use `WORLDLABS_API_KEY`. Override `WLT_API_BASE_URL` to use a different Atlas v2 endpoint.
+- Install a current `@playcanvas/splat-transform` CLI on the server's PATH to keep Atlas room previews within the 100,000-Gaussian conversion target. Large original SPZs can exceed the viewer's existing Gaussian safety limit.
 - Without API keys (`PIPELINE_MODE=auto`), the Upload 3D studio runs a labeled demo simulation through all pipeline stages (`Queued -> Generating -> Downloading -> Converting -> Needs review -> Ready`) and publishes into the live manifest.
 - Default moderation passcode when `ADMIN_PASSCODE` is unset: `bostonhacks2026`.
 
@@ -42,6 +44,8 @@ node modeling/generate_all.mjs && node modeling/validate_assets.mjs
 pnpm typecheck
 pnpm build
 pnpm --filter @faresight/server test
+node scripts/first_milestone_test.mjs --demo
+node scripts/verify_e2e.mjs
 ```
 
 ## Credits & Attribution
@@ -49,7 +53,7 @@ pnpm --filter @faresight/server test
 - OpenStreetMap contributors (ODbL)
 - MBTA V3 API & GTFS
 - PlayCanvas Engine & `@playcanvas/splat-transform`
-- World Labs Marble 1.1
+- [World Labs Atlas](https://docs.atlas.worldlabs.ai/)
 - Replicate `firtoz/trellis`
 - Google Gemini (`gemini-4-hydrogen`)
 - Inter typeface

@@ -97,9 +97,10 @@ export interface Asset {
   scale_factor: number;
   plate_diameter_m?: number | null;
   gaussian_count: number;
-  format: 'sog' | 'ply' | 'gallery';
+  format: 'sog' | 'ply' | 'spz' | 'gallery';
   url: string;
   original_ply_url?: string | null;
+  original_spz_url?: string | null;
   thumbnail_url?: string | null;
   preview_url?: string | null;
   spawn_point?: Vector3 | null;
@@ -112,12 +113,16 @@ export interface Asset {
     measured_width?: number;
     target_gaussians?: number;
     splat_transform_command?: string;
-    conversion_status?: 'compressed' | 'ply_fallback';
+    conversion_status?: 'compressed' | 'ply_fallback' | 'spz_fallback';
   };
 }
 
 export type JobStage = 'queued' | 'generating' | 'downloading' | 'converting' | 'needs_review' | 'ready' | 'failed';
-export type MarbleTier = 'marble-1.1' | 'marble-1.1-draft';
+export const ROOM_MODEL_TIERS = ['atlas-draft', 'atlas-refined'] as const;
+export type RoomModelTier = typeof ROOM_MODEL_TIERS[number];
+export type MarbleTier = RoomModelTier;
+export const MAX_ROOM_PHOTOS = 32;
+export const ROOM_PHOTO_REQUIREMENT = 'Atlas room reconstruction requires 2 to 32 overlapping photos.';
 
 export interface GenerationJob {
   id: string;
@@ -126,15 +131,17 @@ export interface GenerationJob {
   dish_id?: string | null;
   dish_name?: string | null;
   status: JobStage;
-  provider: 'marble-1.1' | 'trellis-replicate' | 'demo-sim';
+  provider: 'atlas-v2' | 'trellis-replicate' | 'demo-sim';
+  pose_operation_id?: string | null;
   provider_task_id?: string | null;
   input_upload_ids: string[];
   plate_diameter_m?: number | null;
-  model_tier?: MarbleTier;
+  model_tier?: RoomModelTier;
   progress: number;
   status_message: string;
   error?: string | null;
   original_ply_path?: string | null;
+  original_spz_path?: string | null;
   converted_asset_path?: string | null;
   preview_image_path?: string | null;
   asset_id?: string | null;

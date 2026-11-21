@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { Asset, GenerationJob, Place } from '@faresight/shared';
 import { demoAssets, places } from './seed.ts';
+import type { AtlasPosedFrame, AtlasSplat } from '../services/atlasClient.ts';
 
 export interface Upload {
   id: string;
@@ -23,6 +24,9 @@ export interface Upload {
 export interface JobRecord extends GenerationJob {
   submission_pending?: boolean;
   world_id?: string;
+  atlas_input_asset_ids?: string[];
+  posed_frames?: AtlasPosedFrame[];
+  atlas_splat?: AtlasSplat;
   preview_download_pending?: boolean;
 }
 
@@ -170,6 +174,6 @@ export class Store {
 }
 
 export function publicJob(job: JobRecord): GenerationJob {
-  const { submission_pending, world_id, preview_download_pending, ...publicFields } = job;
+  const { submission_pending, world_id, preview_download_pending, atlas_input_asset_ids, posed_frames, atlas_splat, ...publicFields } = job;
   return publicFields;
 }

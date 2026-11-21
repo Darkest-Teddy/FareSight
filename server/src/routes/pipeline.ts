@@ -1,6 +1,7 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import type { Dish, GenerationJob, MarbleTier, Vector3 } from '@faresight/shared';
+import { MAX_ROOM_PHOTOS, ROOM_MODEL_TIERS, ROOM_PHOTO_REQUIREMENT } from '@faresight/shared';
+import type { Dish, GenerationJob, RoomModelTier, Vector3 } from '@faresight/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.ts';
 import { publicJob } from '../db/database.ts';
@@ -17,7 +18,7 @@ interface JobBody extends IntakeBody {
   dish_id?: string;
   dish_name?: string;
   plate_diameter_m?: number;
-  model_tier?: MarbleTier;
+  model_tier?: RoomModelTier;
 }
 interface PublishBody { spawn_point?: Vector3; plate_diameter_m?: number; rotation_y?: number; approve?: boolean }
 
@@ -85,7 +86,7 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
     preHandler: admin,
     schema: { body: {
       type: 'object', required: ['place_id', 'upload_ids'],
-      properties: { place_id: idSchema, upload_ids: idList(24) },
+      properties: { place_id: idSchema, upload_ids: idList(MAX_ROOM_PHOTOS + 1) },
     } },
   }, async ({ body }, reply) => {
     if (!store.get('places', body.place_id)) return reply.code(404).send({ error: 'Place not found' });
@@ -100,8 +101,8 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
       type: 'object', required: ['kind', 'place_id', 'upload_ids'],
       properties: {
         kind: { enum: ['room', 'dish'] }, place_id: idSchema, dish_id: idSchema,
-        dish_name: { type: 'string', minLength: 1, maxLength: 120 }, upload_ids: idList(8),
-        plate_diameter_m: plateSize, model_tier: { enum: ['marble-1.1', 'marble-1.1-draft'] },
+        dish_name: { type: 'string', minLength: 1, maxLength: 120 }, upload_ids: idList(MAX_ROOM_PHOTOS),
+        plate_diameter_m: plateSize, model_tier: { enum: ROOM_MODEL_TIERS },
       },
     } },
   }, async ({ body }, reply) => {
@@ -116,9 +117,10 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
     if (body.kind === 'dish' && (uploads.length !== 1 || (body.dish_id && !dish))) {
       return reply.code(400).send({ error: 'Dish generation requires one image and any supplied dish_id must belong to the place' });
     }
-    const key = body.kind === 'room' ? config.marbleKey : config.replicateKey;
-    let provider: GenerationJob['provider'] = body.kind === 'room' ? 'marble-1.1' : 'trellis-replicate';
+    const key = body.kind === 'room' ? config.atlasKey : config.replicateKey;
+    let provider: GenerationJob['provider'] = body.kind === 'room' ? 'atlas-v2' : 'trellis-replicate';
     if (config.mode === 'demo' || (config.mode === 'auto' && !key)) provider = 'demo-sim';
+    if (provider === 'atlas-v2' && uploads.length < 2) return reply.code(400).send({ error: ROOM_PHOTO_REQUIREMENT });
     if (config.mode === 'live' && !key) return reply.code(503).send({ error: `Missing API credentials for ${provider}` });
     const now = new Date().toISOString();
     const job: JobRecord = {
@@ -127,7 +129,7 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
       dish_name: body.kind === 'dish' ? dish?.name ?? (dishName || 'Untitled dish') : null,
       input_upload_ids: body.upload_ids, status: 'queued', progress: 0, provider, provider_task_id: null,
       plate_diameter_m: body.kind === 'dish' ? body.plate_diameter_m ?? dish?.plate_diameter_m ?? null : null,
-      model_tier: body.kind === 'room' ? body.model_tier ?? 'marble-1.1' : undefined,
+      model_tier: body.kind === 'room' ? body.model_tier ?? 'atlas-draft' : undefined,
       status_message: provider === 'demo-sim' ? 'Demo simulation · Queued' : 'Queued',
       created_at: now, updated_at: now,
     };
@@ -146,14 +148,19 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
       const job = store.get('jobs', params.id);
       if (!job) return reply.code(404).send({ error: 'Job not found' });
       if (job.status !== 'failed') return reply.code(409).send({ error: 'Only failed jobs can be retried' });
-      if (job.submission_pending && !job.provider_task_id) {
+      if (job.submission_pending && !job.provider_task_id && job.provider !== 'atlas-v2') {
         return reply.code(409).send({ error: job.error });
       }
-      const hasOriginal = job.original_ply_path && existsSync(job.original_ply_path);
-      const status = hasOriginal && !job.preview_download_pending ? 'converting' : job.provider_task_id ? 'downloading' : 'queued';
+      if (String(job.provider) === 'marble-1.1') {
+        return reply.code(409).send({ error: 'This Marble job used a retired API. Create a new Atlas room job.' });
+      }
+      const original = job.original_spz_path ?? job.original_ply_path;
+      const status = original && existsSync(original) && !job.preview_download_pending ? 'converting'
+        : job.provider === 'atlas-v2' ? (job.atlas_splat ? 'downloading' : 'generating')
+        : job.provider_task_id ? 'downloading' : 'queued';
       const updated = store.updateJob(job, {
         status, status_message: `${job.provider === 'demo-sim' ? 'Demo simulation · ' : ''}Resuming ${status}`,
-        error: null, progress: status === 'converting' ? 85 : status === 'downloading' ? 65 : 0,
+        error: null, progress: status === 'converting' ? 85 : status === 'downloading' ? 65 : status === 'generating' ? job.progress : 0,
       });
       return reply.code(202).send(publicJob(updated));
     });

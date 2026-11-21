@@ -28,7 +28,7 @@ export interface XRAssetData {
   scale_factor: number;
   plate_diameter_m?: number | null;
   gaussian_count: number;
-  format: 'sog' | 'ply' | 'gallery';
+  format: 'sog' | 'ply' | 'spz' | 'gallery';
   url: string;
   spawn_point?: [number, number, number] | null;
   captured_on: string;
@@ -65,6 +65,8 @@ export interface XRPlaceData {
   name: string;
   category: string;
   stop_id: string;
+  lat?: number;
+  lon?: number;
   pin_index?: number;
   typical_price: number;
   vibe: string;

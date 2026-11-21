@@ -1,4 +1,8 @@
 import * as pc from 'playcanvas';
+// @ts-expect-error PlayCanvas ships the SPZ parser script without TypeScript declarations.
+import { SpzParser } from 'playcanvas/scripts/esm/parsers/spz-parser.mjs';
+import zstdGlueUrl from '../../../server/vendor/playcanvas-zstd/zstd.wasm.js?url&no-inline';
+import zstdWasmUrl from '../../../server/vendor/playcanvas-zstd/zstd.wasm.wasm?url';
 import type { XRAssetData } from './bridgeTypes';
 import type { DebugLog } from './sceneSupport';
 
@@ -23,7 +27,7 @@ const softGaussianBudget = 160_000;
 const hardGaussianLimit = 450_000;
 
 export function isSplat(asset: XRAssetData | null | undefined): asset is XRAssetData {
-  return !!asset?.url && (asset.format === 'ply' || asset.format === 'sog');
+  return !!asset?.url && (asset.format === 'ply' || asset.format === 'sog' || asset.format === 'spz');
 }
 
 export class SplatLoader {
@@ -31,7 +35,10 @@ export class SplatLoader {
   private slots = new Map<Slot, Placement>();
   private disposed = false;
 
-  constructor(private app: pc.Application, private log: DebugLog) {}
+  constructor(private app: pc.Application, private log: DebugLog) {
+    pc.WasmModule.setConfig('ZstdDecoderModule', { glueUrl: zstdGlueUrl, wasmUrl: zstdWasmUrl });
+    app.loader.getHandler('gsplat')?.addParser(new SpzParser(app));
+  }
 
   show(slot: Slot, data: XRAssetData | null | undefined, parent: pc.Entity): Promise<boolean> {
     const previous = this.slots.get(slot);

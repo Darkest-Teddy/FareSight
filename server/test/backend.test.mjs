@@ -3,12 +3,15 @@ import { once } from 'node:events';
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
+import { gzipSync } from 'node:zlib';
 import { WebSocket } from 'ws';
 import { computeTotalCost, computeTripEstimate, latLonToSculpture, STOPS } from '@faresight/shared';
 import { createApp } from '../dist/app.js';
 import { getConfig } from '../dist/config.js';
+import { pollAtlasSplats, submitAtlasSplats } from '../dist/services/atlasClient.js';
 import { findDemoAsset } from '../dist/services/demoAssets.js';
 import { inspectSplat } from '../dist/services/splatProcessor.js';
 
@@ -36,7 +39,7 @@ async function setup(t, overrides = {}) {
   const config = {
     ...getConfig(), database: join(dir, 'faresight.db'), uploads: join(dir, 'uploads'), outputs: join(dir, 'outputs'),
     host: '127.0.0.1', port: 0, mode: 'auto', adminPasscode: 'test-passcode', geminiKey: undefined,
-    marbleKey: undefined, replicateKey: undefined, ...overrides,
+    atlasKey: undefined, replicateKey: undefined, ...overrides,
   };
   let app;
   let origin;
@@ -255,12 +258,11 @@ test('upload, intake, failed download with restart and retry, room and dish publ
 });
 
 test('provider request contracts and TRELLIS retry preserve the paid prediction', { timeout: 40_000 }, async (t) => {
-  const server = await setup(t, { geminiKey: 'test-gemini', marbleKey: 'test-marble', replicateKey: 'test-trellis' });
+  const server = await setup(t, { geminiKey: 'test-gemini', replicateKey: 'test-trellis' });
   await server.start();
   const originalFetch = globalThis.fetch;
   const ply = fixturePly();
   let imageId;
-  let marbleSubmissions = 0;
   let trellisSubmissions = 0;
   let previewDownloads = 0;
   let plyDownloads = 0;
@@ -279,32 +281,6 @@ test('provider request contracts and TRELLIS retry preserve the paid prediction'
         recommended_room_upload_ids: [imageId], recommended_dish_upload_id: null, flagged: [],
         used_model: 'gemini-4-hydrogen', manual_override_allowed: true,
       }) }] } }] });
-    }
-    if (url.hostname === 'api.worldlabs.ai') {
-      assert.equal(init.headers['WLT-Api-Key'], 'test-marble');
-      switch (url.pathname) {
-        case '/marble/v1/media-assets:prepare_upload':
-          assert.equal(payload.extension, 'png');
-          assert.equal(payload.kind, 'image');
-          return json({ media_asset: { media_asset_id: 'media-01' }, upload_info: { upload_url: 'https://files.example/upload', required_headers: { 'Content-Type': 'image/png' } } });
-        case '/marble/v1/worlds:generate':
-          marbleSubmissions++;
-          assert.deepEqual(payload, {
-            model: 'marble-1.1',
-            world_prompt: {
-              type: 'multi-image', reconstruct_images: true,
-              multi_image_prompt: [{ content: { source: 'media_asset', media_asset_id: 'media-01' } }],
-            },
-          });
-          return json({ operation_id: 'op-01', done: false });
-        case '/marble/v1/operations/op-01':
-          return json({ operation_id: 'op-01', done: true, response: { world_id: 'world-01' } });
-        case '/marble/v1/worlds/world-01:export':
-          assert.deepEqual(payload, { asset_type: 'splats', format: 'ply', resolution: '100k' });
-          return json({ operation_id: 'export-01', done: true, response: { url: 'https://files.example/marble.ply' } });
-        default:
-          assert.fail(`Unexpected Marble call ${url.pathname}`);
-      }
     }
     if (url.hostname === 'api.replicate.com') {
       assert.equal(init.headers.Authorization, 'Bearer test-trellis');
@@ -326,12 +302,6 @@ test('provider request contracts and TRELLIS retry preserve the paid prediction'
     }
     if (url.hostname === 'files.example') {
       switch (url.pathname) {
-        case '/upload':
-          assert.equal(init.method, 'PUT');
-          assert.deepEqual(Buffer.from(init.body), image);
-          return new Response(null, { status: 200 });
-        case '/marble.ply':
-          return new Response(ply);
         case '/trellis.ply':
           plyDownloads++;
           return new Response(ply);
@@ -352,14 +322,10 @@ test('provider request contracts and TRELLIS retry preserve the paid prediction'
   imageId = upload.id;
   const intake = await server.request('/api/intake', { body: { place_id: placeId, upload_ids: [imageId] } });
   assert.equal(intake.used_model, 'gemini-4-hydrogen');
-  const roomJob = await server.request('/api/jobs', { body: { kind: 'room', place_id: placeId, upload_ids: [imageId] }, status: 202 });
   const dishJob = await server.request('/api/jobs', { body: {
     kind: 'dish', place_id: placeId, upload_ids: [imageId], dish_name: 'Other dish',
   }, status: 202 });
-  const [roomReview, dishFailed] = await Promise.all([
-    server.stage(roomJob.id, 'needs_review'), server.stage(dishJob.id, 'failed'),
-  ]);
-  assert.equal(roomReview.provider_task_id, 'op-01');
+  const dishFailed = await server.stage(dishJob.id, 'failed');
   assert.equal(dishFailed.provider_task_id, 'prediction-01');
   assert.deepEqual(await readFile(dishFailed.original_ply_path), ply);
 
@@ -370,10 +336,168 @@ test('provider request contracts and TRELLIS retry preserve the paid prediction'
   const dishReview = await server.stage(dishJob.id, 'needs_review');
   assert.equal(dishReview.provider_task_id, 'prediction-01');
   assert.deepEqual(await readFile(dishReview.preview_image_path), image);
-  assert.equal(marbleSubmissions, 1);
   assert.equal(trellisSubmissions, 1);
   assert.equal(plyDownloads, 1);
   assert.equal(previewDownloads, 2);
+});
+
+test('Atlas Draft request contract resumes from saved pose, splat and download checkpoints', { timeout: 50_000 }, async (t) => {
+  const server = await setup(t, { atlasKey: 'test-atlas', atlasBaseUrl: 'https://atlas.example/api/v2' });
+  await server.start();
+  const originalFetch = globalThis.fetch;
+  const count = 5;
+  const raw = Buffer.alloc(16 + count * 20);
+  raw.write('NGSP');
+  raw.writeUInt32LE(3, 4);
+  raw.writeUInt32LE(count, 8);
+  raw[13] = 12;
+  const spz = gzipSync(raw);
+  const photos = [image, secondImage];
+  const camera = {
+    extrinsics: { coordinateSystem: 'rub', quaternion: [0, 0, 0, 1], position: [0, 0, 0] },
+    intrinsics: { width: 1280, height: 720, fx: 600, fy: 600, cx: 640, cy: 360 },
+  };
+  const posedFrames = photos.map((_, index) => ({
+    imageAsset: { assetId: `image-${index}` }, depth: { depthAsset: { assetId: `depth-${index}` } }, camera,
+  }));
+  const calls = [];
+  let jobId;
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(input);
+    if (url.hostname === 'files.example') {
+      assert.equal(init.headers, undefined);
+      calls.push(url.pathname);
+      if (url.pathname === '/draft.spz') {
+        return new Response(null, { status: calls.filter((path) => path === '/draft.spz').length === 1 ? 503 : 403 });
+      }
+      assert.equal(url.pathname, '/fresh.spz');
+      return new Response(spz);
+    }
+    if (url.hostname !== 'atlas.example') return originalFetch(input, init);
+    assert.equal(init.headers['WLT-Api-Key'], 'test-atlas');
+    assert(url.pathname.startsWith('/api/v2/'));
+    const path = url.pathname.slice('/api/v2'.length);
+    calls.push(path);
+    const hits = calls.filter((call) => call === path).length;
+    const body = init.body === undefined ? undefined : JSON.parse(init.body);
+    switch (path) {
+      case '/assets':
+        assert.equal(init.method, 'POST');
+        assert.deepEqual(body, { asset: { displayName: `room-${hits - 1}.png`, base64: `data:image/png;base64,${photos[hits - 1].toString('base64')}` } });
+        return Response.json({ id: `input-${hits - 1}` }, { status: 201 });
+      case '/tasks:images2PosedRGBD':
+        assert.equal(init.method, 'POST');
+        assert.equal(init.headers['Idempotency-Key'], `${jobId}-pose`);
+        assert.deepEqual(body, {
+          base64Outputs: false, frames: [{ imageAsset: { assetId: 'input-0' } }, { imageAsset: { assetId: 'input-1' } }],
+          canonicalizeToFirstFrame: true, refinePoses: true, targetResolution: [1280, 720],
+        });
+        return Response.json({ id: 'pose-01', done: false });
+      case '/operations/pose-01':
+        assert.equal(init.method, 'GET');
+        if (hits === 1) return new Response(null, { status: 503 });
+        return Response.json({ id: 'pose-01', done: true, response: { frames: posedFrames.map((frame) => ({
+          ...frame, imageAsset: { ...frame.imageAsset, url: 'https://files.example/posed.png' },
+          depth: { ...frame.depth, confidenceAsset: { assetId: 'unused' } }, centroidWorld: [0, 0, 0],
+        })) } });
+      case '/tasks:posedImages2Splats':
+        assert.equal(init.method, 'POST');
+        assert.equal(init.headers['Idempotency-Key'], `${jobId}-splats`);
+        assert.deepEqual(body, { refine: false, posedFrames });
+        if (hits === 1) throw new TypeError('Connection closed after Atlas accepted the request');
+        return Response.json({ id: 'splat-01', done: false });
+      case '/operations/splat-01':
+        assert.equal(init.method, 'GET');
+        if (hits === 1) return Response.json({ id: 'splat-01', done: false });
+        return Response.json({ id: 'splat-01', done: true, response: {
+          draftSplat: { assetId: 'draft-01', url: 'https://files.example/draft.spz' }, refinedSplats: {},
+        } });
+      case '/assets/draft-01:createReadUrl':
+        assert.equal(init.method, 'POST');
+        return Response.json({ readUrl: 'https://files.example/fresh.spz' });
+      default:
+        assert.fail(`Unexpected Atlas request ${path}`);
+    }
+  });
+
+  const ids = [];
+  for (const [index, bytes] of photos.entries()) {
+    const upload = await server.request('/api/uploads', { body: {
+      filename: `room-${index}.png`, mimeType: 'image/png', dataBase64: bytes.toString('base64'), place_id: placeId,
+    }, status: 201 });
+    ids.push(upload.id);
+  }
+  const jobInput = { kind: 'room', place_id: placeId, upload_ids: ids };
+  const single = await server.request('/api/jobs', { body: { ...jobInput, upload_ids: ids.slice(0, 1) }, status: 400 });
+  assert.equal(single.error, 'Atlas room reconstruction requires 2 to 32 overlapping photos.');
+  const job = await server.request('/api/jobs', { body: jobInput, status: 202 });
+  jobId = job.id;
+  assert.equal(job.provider, 'atlas-v2');
+  assert.equal(job.model_tier, 'atlas-draft');
+
+  async function restartAndRetry(expectedStage) {
+    await server.stop();
+    await server.start();
+    const retry = await server.request(`/api/jobs/${jobId}/retry`, { body: {}, status: 202 });
+    assert.equal(retry.status, expectedStage);
+  }
+  const posingFailed = await server.stage(jobId, 'failed');
+  assert.equal(posingFailed.pose_operation_id, 'pose-01');
+  assert.equal(posingFailed.provider_task_id, null);
+  await restartAndRetry('generating');
+
+  const submissionFailed = await server.stage(jobId, 'failed');
+  assert.match(submissionFailed.error, /Connection closed/);
+  const db = new DatabaseSync(server.config.database, { readOnly: true });
+  try {
+    const record = JSON.parse(db.prepare('SELECT data FROM jobs WHERE id = ?').get(jobId).data);
+    assert.deepEqual(record.posed_frames, posedFrames);
+  } finally {
+    db.close();
+  }
+  await restartAndRetry('generating');
+
+  const downloadFailed = await server.stage(jobId, 'failed');
+  assert.equal(downloadFailed.provider_task_id, 'splat-01');
+  assert.match(downloadFailed.error, /Asset download returned HTTP 503/);
+  await restartAndRetry('downloading');
+
+  const reviewed = await server.stage(jobId, 'needs_review');
+  assert.equal(reviewed.pose_operation_id, 'pose-01');
+  assert.equal(reviewed.provider_task_id, 'splat-01');
+  assert.equal(reviewed.original_spz_path, join(server.config.outputs, `${jobId}-original.spz`));
+  assert.deepEqual(await readFile(reviewed.original_spz_path), spz);
+  const asset = await server.request(`/api/assets/${reviewed.asset_id}`);
+  assert.equal(asset.backend, 'atlas-draft');
+  assert.equal(asset.gaussian_count, count);
+  assert.equal(asset.original_spz_url, `/storage/outputs/${jobId}-original.spz`);
+  assert.equal(asset.metadata.conversion_status, asset.format === 'sog' ? 'compressed' : 'spz_fallback');
+  const served = await fetch(server.origin() + asset.original_spz_url);
+  assert.equal(served.status, 200);
+  assert.deepEqual(Buffer.from(await served.arrayBuffer()), spz);
+  assert.deepEqual(calls, [
+    '/assets', '/assets', '/tasks:images2PosedRGBD', '/operations/pose-01', '/operations/pose-01',
+    '/tasks:posedImages2Splats', '/tasks:posedImages2Splats', '/operations/splat-01', '/operations/splat-01',
+    '/draft.spz', '/draft.spz', '/assets/draft-01:createReadUrl', '/fresh.spz',
+  ]);
+});
+
+test('Atlas Refined sends refine=true and selects the highest published splat count', async (t) => {
+  const config = { atlasKey: 'test-atlas', atlasBaseUrl: 'https://atlas.example/api/v2' };
+  t.mock.method(globalThis, 'fetch', (input, init) => {
+    if (init.method === 'POST') {
+      assert.equal(input, 'https://atlas.example/api/v2/tasks:posedImages2Splats');
+      assert.equal(init.headers['Idempotency-Key'], 'job-refined-splats');
+      assert.equal(JSON.parse(init.body).refine, true);
+      return Response.json({ id: 'refined-op', done: false });
+    }
+    assert.equal(input, 'https://atlas.example/api/v2/operations/refined-op');
+    return Response.json({ done: true, response: { refinedSplats: {
+      '900000': { assetId: 'small' }, '2000000': { assetId: 'large' },
+    } } });
+  });
+  const id = await submitAtlasSplats(config, 'job-refined', [], true);
+  assert.deepEqual(await pollAtlasSplats(config, id, true), { assetId: 'large' });
 });
 
 test('MBTA rate-limit fallback keeps all seven subway routes and labels estimates', { timeout: 10_000 }, async (t) => {

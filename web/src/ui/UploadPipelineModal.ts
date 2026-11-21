@@ -1,4 +1,5 @@
-import type { Asset, GenerationJob, IntakeSelectionResult, JobStage, Place } from '@faresight/shared';
+import { MAX_ROOM_PHOTOS, ROOM_PHOTO_REQUIREMENT } from '@faresight/shared';
+import type { Asset, GenerationJob, IntakeSelectionResult, JobStage, Place, RoomModelTier } from '@faresight/shared';
 import { api, assetUrl, type Upload } from '../api/client';
 import { sampleDemoPhotos } from './demoPhotos';
 import { button, element, errorText, field, message, modal, option, section } from './dom';
@@ -8,6 +9,7 @@ const stages: [JobStage, string][] = [
   ['converting', 'Converting'], ['needs_review', 'Needs review'], ['ready', 'Ready'],
 ];
 const pollingStages = new Set<JobStage>(['queued', 'generating', 'downloading', 'converting']);
+const maxUploads = MAX_ROOM_PHOTOS + 1;
 
 interface UploadActions {
   places(): Place[];
@@ -22,6 +24,7 @@ export class UploadPipelineModal {
   private readonly photoList = element('div', 'photo-grid');
   private readonly intakeDetails = element('div', 'intake-details');
   private readonly feedback = message('');
+  private readonly roomTier = element('select');
   private readonly dish = element('select');
   private readonly dishName = element('input');
   private readonly newDishField = field('New dish name', this.dishName);
@@ -88,11 +91,13 @@ export class UploadPipelineModal {
     this.diameter.max = '200';
     this.diameter.step = 'any';
     this.diameter.placeholder = 'Optional';
-    this.roomButton = button('Generate room (Marble 1.1)', () => void this.run(() => this.generate('room')), 'accent');
+    this.roomTier.append(option('atlas-draft', 'Atlas Draft (~30s, 2-32 photos)'), option('atlas-refined', 'Atlas Refined (~18m, high-res)'));
+    this.roomButton = button('Generate room (Atlas)', () => void this.run(() => this.generate('room')), 'accent');
     this.dishButton = button('Generate dish (TRELLIS)', () => void this.run(() => this.generate('dish')), 'accent');
     const generateActions = element('div', 'button-row');
     generateActions.append(this.roomButton, this.dishButton);
-    generate.append(field('Dish to publish', this.dish), this.newDishField, field('Known plate diameter (cm)', this.diameter), generateActions);
+    generate.append(field('Room quality', this.roomTier), element('p', 'muted', ROOM_PHOTO_REQUIREMENT),
+      field('Dish to publish', this.dish), this.newDishField, field('Known plate diameter (cm)', this.diameter), generateActions);
 
     const monitor = section('4. Monitor and review');
     this.history.addEventListener('change', () => { void this.selectJob(this.history.value); });
@@ -134,11 +139,11 @@ export class UploadPipelineModal {
 
   private refreshControls() {
     this.place.disabled = this.busy || !this.place.options.length;
-    this.file.disabled = this.sample.disabled = this.busy || !this.place.value || this.uploads.length >= 24;
+    this.file.disabled = this.sample.disabled = this.busy || !this.place.value || this.uploads.length >= maxUploads;
     this.auto.disabled = this.busy || !this.uploads.length;
-    this.dish.disabled = this.dishName.disabled = this.diameter.disabled = this.busy;
+    this.roomTier.disabled = this.dish.disabled = this.dishName.disabled = this.diameter.disabled = this.busy;
     this.newDishField.hidden = this.dish.value !== '';
-    this.roomButton.disabled = this.busy || !this.roomIds.size || this.roomIds.size > 8;
+    this.roomButton.disabled = this.busy || this.roomIds.size < 2 || this.roomIds.size > MAX_ROOM_PHOTOS;
     this.dishButton.disabled = this.busy || !this.dishId || (!this.dish.value && !this.dishName.value.trim());
     this.monitor.querySelectorAll<HTMLButtonElement>('[data-mutation]').forEach((control) => {
       control.disabled = this.busy;
@@ -172,7 +177,7 @@ export class UploadPipelineModal {
     const errors: string[] = [];
     let received = 0;
     for (const file of files) {
-      if (uploads.length >= 24) { errors.push('The photo set is limited to 24 uploads.'); break; }
+      if (uploads.length >= maxUploads) { errors.push(`The photo set is limited to ${maxUploads} uploads.`); break; }
       if (file.size > 8 * 1024 * 1024 || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
         errors.push(file.name + ' must be a JPEG, PNG or WebP under 8 MiB.');
         continue;
@@ -227,8 +232,6 @@ export class UploadPipelineModal {
         if (room.checked) this.roomIds.add(upload.id);
         else this.roomIds.delete(upload.id);
         this.refreshControls();
-        if (this.roomIds.size > 8) this.note('Marble accepts up to eight compatible room photos.', true);
-        else if (this.feedback.textContent?.startsWith('Marble accepts')) this.note('');
       });
       const dish = element('input');
       dish.type = 'radio';
@@ -245,6 +248,7 @@ export class UploadPipelineModal {
   private async generate(kind: 'room' | 'dish') {
     const ids = kind === 'room' ? [...this.roomIds] : [this.dishId];
     const dish = kind === 'dish';
+    if (!dish && (ids.length < 2 || ids.length > MAX_ROOM_PHOTOS)) throw new Error(ROOM_PHOTO_REQUIREMENT);
     const diameter = this.diameter.valueAsNumber;
     if (dish && this.diameter.validity.badInput) throw new Error('Enter a valid diameter in centimeters.');
     if (dish && this.diameter.value && !this.diameter.checkValidity()) throw new Error('Enter a plate diameter between 0.1 and 200 cm.');
@@ -254,7 +258,7 @@ export class UploadPipelineModal {
       dish_id: dish && this.dish.value ? this.dish.value : undefined,
       dish_name: dish && !this.dish.value ? this.dishName.value.trim() : undefined,
       plate_diameter_m: dish && Number.isFinite(diameter) ? diameter / 100 : undefined,
-      model_tier: dish ? undefined : 'marble-1.1',
+      model_tier: dish ? undefined : this.roomTier.value as RoomModelTier,
     }, this.passcode.value);
     this.sourceUrls.set(job.id, this.uploads.filter((upload) => ids.includes(upload.id)).map((upload) => upload.url));
     this.jobs.set(job.id, job);

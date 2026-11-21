@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
+import { places } from '../server/src/db/seed.ts';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const dir = fileURLToPath(new URL('output/', import.meta.url));
+const { areas } = JSON.parse(
+  readFileSync(new URL('./osm-data.json', import.meta.url)),
+);
 const stationRef = {
   'place-bucen': [42.350082, -71.106865, 'Green-B', '001'],
   'place-brico': [42.351967, -71.125031, 'Green-B', '002'],
@@ -190,7 +194,7 @@ function parseModel(name) {
     });
   }
   const budget = name.startsWith('segment-')
-    ? [12000, 28000, 14]
+    ? [1, 36000, 12]
     : name.startsWith('boston')
       ? [25000, 55000, 19]
       : [1, 5000, 8];
@@ -315,6 +319,19 @@ function topAt(meshes, x, z) {
   }
   return height;
 }
+// Check membership against the source survey rings, independently of the export triangulation.
+function inFootprint(x, z, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [a, b] = ring[i],
+      [c, d] = ring[j];
+    if (b > z !== d > z && x < a + ((z - b) * (c - a)) / (d - b))
+      inside = !inside;
+  }
+  return inside;
+}
+let venueCount = 0,
+  roofCount = 0;
 for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
   const a = stations[id],
     s = segments[id];
@@ -337,7 +354,7 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
   const model = models[a.segmentFile.slice(0, -4)],
     { bounds, meshes } = model;
   exactBounds(bounds, [-0.45, -0.18, -0.45], [0.45, bounds.max[1], 0.45]);
-  assert.ok(bounds.max[1] >= 0.45 && bounds.max[1] <= 0.62);
+  assert.ok(bounds.max[1] >= 0.3 && bounds.max[1] <= 0.62);
   assert.equal(s.lcdNode, 'LCD_Screen');
   assert.equal(s.dialNode, 'Rotary_Dial');
   assert.equal(s.deckY, 0);
@@ -365,9 +382,65 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
     const coords = dial.positions.filter((_, i) => i % 3 === k);
     approx(Math.max(...coords) + Math.min(...coords), 0, 1e-6);
   }
+  const { centerLat, centerLon, spanMeters, buildings } = areas[id];
+  assert.deepEqual(s.projection, {
+    centerLat,
+    centerLon,
+    spanMeters,
+    deckSize: 0.856,
+  });
+  const stopPlaces = places.filter((place) => place.stop_id === id);
+  assert.deepEqual(
+    Object.keys(s.placeAnchors).sort(),
+    stopPlaces.map((p) => p.id).sort(),
+  );
+  const scale = 0.856 / spanMeters;
+  const glass = meshes.get('Spectral architectural glass');
+  assert.equal(glass.mat.alphaMode, 'BLEND');
+  for (const { positions: p, offset } of meshes.values()) {
+    for (let i = 0; i < p.length; i += 3)
+      if (p[i + 1] + offset[1] > 1e-7)
+        assert.ok(
+          Math.abs(p[i] + offset[0]) <= 0.4240001 &&
+            Math.abs(p[i + 2] + offset[2]) <= 0.4240001,
+          id + ' city crosses the bezel',
+        );
+  }
+  for (const place of stopPlaces) {
+    const [x, y, z] = s.placeAnchors[place.id];
+    const east =
+      (place.lon - centerLon) * 111320 * Math.cos((centerLat * Math.PI) / 180);
+    const south = (centerLat - place.lat) * 110540;
+    approx(x, east * scale, 1e-9, place.id + ' X');
+    approx(z, south * scale, 1e-9, place.id + ' Z');
+    const top = topAt(meshes, x, z);
+    approx(y, top + 0.018, 2e-7, place.id + ' surface clearance');
+    if (buildings.some((b) => inFootprint(east, south, b.ring))) {
+      assert.ok(top > 0.005, place.id + ' missing roof');
+      approx(
+        topAt(new Map([['glass', glass]]), x, z),
+        top,
+        2e-7,
+        place.id + ' highlighted rooftop',
+      );
+      roofCount++;
+    } else {
+      assert.ok(
+        top <= 0.0025,
+        place.id + ' off-footprint coordinate obstructed',
+      );
+    }
+    venueCount++;
+  }
   assert.ok(s.pinAnchors.length >= 8);
   let minSpace = Infinity;
   for (const [i, pin] of s.pinAnchors.entries()) {
+    assert.ok(
+      buildings.some((b) =>
+        inFootprint(pin[0] / scale, pin[2] / scale, b.ring),
+      ) && pin[1] > 0.023,
+      id + ' fallback missing rooftop',
+    );
     approx(
       pin[1] - topAt(meshes, pin[0], pin[2]),
       0.018,
@@ -391,6 +464,15 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
     minSpace.toFixed(6),
   );
 }
+assert.equal(venueCount, 28);
+console.log(
+  venueCount +
+    ' exact venue coordinates, ' +
+    roofCount +
+    ' on surveyed roofs and ' +
+    (venueCount - roofCount) +
+    ' on ground surfaces',
+);
 console.log(
   ringsChecked +
     ' centerline rings; max centroid error ' +

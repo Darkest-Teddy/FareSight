@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { places } from '../server/src/db/seed.ts';
 import {
   Model,
   box,
@@ -6,7 +8,6 @@ import {
   loft,
   rod,
   circle,
-  sweep,
   ellipsoid,
   cross,
   sub,
@@ -24,11 +25,8 @@ const c = {
   ink: '#293043',
   cream: '#e6d9ae',
   copper: '#882d3b',
-  chalk: '#d4d2bf',
   pink: '#ff73ca',
   cyan: '#62e9fa',
-  lawn: '#718e78',
-  walk: '#e6d8bd',
 };
 function palette(m) {
   const b = (name, opts) => m.surface(m.material(name, opts));
@@ -294,1398 +292,833 @@ function hardware(m, s, area, station) {
       box(s.paint, x, y, 0.4302, 0.005, 0.0008, 0.0004, c.ink);
     }
 }
-function path(s, points, width, color, height = 0.003) {
-  for (let i = 1; i < points.length; i++) {
-    const [x, z] = points[i - 1],
-      [u, v] = points[i],
-      len = Math.hypot(u - x, v - z),
-      a = ((-(v - z) / len) * width) / 2,
-      b = (((u - x) / len) * width) / 2;
-    face(
-      s,
-      [
-        [x + a, height, z + b],
-        [u + a, height, v + b],
-        [u - a, height, v - b],
-        [x - a, height, z - b],
-      ],
-      color,
-    );
-  }
-}
-function building(s, x, z, w, d, h, palette, style = 'brick') {
-  const [body, roof, glass] = palette;
-  box(s.city, x, 0.005 + h / 2, z, w, h, d, body, 0.003);
-  box(s.city, x, h + 0.008, z, w + 0.004, 0.006, d + 0.004, roof, 0.002);
-  box(
-    s.city,
-    x - w * 0.16,
-    h + 0.014,
-    z - d * 0.16,
-    w * 0.28,
-    0.009,
-    d * 0.32,
-    '#9b9e9e',
-    0.001,
+const deckSize = 0.856;
+const edge = 0.424;
+const to3 = ([x, z], y) => [x, y, z];
+const turn = (a, b, p) =>
+  (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+const signedArea = (ring) =>
+  ring.reduce((n, a, i) => {
+    const b = ring[(i + 1) % ring.length];
+    return n + a[0] * b[1] - b[0] * a[1];
+  }, 0) / 2;
+function segmentDistance(p, a, b) {
+  const dx = b[0] - a[0],
+    dz = b[1] - a[1];
+  const t = Math.max(
+    0,
+    Math.min(
+      1,
+      ((p[0] - a[0]) * dx + (p[1] - a[1]) * dz) / (dx * dx + dz * dz || 1),
+    ),
   );
-  const rows = Math.max(2, Math.floor(h / 0.024));
-  for (let row = 0; row < rows; row++) {
-    const y = 0.018 + (row * (h - 0.02)) / rows,
-      columns = Math.max(2, Math.round(w / 0.018)),
-      side = Math.max(2, Math.round(d / 0.019));
-    for (const sideSign of [-1, 1]) {
-      const zFace = z + sideSign * (d / 2 + 0.00012);
-      for (let i = 0; i < columns; i++) {
-        const cx = x + w * ((i + 0.5) / columns - 0.5),
-          ww = (w / columns) * 0.5,
-          wh = Math.min(0.012, (h / rows) * 0.58);
-        const v = [
-          [cx - ww / 2, y - wh / 2, zFace],
-          [cx + ww / 2, y - wh / 2, zFace],
-          [cx + ww / 2, y + wh / 2, zFace],
-          [cx - ww / 2, y + wh / 2, zFace],
-        ];
-        face(
-          s.window,
-          sideSign > 0 ? v : v.reverse(),
-          (i + row) % 5 === 0 ? '#e4c79b' : glass,
-        );
-      }
-      const xx = x + sideSign * (w / 2 + 0.00012);
-      for (let i = 0; i < side; i++) {
-        const cz = z + d * ((i + 0.5) / side - 0.5),
-          ww = (d / side) * 0.53,
-          wh = Math.min(0.012, (h / rows) * 0.58);
-        const v = [
-          [xx, y - wh / 2, cz + ww / 2],
-          [xx, y - wh / 2, cz - ww / 2],
-          [xx, y + wh / 2, cz - ww / 2],
-          [xx, y + wh / 2, cz + ww / 2],
-        ];
-        face(s.window, sideSign > 0 ? v : v.reverse(), glass);
+  return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dz);
+}
+function contains(ring, [x, z]) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [a, b] = ring[i],
+      [c, d] = ring[j];
+    if (b > z !== d > z && x < a + ((c - a) * (z - b)) / (d - b))
+      inside = !inside;
+  }
+  return inside;
+}
+function simplify(ring, tolerance, closed) {
+  const points = ring.slice();
+  let changed = true;
+  while (changed && points.length > (closed ? 3 : 2)) {
+    changed = false;
+    for (let i = closed ? 0 : 1; i < points.length - (closed ? 0 : 1); i++) {
+      const a = points[(i + points.length - 1) % points.length];
+      const b = points[(i + 1) % points.length];
+      if (segmentDistance(points[i], a, b) <= tolerance) {
+        points.splice(i, 1);
+        changed = true;
+        break;
       }
     }
-    if (style === 'stone' && row % 2 === 0)
-      box(s.city, x, y + 0.009, z, w + 0.002, 0.002, d + 0.002, roof);
   }
-  if (style === 'shop') {
-    box(
-      s.paint,
-      x,
-      0.033,
-      z + d / 2 + 0.007,
-      w * 0.93,
-      0.006,
-      0.019,
-      roof,
-      0.002,
-    );
-    box(s.light, x, 0.048, z + d / 2 + 0.001, w * 0.71, 0.008, 0.002, glass);
-  }
+  return points;
 }
-// Cut glass changes hue across a facet. Independent triangle normals keep each fold sharp.
-const dichroic = {
-  rose: [
-    '#633792',
-    '#d923a1',
-    '#ff70c8',
-    '#b78bf8',
-    '#54ceef',
-    '#ad3ada',
-    '#ff84d2',
-    '#bc42ac',
-  ],
-  ice: [
-    '#3a56b3',
-    '#18cdeb',
-    '#83f8ff',
-    '#817eea',
-    '#b85ee3',
-    '#4c70d3',
-    '#43bedc',
-    '#7561cc',
-  ],
-};
-function cutFace(surface, a, b, c, ca, cb, cc) {
-  const n = norm(cross(sub(b, a), sub(c, a)));
-  surface.indices.push(
-    surface.vertex(a, n, ca),
-    surface.vertex(b, n, cb),
-    surface.vertex(c, n, cc),
-  );
-}
-function crystal(s, x, z, w, d, levels, tint) {
-  const rose = tint === c.pink;
-  const hue = rose ? dichroic.rose : dichroic.ice;
-  const neon = rose ? s.neonPink : s.neonBlue;
-  const rings = levels.map(([y, scale, dx = 0, dz = 0, rake = 0], j) => {
-    const cx = x + dx,
-      cz = z + dz;
-    return rect(
-      cx,
-      y,
-      cz,
-      w * scale,
-      d * scale,
-      Math.min(w, d) * scale * (0.18 + 0.07 * (j % 2)),
-    ).map(([px, py, pz]) => [
-      px,
-      py + rake * ((px - cx) / w - (0.44 * (pz - cz)) / d),
-      pz,
+// Positive signed area in XZ faces down in glTF. Reverse only the emitted roof triangles.
+function triangulate(ring) {
+  const active = ring.map((_, i) => i);
+  const triangles = [];
+  while (active.length > 3) {
+    const ear = active.findIndex((j, i) => {
+      const a = ring[active[(i + active.length - 1) % active.length]];
+      const b = ring[j],
+        c = ring[active[(i + 1) % active.length]];
+      return (
+        turn(a, b, c) > 1e-14 &&
+        !active.some((k) => {
+          const p = ring[k];
+          return (
+            p !== a &&
+            p !== b &&
+            p !== c &&
+            turn(a, b, p) >= -1e-14 &&
+            turn(b, c, p) >= -1e-14 &&
+            turn(c, a, p) >= -1e-14
+          );
+        })
+      );
+    });
+    if (ear < 0) return null;
+    triangles.push([
+      active[(ear + active.length - 1) % active.length],
+      active[ear],
+      active[(ear + 1) % active.length],
     ]);
-  });
-  for (let j = 1; j < rings.length; j++) {
-    const lo = rings[j - 1],
-      hi = rings[j];
-    const rise = levels[j][0] - levels[j - 1][0];
-    for (let i = 0; i < 8; i++) {
-      const k = (i + 1) % 8;
-      cutFace(
-        s.glass,
-        lo[i],
-        hi[i],
-        hi[k],
-        hue[(i + 5) % 8],
-        hue[(i + 1) % 8],
-        hue[i],
-      );
-      cutFace(
-        s.glass,
-        lo[i],
-        hi[k],
-        lo[k],
-        hue[(i + 5) % 8],
-        hue[i],
-        hue[(i + 6) % 8],
-      );
-      if (i % 2 === 0) {
-        sweep(neon, [lo[i], hi[i]], 0.0012, tint, 4, false);
-        if (rise > 0.058 && w > 0.032 && (i === 0 || i === 2 || i === 6))
-          sweep(
-            s.light,
-            [lo[i], hi[k]],
-            0.001,
-            rose ? '#d3a0ec' : '#94bed8',
-            4,
-            false,
-          );
-      }
-      // A small bank of etched lamellae leaves the broad faces of the prism open.
-      if (w > 0.035 && rise > 0.085 && (i === 0 || i === 4)) {
-        for (let band = 1; band <= 5; band++) {
-          const f = 0.14 + band * 0.054;
-          sweep(
-            s.window,
-            [mix(lo[i], hi[i], f), mix(lo[k], hi[k], f)],
-            0.00065,
-            '#aea1c7',
-            3,
-            false,
-          );
+    active.splice(ear, 1);
+  }
+  if (turn(...active.map((i) => ring[i])) > 1e-14) triangles.push(active);
+  return triangles.map((tri) => tri.map((i) => ring[i]));
+}
+// Clip convex pieces independently so a concave polygon can leave two separate islands.
+function clip(poly) {
+  for (const axis of [0, 1])
+    for (const sign of [-1, 1]) {
+      if (!poly.length) return poly;
+      const output = [];
+      let a = poly.at(-1);
+      for (const b of poly) {
+        const insideA = sign * a[axis] <= edge,
+          insideB = sign * b[axis] <= edge;
+        if (insideA !== insideB) {
+          const p = mix(a, b, (sign * edge - a[axis]) / (b[axis] - a[axis]));
+          p[axis] = sign * edge;
+          output.push(p);
         }
+        if (insideB) output.push(b);
+        a = b;
       }
+      poly = output;
     }
-    sweep(neon, [...hi, hi[0]], 0.0011, tint, 4, false);
-  }
-  face(s.glass, rings[0], hue[0]);
-  face(s.glass, [...rings.at(-1)].reverse(), hue[3]);
-  // A luminous internal fin stays visible through the tinted envelope from either side.
-  if (w >= 0.05) {
-    const foot = rings[0],
-      cap = rings.at(-1);
-    const spine = [
-      mix(foot[2], foot[6], 0.43),
-      mix(foot[2], foot[6], 0.58),
-      mix(cap[0], cap[4], 0.47),
-      mix(cap[0], cap[4], 0.35),
-    ];
-    face(neon, spine, tint);
-    face(neon, [...spine].reverse(), tint);
-  }
+  return poly;
 }
-function needle(s, x, z, base, tip, width, color) {
-  const shaft = rect(x, base, z, width, width * 0.76, width * 0.16);
-  const shoulder = rect(
-    x,
-    tip - width * 1.4,
-    z,
-    width * 0.57,
-    width * 0.5,
-    width * 0.1,
-  );
-  loft(s.glass, [shaft, shoulder], color, { top: false });
-  const apex = [x + width * 0.09, tip, z];
-  for (let i = 0; i < 8; i++)
-    face(
-      s.trim,
-      [shoulder[i], apex, shoulder[(i + 1) % 8]],
-      i % 2 ? c.cream : color,
-    );
-  for (const i of [0, 3, 6])
-    sweep(
-      color === c.pink ? s.neonPink : s.neonBlue,
-      [shaft[i], shoulder[i]],
-      0.0009,
-      color,
-      4,
-      false,
-    );
-}
-const brick = ['#a67670', '#766d78', '#45566a'],
-  stone = ['#cfcac0', '#94939e', '#566876'];
-function midrise(s, x, z, w, d, h, kind) {
-  const sliver = kind === 'curtain';
-  const exterior = sliver ? '#8bafba' : '#c8c6c3';
-  const stories = sliver ? 2 : 3;
-  for (let j = 0; j < stories; j++) {
-    const y = 0.005 + (h * j) / stories;
-    const cx = x - w * j * 0.047,
-      cz = z - d * j * 0.042;
-    const width = w * (1 - j * (sliver ? 0.06 : 0.13)),
-      depth = d * (1 - j * 0.08);
-    const chamfer = width * (sliver ? 0.2 : 0.08);
-    const floor = (height, overhang = 0) =>
-      rect(cx, height, cz, width + overhang, depth + overhang, chamfer);
-    const ht = h / stories;
-    loft(s.window, [floor(y), floor(y + ht)], sliver ? '#68839d' : '#687887');
-    for (const f of sliver ? [0.18, 0.96] : [0.13, 0.56, 0.95]) {
-      const yBand = y + ht * f;
-      loft(
-        s.city,
-        [floor(yBand - 0.0014, 0.0028), floor(yBand + 0.0014, 0.0028)],
-        exterior,
-        { bottom: false },
-      );
+const inBounds = (p) => p.every((v) => Math.abs(v) <= edge);
+function polygon(feature, scale, tolerance) {
+  const raw = feature.ring.map((p) => p.map((v) => v * scale));
+  let ring = simplify(raw, tolerance, true);
+  if (signedArea(ring) < 0) ring.reverse();
+  let triangles = triangulate(ring);
+  if (!triangles) {
+    ring = simplify(raw, 1e-8, true);
+    if (signedArea(ring) < 0) ring.reverse();
+    triangles = triangulate(ring);
+  }
+  if (!triangles) return null; // A self-crossing OSM way does not define a unique interior.
+  const walls = [],
+    roof = [];
+  if (ring.every(inBounds)) {
+    ring.forEach((a, i) => walls.push([a, ring[(i + 1) % ring.length]]));
+    roof.push(...triangles);
+  } else {
+    const boundary = new Map();
+    const key = ([x, z]) => Math.round(x * 1e9) + ',' + Math.round(z * 1e9);
+    for (const tri of triangles) {
+      const piece = clip(tri);
+      if (piece.length < 3 || signedArea(piece) < 1e-12) continue;
+      for (let i = 1; i < piece.length - 1; i++)
+        if (turn(piece[0], piece[i], piece[i + 1]) > 1e-12)
+          roof.push([piece[0], piece[i], piece[i + 1]]);
+      piece.forEach((a, i) => {
+        const b = piece[(i + 1) % piece.length],
+          ka = key(a),
+          kb = key(b);
+        if (ka !== kb && !boundary.delete(kb + ':' + ka))
+          boundary.set(ka + ':' + kb, [a, b]);
+      });
     }
-    const corners = floor(y, 0.0006),
-      top = floor(y + ht, 0.0006);
-    for (const i of [0, 2, 4, 6]) {
-      const k = (i + 1) % 8;
-      for (const t of [0.22, 0.53, 0.82])
-        sweep(
-          s.city,
-          [mix(corners[i], corners[k], t), mix(top[i], top[k], t)],
-          0.0006,
-          exterior,
-          3,
-          false,
-        );
-    }
+    walls.push(...boundary.values());
   }
-  box(
-    s.city,
-    x - w * 0.14,
-    h + 0.013,
-    z - d * 0.15,
-    w * 0.38,
-    0.016,
-    d * 0.35,
-    '#9a9ca4',
-    0.002,
-  );
-  for (let i = 0; i < 4; i++)
-    box(
-      s.window,
-      x - w * 0.23 + w * 0.06 * i,
-      h + 0.021,
-      z - d * 0.15,
-      w * 0.027,
-      0.001,
-      d * 0.2,
-      '#586676',
-    );
+  const area = roof.reduce((sum, tri) => sum + turn(...tri) / 2, 0);
+  return area > 1e-10 ? { ...feature, ring, walls, roof, area } : null;
 }
-function brownstone(s, x, z, w, d, h) {
-  building(s, x, z, w, d, h, brick);
-  const roofY = h + 0.012;
-  loft(
-    s.city,
-    [
-      rect(x, roofY, z, w * 1.07, d * 1.07, 0.003),
-      rect(x, roofY + 0.024, z, w * 0.81, d * 0.69, 0.002),
-    ],
-    '#63677a',
-  );
-  for (const dx of [-0.26, 0.26]) {
-    const cx = x + w * dx,
-      cz = z + d * 0.39;
-    box(s.city, cx, roofY + 0.011, cz, 0.015, 0.018, 0.011, '#d1b7a1');
-    box(
-      s.window,
-      cx,
-      roofY + 0.012,
-      cz + 0.0057,
-      0.008,
-      0.009,
-      0.001,
-      '#3f5869',
-    );
-    loft(
-      s.trim,
-      [
-        rect(cx, roofY + 0.019, cz, 0.019, 0.015),
-        rect(cx, roofY + 0.024, cz, 0.005, 0.013),
-      ],
-      '#777583',
-    );
-  }
-  box(
-    s.city,
-    x - w * 0.23,
-    roofY + 0.026,
-    z - d * 0.23,
-    0.011,
-    0.025,
-    0.015,
-    brick[0],
-  );
+function roofFaces(surface, roof, y, color) {
+  for (const [a, b, c] of roof)
+    face(surface, [to3(a, y), to3(c, y), to3(b, y)], color);
 }
-function landmark(s, index) {
-  if (index === 0) {
-    // Each cantilever turns above a narrower bearing, with the tallest blade behind the crown.
-    for (const [x, z, w, d, y, h, shift, rake, color] of [
-      [-0.035, -0.07, 0.157, 0.129, 0.006, 0.132, -0.009, -0.024, c.cyan],
-      [-0.055, -0.08, 0.195, 0.14, 0.129, 0.114, 0.015, 0.029, c.pink],
-      [-0.015, -0.084, 0.159, 0.157, 0.235, 0.108, 0.014, 0.033, c.cyan],
-      [-0.035, -0.077, 0.18, 0.132, 0.332, 0.149, -0.018, 0.06, c.pink],
+function street(s, road, scale) {
+  const widthM =
+    {
+      primary: 12,
+      secondary: 10,
+      tertiary: 8,
+      residential: 6.5,
+      pedestrian: 4,
+      service: 3.8,
+      footway: 1.8,
+      unclassified: 6,
+    }[road.kind] ?? 5;
+  const points = simplify(
+    road.points.map((p) => p.map((v) => v * scale)),
+    0.0008,
+    false,
+  ).filter((p, i, arr) => !i || Math.hypot(...sub(p, arr[i - 1])) > 1e-8);
+  const offsets = points.slice(1).map((p, i) => {
+    const [dx, dz] = norm(sub(p, points[i]));
+    return [-dz, dx];
+  });
+  const halves = points.map((p, i) => {
+    const n = offsets[i] ?? offsets.at(-1);
+    if (!n) return [p, p];
+    const prev = offsets[i - 1] ?? n,
+      bisector = norm([n[0] + prev[0], n[1] + prev[1]]);
+    const half =
+      (widthM * scale) /
+      (2 * Math.max(0.5, bisector[0] * n[0] + bisector[1] * n[1]));
+    return [-1, 1].map((sign) =>
+      p.map((v, j) => v + sign * half * bisector[j]),
+    );
+  });
+  const foot = road.kind === 'footway' || road.kind === 'pedestrian';
+  const y = foot ? 0.00184 : road.major ? 0.0024 : 0.0021;
+  const color = foot ? '#bfb9a7' : road.major ? '#53596a' : '#747783';
+  for (let i = 1; i < halves.length; i++) {
+    const [a, b] = halves[i - 1],
+      [c, d] = halves[i];
+    for (const tri of [
+      [a, c, d],
+      [a, d, b],
     ]) {
-      crystal(
-        s,
-        x,
-        z,
-        w,
-        d,
-        [
-          [y, 0.85],
-          [y + h * 0.2, 1.02, shift],
-          [y + h, 0.88, shift * 1.6, -0.01, rake],
-        ],
+      const piece = simplify(clip(tri), 1e-9, true);
+      const area = signedArea(piece);
+      if (Math.abs(area) < 1e-11) continue;
+      if (area > 0) piece.reverse();
+      face(
+        s.city,
+        piece.map((p) => to3(p, y)),
         color,
       );
     }
-    crystal(
-      s,
-      0.077,
-      -0.123,
-      0.104,
-      0.093,
-      [
-        [0.005, 0.92],
-        [0.225, 0.83],
-        [0.345, 1.04, 0.017, 0, 0.058],
-      ],
-      c.pink,
-    );
-    crystal(
-      s,
-      -0.142,
-      -0.127,
-      0.073,
-      0.08,
-      [
-        [0.004, 1],
-        [0.202, 0.85, -0.013],
-        [0.292, 0.95, -0.005, 0, 0.044],
-      ],
-      c.cyan,
-    );
-    crystal(
-      s,
-      -0.103,
-      -0.146,
-      0.083,
-      0.067,
-      [
-        [0.008, 1],
-        [0.333, 0.75, -0.019],
-        [0.45, 0.68, -0.014, 0, 0.042],
-      ],
-      c.pink,
-    );
-    for (let tier = 0; tier < 3; tier++) {
-      const y = 0.008 + tier * 0.033;
-      crystal(
-        s,
-        0.041,
-        0.03 - tier * 0.011,
-        0.112 - tier * 0.016,
-        0.073 - tier * 0.01,
-        [
-          [y, 1],
-          [y + 0.032, 1],
-        ],
-        tier === 2 ? c.pink : c.cyan,
-      );
+  }
+  return { points, radius: (widthM * scale) / 2 };
+}
+// OSM often supplies both an overall building and its component parts. Keep only exposed
+// surfaces so equal-height roofs and shared party walls never compete for the same pixels.
+function boundsOf(points) {
+  return [0, 1].map((i) => [
+    Math.min(...points.map((p) => p[i])),
+    Math.max(...points.map((p) => p[i])),
+  ]);
+}
+const overlaps = (a, b) =>
+  a.every(([lo, hi], i) => lo <= b[i][1] + 1e-8 && hi >= b[i][0] - 1e-8);
+function subtractTriangle(poly, tri) {
+  let inside = poly;
+  const outside = [];
+  for (let i = 0; i < 3; i++) {
+    const a = tri[i],
+      b = tri[(i + 1) % 3],
+      keep = [],
+      cut = [];
+    let prev = inside.at(-1),
+      d0 = turn(a, b, prev);
+    for (const p of inside) {
+      const d1 = turn(a, b, p);
+      if (d0 < 0 !== d1 < 0) {
+        const q = mix(prev, p, d0 / (d0 - d1));
+        keep.push(q);
+        cut.push(q);
+      }
+      (d1 < 0 ? cut : keep).push(p);
+      prev = p;
+      d0 = d1;
     }
-    needle(s, -0.078, -0.122, 0.43, 0.605, 0.023, c.pink);
-    needle(s, 0.06, -0.159, 0.26, 0.487, 0.014, c.cyan);
-    needle(s, -0.148, -0.125, 0.265, 0.411, 0.013, c.cyan);
-    // The bridge crosses the Charles perpendicular to its banks.
-    const bx = 0.126;
-    box(s.city, bx, 0.016, -0.315, 0.047, 0.01, 0.157, '#78828e');
-    for (const x of [bx - 0.023, bx + 0.023]) {
-      const arch = Array.from({ length: 9 }, (_, i) => [
-        x,
-        0.027 + 0.034 * Math.sin((Math.PI * i) / 8),
-        -0.391 + i * 0.019,
-      ]);
-      sweep(s.trim, arch, 0.0026, '#c6b2af', 5);
-      for (let i = 0; i < arch.length - 1; i++) {
-        const foot = [x, 0.02, arch[i][2]];
-        sweep(s.paint, [foot, arch[i]], 0.0014, '#83576a', 4, false);
-        sweep(s.paint, [foot, arch[i + 1]], 0.0014, '#83576a', 4, false);
+    if (signedArea(keep) < 1e-12) return [poly];
+    if (signedArea(cut) > 1e-12) outside.push(cut);
+    inside = keep;
+  }
+  return outside;
+}
+function exposedShells(buildings) {
+  for (const b of buildings) {
+    b.bounds = boundsOf(b.roof.flat());
+    b.triangles = b.roof.map((tri) => ({ tri, bounds: boundsOf(tri) }));
+  }
+  buildings.sort(
+    (a, b) =>
+      b.height - a.height ||
+      Number(b.hero) - Number(a.hero) ||
+      (b.groundPriority ?? 0) - (a.groundPriority ?? 0) ||
+      Number(Boolean(b.name)) - Number(Boolean(a.name)) ||
+      b.area - a.area ||
+      a.id - b.id,
+  );
+  for (const [rank, b] of buildings.entries()) b.rank = rank;
+  for (const b of buildings) {
+    const neighbors = buildings.filter(
+      (other) => other !== b && overlaps(b.bounds, other.bounds),
+    );
+    b.visibleRoof = [];
+    for (const { tri, bounds } of b.triangles) {
+      let pieces = [tri];
+      for (const other of neighbors) {
+        if (other.rank > b.rank || !overlaps(bounds, other.bounds)) continue;
+        for (const cutter of other.triangles) {
+          if (overlaps(bounds, cutter.bounds))
+            pieces = pieces.flatMap((piece) =>
+              subtractTriangle(piece, cutter.tri),
+            );
+          if (!pieces.length) break;
+        }
+        if (!pieces.length) break;
+      }
+      for (const piece of pieces)
+        for (let i = 1; i < piece.length - 1; i++) {
+          if (turn(piece[0], piece[i], piece[i + 1]) > 1e-11)
+            b.visibleRoof.push([piece[0], piece[i], piece[i + 1]]);
+        }
+    }
+    b.visibleWalls = [];
+    for (const [a, c] of b.walls) {
+      const bounds = boundsOf([a, c]),
+        near = neighbors.filter((o) => overlaps(bounds, o.bounds));
+      const length = Math.hypot(...sub(c, a));
+      if (length < 1e-7) continue;
+      const cuts = [0, 1],
+        dir = sub(c, a),
+        normal = [dir[1] / length, -dir[0] / length];
+      for (const o of near)
+        for (const [u, v] of o.walls) {
+          if (!overlaps(bounds, boundsOf([u, v]))) continue;
+          const d0 = turn(u, v, a),
+            d1 = turn(u, v, c);
+          if (Math.abs(d0 - d1) > 1e-14) {
+            const t = d0 / (d0 - d1);
+            if (t > 0 && t < 1 && segmentDistance(mix(a, c, t), u, v) < 1e-8)
+              cuts.push(t);
+          } else if (
+            segmentDistance(u, a, c) < 1e-8 ||
+            segmentDistance(v, a, c) < 1e-8
+          ) {
+            for (const p of [u, v]) {
+              const t =
+                ((p[0] - a[0]) * dir[0] + (p[1] - a[1]) * dir[1]) /
+                (length * length);
+              if (t > 0 && t < 1) cuts.push(t);
+            }
+          }
+        }
+      cuts.sort((u, v) => u - v);
+      for (let i = 1; i < cuts.length; i++) {
+        if ((cuts[i] - cuts[i - 1]) * length < 1e-7) continue;
+        const mid = mix(a, c, (cuts[i - 1] + cuts[i]) / 2);
+        const side = (sign) => mid.map((v, k) => v + sign * normal[k] * 1e-7);
+        const covered = near.filter(
+          (o) =>
+            (inBounds(side(1)) && contains(o.ring, side(1))) ||
+            (o.rank < b.rank && contains(o.ring, side(-1))),
+        );
+        const base = Math.max(0.00255, ...covered.map((o) => o.height));
+        if (base < b.height - 1e-6)
+          b.visibleWalls.push([
+            mix(a, c, cuts[i - 1]),
+            mix(a, c, cuts[i]),
+            base,
+          ]);
       }
     }
-    for (const x of [-0.09, 0.075]) {
-      box(s.city, x, 0.0045, 0.211, 0.13, 0.004, 0.011, '#c7c3b1', 0.003);
-      box(s.city, x, 0.007, 0.211, 0.121, 0.002, 0.007, '#799877', 0.002);
+  }
+  return buildings.filter((b) => b.visibleRoof.length || b.visibleWalls.length);
+}
+
+// A repeating sash, mullion and sill for the miniature street elevations (32 x 32 RGB PNG).
+const sashTile = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAyElEQVR42u3VOQoCQRSE4bmzK+5eQEcHe1wmdsXdQ5gJHsBA8AyCGCi8sCqwBjpy4M8K3kdHHbxfT68FGfCvQBy5FGlArjPFQpd8o5MM5LszzAA6yUAhnGMG0EkGir0FZgCdZKDUX2IG0EkGytEKM4BOMmC3fk8GKoM1ZrfoJANVt8EMoJMM1OItZgCdZKA+3GEG0EkGGqM9ZgCdZKA5PmAG0EkGWpMjZgCdZKCdnDAD6CQDHv+D6+WcuuzTzwAvwON+85r3F3wAl3Y27/RpLRsAAAAASUVORK5CYII=',
+  'base64',
+);
+const masonry = [
+  ['#ae7972', '#855c5b', '#c6a69b'],
+  ['#d9c8b0', '#b1a28d', '#ede2c8'],
+  ['#a1b1bc', '#798b9b', '#c4d0d3'],
+  ['#b38b7c', '#97786e', '#d8bc9e'],
+  ['#9999a6', '#717381', '#b9bdc6'],
+  ['#c0b6af', '#998e89', '#d9d0c1'],
+];
+const spectral = [
+  ['#553790', '#b349bf', '#ffa4df', '#a0f2fa', '#ff83d2'],
+  ['#4157a4', '#477fd4', '#93faff', '#d9a0fb', '#8cedfb'],
+];
+// Two shallow, angled planes meet on a luminous ridge. Split the original roof
+// triangles at that line, preserving setbacks, concavities and the street footprint.
+function crystalRoof(s, b, hue, neon) {
+  const [[x0, x1], [z0, z1]] = b.bounds;
+  const direction = x1 - x0 < z1 - z0 ? [0.94, 0.34] : [0.31, 0.95];
+  const project = (p) => p[0] * direction[0] + p[1] * direction[1];
+  const projections = b.roof.flat().map(project);
+  const lo = Math.min(...projections),
+    hi = Math.max(...projections),
+    ridge = lo + 0.62 * (hi - lo);
+  const rise = Math.min(0.031, b.height * 0.095, (hi - lo) * 0.32);
+  const height = (p) =>
+    b.height +
+    rise *
+      Math.max(
+        0,
+        Math.min(
+          (project(p) - lo) / (ridge - lo),
+          (hi - project(p)) / (hi - ridge),
+        ),
+      );
+  function split(points, sign) {
+    const out = [];
+    let prev = points.at(-1),
+      a = (project(prev) - ridge) * sign;
+    for (const p of points) {
+      const d = (project(p) - ridge) * sign;
+      if (a < 0 !== d < 0) out.push(mix(prev, p, a / (a - d)));
+      if (d >= 0) out.push(p);
+      prev = p;
+      a = d;
     }
-    path(
-      s.city,
-      [
-        [-0.42, -0.34],
-        [-0.18, -0.315],
-        [0.06, -0.33],
-        [0.42, -0.305],
-      ],
-      0.104,
-      '#71b5bd',
-      0.005,
-    );
-    path(
-      s.light,
-      [
-        [-0.418, -0.282],
-        [-0.18, -0.258],
-        [0.06, -0.273],
-        [0.42, -0.248],
-      ],
-      0.005,
-      '#d5f4e1',
-      0.006,
-    );
-  } else if (index === 1) {
-    for (const [x, z, h, col] of [
-      [-0.11, -0.096, 0.45, c.pink],
-      [0.06, -0.075, 0.364, c.cyan],
-    ]) {
-      crystal(
-        s,
-        x,
-        z,
-        0.103,
-        0.112,
-        [
-          [0.006, 1],
-          [h * 0.58, 0.81, -0.014],
-          [h * 0.78, 1.23, 0.017, 0, 0.035],
-          [h, 0.67, 0.037, -0.008, 0.071],
-        ],
-        col,
-      );
-      for (let j = 0; j < 4; j++)
-        box(
-          s.light,
-          x,
-          h * 0.64 + j * 0.012,
-          z + 0.055,
-          0.112,
-          0.004,
-          0.005,
-          j % 2 ? c.cream : col,
-        );
-    }
-    needle(s, -0.102, -0.13, 0.4, 0.535, 0.016, c.pink);
-    needle(s, 0.061, -0.109, 0.33, 0.41, 0.013, c.cyan);
-    // A projecting blade sign points down the avenue.
-    const blade = [
-      [-0.157, 0.314, -0.044],
-      [-0.067, 0.33, -0.044],
-      [-0.12, 0.236, 0.026],
-    ];
-    face(s.glass, blade, '#f9a4cf');
-    sweep(s.neonPink, [...blade, blade[0]], 0.0024, c.pink, 5, false);
-    for (const [x, z, width, h] of [
-      [-0.041, 0.015, 0.112, 0.153],
-      [0.036, 0.033, 0.081, 0.111],
-    ]) {
-      crystal(
-        s,
-        x,
-        z,
-        width,
-        0.068,
-        [
-          [0.005, 1],
-          [h * 0.66, 1],
-          [h, 0.73, -0.009],
-        ],
-        x < 0 ? c.pink : c.cyan,
-      );
-    }
-    for (const [i, clr] of [c.pink, c.cyan, '#f6c673'].entries()) {
-      const x = -0.134 + i * 0.121;
-      const h = 0.098 - i * 0.021;
-      building(s, x, 0.097, 0.09, 0.063, h, [brick[0], clr, brick[2]], 'shop');
-      box(
-        s.paint,
-        x - 0.008,
-        h + 0.023,
-        0.088,
-        0.059,
-        0.026,
-        0.042,
-        '#b8a6aa',
-        0.006,
-      );
-      for (const y of [0.031, 0.037])
-        box(
-          i === 1 ? s.neonBlue : s.neonPink,
-          x,
-          y,
-          0.146,
-          0.084,
-          0.002,
-          0.003,
-          clr,
-        );
-      box(s.window, x, 0.019, 0.129, 0.071, 0.016, 0.002, '#455977');
-    }
-  } else if (index === 2) {
-    // Open, faceted ballpark seating and the tall left-field wall.
-    const x = -0.084,
-      z = 0.054;
-    const bowl = (rx, rz, y) =>
-      Array.from({ length: 27 }, (_, i) => {
-        const a = (-0.15 + (i / 26) * 1.73) * Math.PI;
-        return [x + rx * Math.cos(a), y, z + rz * Math.sin(a)];
-      });
-    // Continuous treads and risers keep the upper deck open around the outfield.
-    for (let tier = 0; tier < 6; tier++) {
-      const rx = 0.083 + tier * 0.01,
-        rz = 0.056 + tier * 0.009,
-        y = 0.014 + tier * 0.011;
-      const foot = bowl(rx, rz, y),
-        lip = bowl(rx, rz, y + 0.009),
-        back = bowl(rx + 0.01, rz + 0.009, y + 0.009);
-      for (let i = 0; i < lip.length - 1; i++) {
-        const aisle = i % 6 === 0;
-        face(
-          s.glass,
-          [foot[i], foot[i + 1], lip[i + 1], lip[i]],
-          tier % 3 ? '#66d6e2' : '#db82cb',
-        );
-        face(
-          aisle ? s.city : s.glass,
-          [lip[i], lip[i + 1], back[i + 1], back[i]],
-          aisle ? '#d7d7c5' : tier % 2 ? '#d87acc' : '#90dce8',
-        );
-      }
-      sweep(
-        tier === 5 ? s.neonPink : s.light,
-        lip,
-        0.0013,
-        tier === 5 ? c.pink : c.cyan,
-        4,
-        false,
-      );
-    }
-    for (const [lx, lz] of [
-      [-0.172, -0.027],
-      [-0.192, 0.113],
-      [0.035, 0.093],
-    ]) {
-      for (const sign of [-1, 1])
-        sweep(
-          s.trim,
-          [
-            [lx + sign * 0.007, 0.035, lz],
-            [lx + sign * 0.003, 0.137, lz],
-          ],
-          0.0016,
-          '#a2a6b4',
-          4,
-        );
-      box(s.paint, lx, 0.14, lz, 0.034, 0.012, 0.007, '#4d5d6b');
-      for (let j = 0; j < 5; j++)
-        box(
-          s.light,
-          lx - 0.013 + 0.0065 * j,
-          0.14,
-          lz + 0.004,
-          0.0045,
-          0.007,
-          0.002,
-          '#fff2c5',
-        );
-    }
-    box(s.city, x, 0.007, z, 0.164, 0.097 * 0.06, 0.104, '#5f9f78', 0.013);
-    face(
-      s.city,
-      [
-        [x - 0.033, 0.011, z],
-        [x, 0.011, z + 0.033],
-        [x + 0.033, 0.011, z],
-        [x, 0.011, z - 0.033],
-      ],
-      '#c69e77',
-    );
-    box(s.city, x, 0.028, z - 0.081, 0.178, 0.045, 0.006, '#417e67');
-    box(s.window, x - 0.02, 0.029, z - 0.0777, 0.08, 0.023, 0.001, '#315e56');
-    for (let j = 0; j < 9; j++)
-      box(
-        s.city,
-        x - 0.05 + j * 0.008,
-        0.033,
-        z - 0.077,
-        0.0035,
-        0.005,
-        0.001,
-        '#d6dab7',
-      );
-    for (const dx of [-0.034, 0.034])
-      path(
-        s.city,
-        [
-          [x, z + 0.033],
-          [x + dx, z],
-        ],
-        0.0018,
-        '#f7ecd7',
-        0.0117,
-      );
-    for (const [px, pz] of [
-      [x, z - 0.033],
-      [x - 0.033, z],
-      [x + 0.033, z],
-      [x, z + 0.033],
-    ])
-      box(s.city, px, 0.012, pz, 0.005, 0.001, 0.005, '#f6e7d2');
-    crystal(
-      s,
-      0.041,
-      -0.098,
-      0.082,
-      0.075,
-      [
-        [0.006, 1],
-        [0.162, 0.9, -0.008],
-        [0.246, 0.65, -0.02, 0, 0.04],
-      ],
-      c.pink,
-    );
-    crystal(
-      s,
-      0.098,
-      -0.127,
-      0.096,
-      0.08,
-      [
-        [0.005, 1],
-        [0.211, 0.89, -0.011],
-        [0.314, 0.77, 0.008, 0, 0.045],
-      ],
-      c.cyan,
-    );
-    needle(s, 0.127, -0.157, 0.247, 0.387, 0.012, c.cyan);
-    for (const dx of [-0.039, 0.039])
-      rod(
-        s.trim,
-        [0.098 + dx, 0.3, -0.127],
-        [0.098 + dx, 0.456, -0.127],
-        0.004,
-        c.cream,
-        8,
-      );
-    box(s.paint, 0.098, 0.442, -0.127, 0.152, 0.129, 0.012, '#d7d7c7', 0.004);
-    for (let j = 0; j < 9; j++)
-      box(
-        s.light,
-        0.098,
-        0.384 + j * 0.014,
-        -0.12,
-        0.142,
-        0.0018,
-        0.002,
-        '#9cbbd1',
-      );
-    const corners = [
-      [0.098, 0.489, -0.114],
-      [0.041, 0.405, -0.114],
-      [0.155, 0.405, -0.114],
-    ];
-    sweep(s.neonPink, [...corners, corners[0]], 0.0024, '#ff896e', 5, false);
-    for (const [k, clr] of ['#e96358', '#ff9683', '#e6425b'].entries()) {
-      const a = [0.098, 0.489, -0.117],
-        b = [0.041, 0.405, -0.117],
-        d = [0.155, 0.405, -0.117],
-        mid = [0.098, 0.432, -0.114];
+    return out;
+  }
+  for (const tri of b.visibleRoof)
+    for (const side of [-1, 1]) {
+      const piece = simplify(split(tri, side), 1e-9, true);
+      if (signedArea(piece) < 1e-12) continue;
       face(
-        s.light,
-        [
-          ...[
-            [b, d],
-            [d, a],
-            [a, b],
-          ][k],
-          mid,
-        ],
-        clr,
+        s.glass,
+        piece.reverse().map((p) => to3(p, height(p))),
+        side < 0 ? hue[2] : hue[3],
       );
     }
-  } else if (index === 3) {
-    building(s, -0.065, -0.097, 0.204, 0.09, 0.111, brick, 'stone');
-    loft(
-      s.city,
-      [
-        rect(-0.065, 0.116, -0.097, 0.215, 0.101),
-        rect(-0.065, 0.169, -0.097, 0.19, 0.012),
-      ],
-      '#59657a',
-    );
-    crystal(
-      s,
-      -0.023,
-      -0.103,
-      0.08,
-      0.08,
-      [
-        [0.115, 1],
-        [0.286, 0.87],
-        [0.303, 1.06],
-        [0.354, 0.68, 0, 0, 0.021],
-        [0.504, 0.1],
-      ],
-      c.pink,
-    );
-    rod(
-      s.trim,
-      [-0.023, 0.498, -0.103],
-      [-0.023, 0.525, -0.103],
-      0.0018,
-      c.cream,
-      6,
-    );
-    for (const x of [-0.069, 0.023])
-      crystal(
-        s,
-        x,
-        -0.103,
-        0.017,
-        0.018,
+  for (const [a, c] of b.visibleWalls) {
+    const cuts = [a],
+      p0 = project(a) - ridge,
+      p1 = project(c) - ridge;
+    if (p0 * p1 < 0) cuts.push(mix(a, c, p0 / (p0 - p1)));
+    cuts.push(c);
+    for (let i = 1; i < cuts.length; i++) {
+      const start = cuts[i - 1],
+        end = cuts[i],
+        h0 = height(start),
+        h1 = height(end);
+      const low = to3(start, b.height),
+        last = to3(end, b.height);
+      const trim0 = Math.max(b.height, h0 - 0.0011),
+        trim1 = Math.max(b.height, h1 - 0.0011);
+      for (const [surf, pts, tint] of [
+        [s.glass, [low, to3(start, trim0), to3(end, trim1), last], hue[1]],
         [
-          [0.153, 1],
-          [0.276, 0.8],
-          [0.323, 0.15],
+          neon,
+          [to3(start, trim0), to3(start, h0), to3(end, h1), to3(end, trim1)],
+          hue[4],
         ],
-        c.cyan,
-      );
-    for (const x of [-0.136, -0.098, 0.014]) {
-      const z = -0.0505;
-      const arch = [
-        [x - 0.011, 0.047, z],
-        [x + 0.011, 0.047, z],
-        [x + 0.011, 0.091, z],
-        [x, 0.104, z],
-        [x - 0.011, 0.091, z],
-      ];
-      face(s.window, arch, '#485d72');
-      sweep(s.trim, [...arch, arch[0]], 0.0018, '#d1b3a4', 4, false);
-      sweep(
-        s.light,
-        [
-          [x, 0.05, z + 0.001],
-          [x, 0.097, z + 0.001],
-        ],
-        0.0008,
-        '#b4d7df',
-        4,
-        false,
-      );
+      ]) {
+        for (const tri of [
+          [pts[0], pts[1], pts[2]],
+          [pts[0], pts[2], pts[3]],
+        ])
+          if (
+            Math.hypot(...cross(sub(tri[1], tri[0]), sub(tri[2], tri[0]))) >
+            1e-12
+          )
+            face(surf, tri, tint);
+      }
     }
-    for (const [x, z, h] of [
-      [-0.077, -0.062, 0.256],
-      [0.024, -0.066, 0.298],
-    ]) {
-      crystal(
-        s,
-        x,
-        z,
-        0.029,
-        0.034,
+  }
+}
+function renderBuilding(s, b, detail) {
+  const tone = masonry[b.id % masonry.length];
+  const hue = spectral[b.tint],
+    neon = b.tint ? s.neonBlue : s.neonPink;
+  const y = b.height;
+  const corniceHeight = Math.min(0.0026, y * 0.07);
+  const crown =
+    b.hero &&
+    y > 0.07 &&
+    b.visibleRoof.length &&
+    b.visibleRoof.reduce((n, tri) => n + turn(...tri) / 2, 0) > b.area * 0.98;
+  if (crown) crystalRoof(s, b, hue, neon);
+  else
+    roofFaces(
+      b.hero ? s.glass : s.city,
+      b.visibleRoof,
+      y,
+      b.hero ? hue[2] : tone[2],
+    );
+  for (const [i, [a, end, base]] of b.visibleWalls.entries()) {
+    const trimY = Math.max(base + (y - base) * 0.1, y - corniceHeight);
+    const length = Math.hypot(...sub(a, end));
+    if (length < 1e-7) continue;
+    const cut = a.some(
+      (v, j) =>
+        Math.abs(Math.abs(v) - edge) < 1e-8 && Math.abs(v - end[j]) < 1e-8,
+    );
+    const raised = (p, h) => [p[0], h, p[1]];
+    const wall = (surface, bottom, top, color, start = a, finish = end) =>
+      face(
+        surface,
         [
-          [0.113, 1],
-          [h - 0.047, 0.88],
-          [h, 0.14],
+          raised(start, bottom),
+          raised(start, top),
+          raised(finish, top),
+          raised(finish, bottom),
         ],
-        x < 0 ? c.pink : c.cyan,
+        color,
       );
-    }
-    const clockX = -0.023,
-      clockY = 0.269,
-      clockZ = -0.066;
-    const dial = Array.from({ length: 25 }, (_, i) => {
-      const a = (i * TAU) / 25;
-      return [
-        clockX + 0.023 * Math.cos(a),
-        clockY + 0.023 * Math.sin(a),
-        clockZ,
-      ];
-    });
-    face(s.window, dial, '#34425b');
-    sweep(s.light, [...dial, dial[0]], 0.0018, '#f3d9ab', 5, false);
-    for (let j = 0; j < 12; j++) {
-      const a = (TAU * j) / 12;
-      sweep(
-        s.light,
-        [0.016, 0.02].map((r) => [
-          clockX + r * Math.cos(a),
-          clockY + r * Math.sin(a),
-          clockZ + 0.001,
-        ]),
-        0.0008,
-        c.cream,
-        4,
-        false,
-      );
-    }
-    sweep(
-      s.light,
-      [
-        [clockX - 0.01, clockY + 0.007, clockZ + 0.002],
-        [clockX, clockY, clockZ + 0.002],
-        [clockX + 0.004, clockY + 0.016, clockZ + 0.002],
-      ],
-      0.0013,
-      c.cream,
-      4,
-    );
-    // Widener's long temple front looks over a stair and the Yard.
-    const libraryX = 0.11;
-    building(s, libraryX, 0.032, 0.14, 0.092, 0.075, stone, 'stone');
-    for (let j = 0; j < 4; j++)
-      box(
-        s.city,
-        libraryX,
-        0.006 + j * 0.003,
-        0.088 + j * -0.003,
-        0.128 - j * 0.002,
-        0.006 + j * 0.005,
-        0.072 - j * 0.009,
-        '#d5cbb5',
-      );
-    for (let j = 0; j < 8; j++) {
-      const cx = libraryX - 0.053 + j * 0.015;
-      rod(s.city, [cx, 0.021, 0.093], [cx, 0.081, 0.093], 0.004, '#e5ddce', 8);
-      box(s.city, cx, 0.08, 0.093, 0.011, 0.006, 0.011, stone[0]);
-    }
-    box(s.city, libraryX, 0.086, 0.087, 0.138, 0.01, 0.034, '#c6b8a6');
-    const pediment = [
-      [0.04, 0.091, 0.105],
-      [0.18, 0.091, 0.105],
-      [libraryX, 0.116, 0.105],
-    ];
-    face(s.city, pediment, '#cfbdac');
-    sweep(s.trim, [...pediment, pediment[0]], 0.0023, '#ede1cf', 4, false);
-    for (const z of [0.171, 0.148])
-      path(
-        s.city,
+    if (b.hero) {
+      const lo = raised(a, base),
+        hi = raised(a, trimY),
+        next = raised(end, trimY),
+        foot = raised(end, base);
+      const sideShade = (i + b.id) % 3;
+      for (const [points, colors] of [
         [
-          [-0.16, z],
-          [0.16, z - 0.01],
+          [lo, hi, next],
+          [hue[0], hue[2], hue[sideShade + 1]],
         ],
-        0.008,
-        c.walk,
-        0.006,
-      );
-    path(
-      s.city,
-      [
-        [-0.2, 0.15],
-        [-0.04, 0.084],
-        [0.025, 0.03],
-        [0.183, -0.012],
-      ],
-      0.022,
-      c.walk,
-      0.006,
-    );
-  } else {
-    crystal(
-      s,
-      -0.089,
-      -0.13,
-      0.11,
-      0.103,
-      [
-        [0.005, 1],
-        [0.347, 1],
-        [0.44, 1.03, 0.017, 0, 0.088],
-        [0.517, 0.56, 0.033, -0.006, 0.063],
-      ],
-      c.pink,
-    );
-    crystal(
-      s,
-      0.072,
-      -0.174,
-      0.088,
-      0.092,
-      [
-        [0.005, 1],
-        [0.286, 0.84, 0.018],
-        [0.427, 1.09, 0.025, 0, 0.067],
-        [0.536, 0.59, 0.008, -0.014, 0.062],
-      ],
-      c.cyan,
-    );
-    needle(s, 0.06, -0.198, 0.421, 0.601, 0.018, c.cyan);
-    needle(s, -0.112, -0.159, 0.405, 0.552, 0.013, c.pink);
-    crystal(
-      s,
-      0.006,
-      -0.088,
-      0.073,
-      0.08,
-      [
-        [0.006, 1],
-        [0.135, 0.82, 0.008],
-        [0.285, 0.79, -0.015, -0.01, 0.063],
-      ],
-      c.pink,
-    );
-    box(s.city, 0, 0.0045, 0.104, 0.319, 0.006, 0.14, '#c2a8a2', 0.018);
-    path(
-      s.city,
-      [
-        [0, 0.033],
-        [0, 0.189],
-      ],
-      0.093,
-      '#d7c6b7',
-      0.008,
-    );
-    for (const x of [-0.051, 0.051])
-      path(
-        s.city,
         [
-          [x, 0.049],
-          [x, 0.176],
+          [lo, next, foot],
+          [hue[0], hue[sideShade + 1], hue[1]],
         ],
-        0.003,
-        '#a58685',
-        0.0082,
-      );
-    // Paifang pillars, corbels, and sweeping, upturned tiled roofs.
-    for (const x of [-0.132, -0.066, 0.066, 0.132]) {
-      box(s.city, x, 0.015, 0.118, 0.022, 0.03, 0.025, '#dfd1b5', 0.003);
-      rod(
-        s.paint,
-        [x, 0.021, 0.118],
-        [x, Math.abs(x) < 0.1 ? 0.143 : 0.105, 0.118],
-        0.008,
-        '#b43f43',
-        12,
-      );
-      for (let j = 0; j < 3; j++)
-        box(
-          s.trim,
-          x,
-          0.089 + j * 0.008,
-          0.118,
-          0.018 + j * 0.011,
-          0.005,
-          0.021,
-          c.cream,
+      ]) {
+        const normal = norm(
+          cross(sub(points[1], points[0]), sub(points[2], points[0])),
         );
+        s.glass.indices.push(
+          ...points.map((p, k) => s.glass.vertex(p, normal, colors[k])),
+        );
+      }
+      wall(neon, trimY, y, hue[4]);
+    } else {
+      const cornice = detail && length > 0.014;
+      const top = cornice ? trimY : y;
+      const bodyColor = tone[b.id % 6 === 0 ? 1 : 0];
+      if (cut || length < 0.004) wall(s.city, base, top, bodyColor);
+      else {
+        const cols = Math.max(1, Math.round(length / 0.009)),
+          stories = Math.max(1, Math.round((top - base) / 0.02));
+        face(
+          s.facade,
+          [
+            raised(a, base),
+            raised(a, top),
+            raised(end, top),
+            raised(end, base),
+          ],
+          bodyColor,
+          [
+            [0, stories],
+            [0, 0],
+            [cols, 0],
+            [cols, stories],
+          ],
+        );
+      }
+      if (cornice) wall(s.city, trimY, y, tone[2]);
     }
-    for (const [x, w, y] of [
-      [0, 0.169, 0.146],
-      [0, 0.119, 0.185],
-      [-0.111, 0.09, 0.111],
-      [0.111, 0.09, 0.111],
-    ]) {
-      box(s.light, x, y - 0.023, 0.118, w * 0.9, 0.023, 0.021, '#67b9ac');
-      if (y === 0.146) {
-        box(s.trim, x, y - 0.022, 0.131, 0.059, 0.02, 0.004, '#d5ab73', 0.0015);
-        box(s.window, x, y - 0.022, 0.134, 0.051, 0.015, 0.002, '#364c64');
-        for (const dx of [-0.043, 0.043]) {
-          sweep(
-            s.trim,
-            [
-              [x + dx, y - 0.027, 0.125],
-              [x + dx, y - 0.047, 0.125],
-            ],
-            0.001,
-            '#c99968',
-            4,
-            false,
-          );
-          ellipsoid(
-            s.paint,
-            [x + dx, y - 0.05, 0.125],
-            [0.006, 0.008, 0.006],
-            '#d95354',
-            8,
-            5,
+    // Coplanar decoration would flicker in the headset. Lift facade details out by 0.08 mm.
+    const shift = [
+      (0.00008 * (end[1] - a[1])) / length,
+      (0.00008 * (a[0] - end[0])) / length,
+    ];
+    const at = (t) => mix(a, end, t).map((v, k) => v + shift[k]);
+    if (cut || !inBounds(at(0)) || !inBounds(at(1)) || length < 0.008) continue;
+    if (b.hero) {
+      wall(
+        neon,
+        base,
+        trimY,
+        hue[4],
+        at(0.01),
+        at(Math.min(0.16, 0.01 + 0.0012 / length)),
+      );
+      if (length > 0.022) {
+        const count = Math.min(
+          14,
+          Math.max(1, Math.floor((trimY - base) / 0.021)),
+        );
+        for (let j = 1; j <= count; j++) {
+          const h = base + ((trimY - base) * j) / (count + 1);
+          wall(
+            s.window,
+            h,
+            Math.min(trimY, h + 0.00085),
+            hue[3],
+            at(0.07),
+            at(0.93),
           );
         }
       }
-      for (let j = 0; j < 12; j++) {
-        const a = -1 + (2 * j) / 12,
-          b = -1 + (2 * (j + 1)) / 12;
-        const p = (v, d) => [
-          x + (v * w) / 2,
-          y + 0.019 * Math.abs(v) ** 3 + (1 - Math.abs(d)) * 0.025,
-          0.118 + d * 0.029,
-        ];
-        for (const d of [-1, 1])
-          face(
-            s.city,
-            d < 0
-              ? [p(a, 0), p(b, 0), p(b, d), p(a, d)]
-              : [p(a, d), p(b, d), p(b, 0), p(a, 0)],
-            j % 3 === 1 ? '#477f85' : '#5a9794',
-          );
-        for (const d of [-1, 1])
-          sweep(
-            d === 1 && y > 0.17 ? s.neonPink : s.neonBlue,
-            [p(a, d), p(b, d)],
-            0.0016,
-            c.cyan,
-            4,
-            false,
-          );
-        if (j % 2 === 0)
-          for (const d of [-1, 1])
-            sweep(s.trim, [p(a, 0), p(a, d)], 0.0009, '#a5bfb1', 4, false);
-      }
-    }
-  }
-}
-function tree(s, x, z, h, pine, random) {
-  rod(s.city, [x, 0.004, z], [x, h * 0.61, z], 0.0028, '#7e6e52', 7);
-  if (pine) {
-    for (let j = 0; j < 3; j++) {
-      const y = h * (0.24 + j * 0.17),
-        r = h * (0.24 - j * 0.043);
-      loft(
-        s.city,
-        [
-          circle(x, y, z, r, 9),
-          circle(x, y + h * (0.38 - j * 0.045), z, 0.0015, 9),
-        ],
-        ['#286958', '#378969', '#63a56c'][j],
-      );
-    }
-  } else {
-    for (let j = 0; j < 3; j++) {
-      const a = (j * TAU) / 3 + random() * 0.4,
-        k = h * 0.13;
-      ellipsoid(
-        s.city,
-        [x + k * Math.cos(a), h * (0.64 + j * 0.055), z + k * Math.sin(a)],
-        [h * 0.22, h * 0.235, h * 0.22],
-        ['#72ae75', '#8abb73', '#5da17c'][j],
-        9,
-        5,
-      );
-    }
-  }
-}
-function roofAt(m, x, z) {
-  let y = 0;
-  for (const s of m.surfaces) {
-    const [dx, dy, dz] = s.translation ?? [0, 0, 0];
-    const q = x - dx,
-      r = z - dz;
-    for (let j = 0; j < s.indices.length; j += 3) {
-      const [a, b, c] = s.indices
-        .slice(j, j + 3)
-        .map((k) => s.positions.slice(k * 3, k * 3 + 3));
-      const d = (b[2] - c[2]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[2] - c[2]);
-      if (Math.abs(d) < 1e-12) continue;
-      const u = ((b[2] - c[2]) * (q - c[0]) + (c[0] - b[0]) * (r - c[2])) / d,
-        v = ((c[2] - a[2]) * (q - c[0]) + (a[0] - c[0]) * (r - c[2])) / d;
-      if (u >= -1e-7 && v >= -1e-7 && u + v <= 1.0000001)
-        y = Math.max(y, dy + u * a[1] + v * b[1] + (1 - u - v) * c[1]);
-    }
-  }
-  return y;
-}
-export function segments(dir) {
-  const anchors = {};
-  focal.forEach(([id, , station, area], index) => {
-    const m = new Model(),
-      s = palette(m),
-      random = rng(700 + index);
-    hardware(m, s, area, station);
-    box(s.city, 0, -0.0035, 0, 0.856, 0.007, 0.856, c.lawn, 0.017);
-    // Streets flank the landmark district. Each block has a sidewalk apron and roof trim.
-    path(
-      s.city,
-      [
-        [-0.403, -0.043],
-        [-0.236, -0.035],
-        [-0.145, 0.046],
-        [-0.08, 0.126],
-        [0.066, 0.158],
-        [0.18, 0.12],
-        [0.303, 0.11],
-      ],
-      0.014,
-      c.walk,
-      0.0015,
-    );
-    path(
-      s.city,
-      [
-        [-0.08, 0.126],
-        [-0.105, 0.216],
-        [-0.083, 0.29],
-        [-0.088, 0.41],
-      ],
-      0.013,
-      c.walk,
-      0.0016,
-    );
-    for (const x of [-0.218, 0.218])
-      path(
-        s.city,
-        [
-          [x, -0.419],
-          [x, 0.417],
-        ],
-        0.05,
-        '#73808a',
-        0.002,
-      );
-    for (const z of [-0.228, 0.211])
-      path(
-        s.city,
-        [
-          [-0.42, z],
-          [0.42, z],
-        ],
-        0.048,
-        '#79848b',
-        0.0025,
-      );
-    for (const z of [-0.228, 0.211])
-      for (let i = 0; i < 21; i++) {
-        box(
-          s.city,
-          -0.402 + i * 0.04,
-          0.0032,
-          z,
-          0.017,
-          0.0004,
-          0.0015,
-          '#e6dbbb',
+      if (length > 0.018 && y - base > 0.07) {
+        const q = at(0.08),
+          r = at(0.92),
+          delta = (trimY - base) * 0.1;
+        face(
+          s.light,
+          [
+            raised(q, base + delta),
+            raised(q, base + delta + 0.0015),
+            raised(r, trimY - delta + 0.0015),
+            raised(r, trimY - delta),
+          ],
+          hue[3],
         );
       }
-    for (const x of [-0.218, 0.218])
-      for (const z of [-0.228, 0.211])
-        for (let i = 0; i < 6; i++)
-          box(
-            s.city,
-            x - 0.017 + i * 0.0068,
-            0.0037,
-            z + 0.028,
-            0.003,
-            0.0004,
-            0.015,
-            '#dedcc8',
-          );
-    const parcels = [
-      [-0.32, -0.13],
-      [-0.32, 0.034],
-      [-0.326, 0.315],
-      [-0.14, 0.318],
-      [0.017, 0.319],
-      [0.151, 0.32],
-      [0.322, 0.315],
-      [0.327, 0.075],
-      [0.322, -0.116],
-      [-0.311, -0.322],
-      [0.314, -0.32],
-    ];
-    const blockStyles = [
-      [
-        'curtain',
-        'stone',
-        'slab',
-        'brownstone',
-        'slab',
-        'stone',
-        'curtain',
-        'slab',
-        'curtain',
-      ],
-      [
-        'slab',
-        'shop',
-        'brownstone',
-        'shop',
-        'curtain',
-        'shop',
-        'slab',
-        'shop',
-        'curtain',
-        'brownstone',
-        'slab',
-      ],
-      [
-        'brownstone',
-        'slab',
-        'curtain',
-        'brownstone',
-        'stone',
-        'shop',
-        'slab',
-        'curtain',
-        'slab',
-        'brownstone',
-        'curtain',
-      ],
-      [
-        'brownstone',
-        'stone',
-        'slab',
-        'brownstone',
-        'stone',
-        'brownstone',
-        'curtain',
-        'stone',
-        'brownstone',
-        'brownstone',
-        'slab',
-      ],
-      [
-        'curtain',
-        'shop',
-        'slab',
-        'shop',
-        'stone',
-        'shop',
-        'curtain',
-        'shop',
-        'slab',
-        'curtain',
-        'curtain',
-      ],
-    ];
-    parcels.forEach(([x, z], i) => {
-      if ((index === 0 && i >= 9) || ((index === 2 || index === 4) && i === 4))
-        return;
-      const style = blockStyles[index][i];
-      const w = (0.077 + random() * 0.036) * (style === 'curtain' ? 0.69 : 1),
-        d = 0.065 + random() * 0.044;
-      const h =
-        (0.049 +
-          random() * (index === 1 ? 0.062 : 0.109) +
-          (z < 0 && index === 4 ? 0.05 : 0)) *
-        (z > 0.25 ? 0.85 : 1) *
-        (style === 'curtain' ? 1.47 : 1);
-      box(s.city, x, 0.0025, z, w + 0.015, 0.005, d + 0.019, '#c3bdab', 0.003);
-      if (style === 'slab' || style === 'curtain') {
-        midrise(s, x, z, w, d, h, style);
-        return;
-      }
-      if (style === 'brownstone') {
-        brownstone(s, x, z, w, d, h);
-        return;
-      }
-      const tone = style === 'stone' ? stone : brick;
-      const storeColors = ['#c99d86', '#99bfd0', '#e2b3ac', '#acbda3'];
-      building(
-        s,
-        x,
-        z,
-        w,
-        d,
-        h,
-        style === 'shop' ? [tone[0], storeColors[i % 4], tone[2]] : tone,
-        style,
-      );
-    });
-    landmark(s, index);
-    const satellites = [
-      [
-        [-0.123, 0.019, 0.19, c.cyan],
-        [0.117, -0.013, 0.232, c.pink],
-      ],
-      [
-        [-0.166, -0.159, 0.221, c.cyan],
-        [0.149, -0.013, 0.177, c.pink],
-      ],
-      [
-        [-0.142, -0.117, 0.192, c.cyan],
-        [0.02, -0.166, 0.242, c.pink],
-      ],
-      [
-        [-0.14, -0.182, 0.157, c.pink],
-        [0.113, -0.145, 0.189, c.cyan],
-      ],
-      [
-        [-0.164, -0.03, 0.227, c.cyan],
-        [0.158, -0.096, 0.299, c.pink],
-      ],
-    ];
-    for (const [x, z, h, col] of satellites[index])
-      crystal(
-        s,
-        x,
-        z,
-        0.054,
-        0.049,
-        [
-          [0.005, 1],
-          [h * 0.57, 0.76, -0.007],
-          [h, 1.06, 0.013, -0.006, 0.046],
-        ],
-        col,
-      );
-    for (let i = 0; i < 28; i++) {
-      const side = i % 4,
-        lane = -0.363 + Math.floor(i / 4) * 0.119 + (random() - 0.5) * 0.012;
-      const [x, z] = [
-        [lane, 0.395],
-        [-0.398, lane],
-        [lane, -0.397],
-        [0.397, lane],
-      ][side];
-      const pine = (i + index) % 3 !== 0;
-      tree(s, x, z, (pine ? 0.069 : 0.052) + random() * 0.049, pine, random);
     }
-    for (const [x, z] of [
-      [-0.172, 0.151],
-      [-0.172, 0.043],
-      [0.17, 0.144],
-      [0.171, -0.044],
-      [-0.135, 0.258],
-      [0.095, 0.259],
-    ])
-      tree(
-        s,
-        x,
-        z,
-        0.055 + random() * 0.024,
-        index === 2 || random() > 0.6,
-        random,
-      );
-    const pins = [...parcels.slice(0, 9), [0, -0.092]].map(([x, z]) => [
-      x,
-      Math.ceil((roofAt(m, x, z) + 0.018001) * 1e6) / 1e6,
-      z,
+  }
+}
+function tree(s, [x, z], h, pine) {
+  rod(s.city, [x, 0.0015, z], [x, h * 0.58, z], h * 0.045, '#826b51', 5);
+  if (pine) {
+    for (let i = 0; i < 3; i++) {
+      const y = h * (0.22 + i * 0.18),
+        r = h * (0.25 - i * 0.044);
+      const ring = circle(x, y, z, r, 7),
+        tip = [x, y + h * 0.42, z];
+      for (let k = 0; k < ring.length; k++)
+        face(
+          s.city,
+          [ring[k], tip, ring[(k + 1) % 7]],
+          ['#317365', '#438e6b', '#6aa573'][i],
+        );
+    }
+  } else {
+    ellipsoid(
+      s.city,
+      [x, h * 0.63, z],
+      [h * 0.28, h * 0.32, h * 0.25],
+      '#719c74',
+      7,
+      4,
+    );
+    ellipsoid(
+      s.city,
+      [x + h * 0.1, h * 0.78, z],
+      [h * 0.19, h * 0.22, h * 0.18],
+      '#94b67a',
+      6,
+      3,
+    );
+  }
+}
+function distanceTo(b, p) {
+  if (contains(b.ring, p)) return 0;
+  return b.walls.reduce(
+    (d, [a, end]) => Math.min(d, segmentDistance(p, a, end)),
+    Infinity,
+  );
+}
+function plant(s, parks, buildings, roads, venues, random, limit) {
+  const trees = [];
+  for (const park of parks.toSorted((a, b) => b.area - a.area)) {
+    if (['pitch', 'stadium'].includes(park.kind)) continue;
+    const vertices = park.roof.flat();
+    const bounds = [0, 1].map((j) => [
+      Math.min(...vertices.map((p) => p[j])),
+      Math.max(...vertices.map((p) => p[j])),
     ]);
+    const wanted = Math.min(30, Math.ceil(park.area / 0.0013));
+    let planted = 0;
+    for (
+      let i = 0;
+      i < wanted * 45 && planted < wanted && trees.length < limit;
+      i++
+    ) {
+      const p = bounds.map(([a, b]) => a + (b - a) * random());
+      const h = 0.019 + random() * 0.024,
+        r = h * 0.31;
+      if (
+        p.some((v) => Math.abs(v) + r > edge) ||
+        distanceTo(park, p) > 0 ||
+        buildings.some((b) => distanceTo(b, p) < r) ||
+        venues.some((v) => Math.hypot(...sub(v.p, p)) < r) ||
+        trees.some((q) => Math.hypot(...sub(q, p)) < r + 0.006) ||
+        roads.some(({ points, radius }) =>
+          points.some(
+            (q, j) => j && segmentDistance(p, q, points[j - 1]) < radius + r,
+          ),
+        )
+      )
+        continue;
+      tree(s, p, h, random() < 0.5);
+      trees.push(p);
+      planted++;
+    }
+  }
+}
+// Use the same float32 positions and indexed triangles that Model.save writes to the GLB.
+function topAt(meshes, [x, z]) {
+  let y = -Infinity;
+  for (const {
+    positions: p,
+    indices,
+    translation: [dx, dy, dz] = [0, 0, 0],
+  } of meshes) {
+    for (let i = 0; i < indices.length; i += 3) {
+      const a = indices[i] * 3,
+        b = indices[i + 1] * 3,
+        c = indices[i + 2] * 3;
+      const ax = p[a] - p[c],
+        az = p[a + 2] - p[c + 2],
+        bx = p[b] - p[c],
+        bz = p[b + 2] - p[c + 2];
+      const det = ax * bz - bx * az;
+      if (Math.abs(det) < 1e-12) continue;
+      const px = x - dx - p[c],
+        pz = z - dz - p[c + 2];
+      const u = (px * bz - pz * bx) / det,
+        v = (ax * pz - az * px) / det;
+      if (u >= -1e-7 && v >= -1e-7 && u + v <= 1.0000001)
+        y = Math.max(
+          y,
+          dy + u * p[a + 1] + v * p[b + 1] + (1 - u - v) * p[c + 1],
+        );
+    }
+  }
+  if (!Number.isFinite(y)) throw new Error('No deck under pin at ' + [x, z]);
+  return [x, y + 0.018, z];
+}
+function fallbackPins(buildings, meshes) {
+  const candidates = buildings
+    .filter((b) => b.visibleRoof.length)
+    .map((b) => {
+      const tri = b.visibleRoof.reduce((a, c) =>
+        turn(...a) > turn(...c) ? a : c,
+      );
+      return [0, 1].map((i) => tri.reduce((n, p) => n + p[i], 0) / 3);
+    });
+  const picks = [candidates.shift()];
+  while (picks.length < 8) {
+    const score = (p) =>
+      Math.min(...picks.map((q) => Math.hypot(...sub(q, p))));
+    const next = candidates.reduce((a, b) => (score(a) > score(b) ? a : b));
+    picks.push(next);
+    candidates.splice(candidates.indexOf(next), 1);
+  }
+  return picks.map((p) => topAt(meshes, p));
+}
+export function segments(dir) {
+  const { areas } = JSON.parse(
+    readFileSync(new URL('./osm-data.json', import.meta.url)),
+  );
+  const anchors = {};
+  for (const [index, [id, , station, code]] of focal.entries()) {
+    const area = areas[id],
+      { centerLat, centerLon, spanMeters } = area,
+      scale = deckSize / spanMeters;
+    const random = rng(700 + index),
+      m = new Model(),
+      s = palette(m);
+    hardware(m, s, code, station);
+    s.facade = m.surface(
+      m.material('Masonry street elevations', { rough: 0.84 }),
+    );
+    m.textures.push({
+      bytes: sashTile,
+      material: s.facade.material,
+      name: 'Miniature window sash',
+    });
+    box(s.city, 0, -0.0035, 0, deckSize, 0.007, deckSize, '#b2b2a6', 0.017);
+    const venues = places
+      .filter((p) => p.stop_id === id)
+      .map((v) => ({
+        id: v.id,
+        p: [
+          (v.lon - centerLon) *
+            111320 *
+            Math.cos((centerLat * Math.PI) / 180) *
+            scale,
+          -(v.lat - centerLat) * 110540 * scale,
+        ],
+      }));
+    const buildings = area.buildings
+      .map((b) => polygon(b, scale, 0.00036))
+      .filter((b) => b && b.area >= 18 * scale * scale);
+    const parks = [
+      ...area.parks,
+      ...area.waters.map((w) => ({ ...w, kind: 'water' })),
+    ]
+      .map((p) => polygon(p, scale, 0.00033))
+      .filter(Boolean);
+    // Trim nested parks and pitches before drawing their shared ground plane.
+    for (const p of parks) {
+      p.height = 0.0015;
+      p.groundPriority = 1 / p.area;
+    }
+    for (const p of exposedShells(parks))
+      roofFaces(
+        s.city,
+        p.visibleRoof,
+        0.0015,
+        p.kind === 'water'
+          ? '#6da4ad'
+          : p.kind === 'pitch'
+            ? '#7cab80'
+            : ['#88a581', '#94af86', '#a2b88c'][p.id % 3],
+      );
+    const roads = area.roads.map((r) => street(s, r, scale));
+    buildings.sort(
+      (a, b) => b.heightM - a.heightM || b.area - a.area || a.id - b.id,
+    );
+    const tallest = buildings[0].heightM;
+    const landmark =
+      /Computing & Data Sciences|Marshall Tower|Fairfield Tower|Shields Tower|George Sherman Union|Brighton Music Hall|88 Food Connection|Green Monster|Vineyard Vines Club|Fenway Farms|Kenmore Tower|Memorial Hall|Memorial Church|Widener Library|Winthrop Center|State Street Financial Center/i;
+    const highlights = new Set();
+    const skyline = [];
+    for (const b of buildings) {
+      if (b.area < 0.0004 || b.area < Math.abs(signedArea(b.ring)) * 0.23)
+        continue;
+      const site = b.roof[0][0];
+      if (skyline.some((p) => Math.hypot(...sub(site, p)) < 0.07)) continue;
+      skyline.push(site);
+      highlights.add(b);
+      if (skyline.length === 6) break;
+    }
+    for (const v of venues) {
+      const nearest = buildings.reduce((best, b) =>
+        distanceTo(b, v.p) < distanceTo(best, v.p) ? b : best,
+      );
+      highlights.add(nearest);
+    }
+    let color = 0;
+    // Reserve facade detail for large, legible street fronts. All eligible footprints keep roofs and walls.
+    const detailed = new Set(
+      buildings
+        .toSorted((a, b) => b.area - a.area)
+        .slice(0, area.buildings.length > 300 ? 15 : 30),
+    );
+    const scaleHeight = (h) => 0.46 * Math.tanh(0.014 * h);
+    for (const b of buildings) {
+      b.hero = highlights.has(b) || landmark.test(b.name ?? '');
+      if (b.hero) b.tint = color++ % 2;
+      b.height =
+        scaleHeight(b.heightM) +
+        Math.max(0, 0.35 - scaleHeight(tallest)) * (b.heightM / tallest) ** 5;
+    }
+    const rendered = exposedShells(buildings);
+    for (const b of rendered) renderBuilding(s, b, detailed.has(b));
+    plant(s, parks, buildings, roads, venues, random, 40);
+    const meshes = m.surfaces.map((surface) => ({
+      ...surface,
+      positions: Float32Array.from(surface.positions),
+    }));
+    const tris = meshes.reduce((n, s) => n + s.indices.length / 3, 0);
+    if (tris >= 35000)
+      throw new Error(id + ' exceeds geometry budget: ' + tris);
     anchors[id] = {
       lcdNode: 'LCD_Screen',
       dialNode: 'Rotary_Dial',
       deckY: 0,
-      pinAnchors: pins,
+      projection: { centerLat, centerLon, spanMeters, deckSize },
+      placeAnchors: Object.fromEntries(
+        venues.map(({ id, p }) => [id, topAt(meshes, p)]),
+      ),
+      pinAnchors: fallbackPins(rendered, meshes),
     };
     m.save(dir + 'segment-' + id + '.glb');
-  });
+    console.log(
+      id,
+      rendered.length + ' OSM building ways',
+      tris + ' triangles',
+      meshes.filter((s) => s.indices.length).length + ' primitives',
+    );
+  }
   json(dir + 'segment-anchors.json', anchors);
 }

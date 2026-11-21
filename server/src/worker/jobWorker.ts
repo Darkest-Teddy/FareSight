@@ -5,8 +5,8 @@ import { basename, extname, resolve } from 'node:path';
 import type { Asset, Vector3 } from '@faresight/shared';
 import type { Config } from '../config.ts';
 import type { JobRecord, Store, Upload } from '../db/database.ts';
+import { downloadAtlasSplat, pollAtlasPose, pollAtlasSplats, submitAtlasPose, submitAtlasSplats, uploadAtlasImage } from '../services/atlasClient.ts';
 import { findDemoAsset } from '../services/demoAssets.ts';
-import { exportMarblePly, marbleModel, pollMarble, submitMarble } from '../services/marbleClient.ts';
 import { downloadFile, ProviderHttpError } from '../services/providerHttp.ts';
 import { convertSplat, measureScale } from '../services/splatProcessor.ts';
 import { pollTrellis, submitTrellis } from '../services/trellisClient.ts';
@@ -51,34 +51,52 @@ async function advance(store: Store, config: Config, initialJob: JobRecord) {
   };
 
   try {
+    if (String(job.provider) === 'marble-1.1') throw new Error('This Marble job used a retired API. Create a new Atlas room job.');
     if (job.status === 'queued') {
       next('generating', 'Generating spatial preview', job.provider === 'demo-sim' ? { provider_task_id: `demo-${job.id}` } : {});
       return;
     }
 
     if (job.status === 'generating') {
-      if (!job.provider_task_id) {
-        if (job.submission_pending) throw new Error(failedSubmission);
-        const beforeSubmit = () => set({ submission_pending: true });
-        const provider_task_id = job.provider === 'marble-1.1'
-          ? await submitMarble(config, inputs(), job.model_tier ?? 'marble-1.1', beforeSubmit)
-          : await submitTrellis(config, inputs()[0], beforeSubmit);
-        set({ provider_task_id, submission_pending: false, progress: 25 });
-        return;
-      }
-
       if (job.provider === 'demo-sim') {
         next('downloading', 'Copying the prebuilt demo splat', { preview_download_pending: job.kind === 'dish' });
         return;
       }
-      if (job.provider === 'marble-1.1') {
-        const world_id = await pollMarble(config, job.provider_task_id);
-        if (!world_id) {
-          set({ progress: 45, status_message: 'Waiting for Marble reconstruction' });
+      if (job.provider === 'atlas-v2') {
+        if (!job.pose_operation_id) {
+          const assetIds = [...(job.atlas_input_asset_ids ?? [])];
+          for (const upload of inputs().slice(assetIds.length)) {
+            assetIds.push(await uploadAtlasImage(config, upload));
+            set({ atlas_input_asset_ids: [...assetIds] });
+          }
+          const pose_operation_id = await submitAtlasPose(config, job.id, assetIds);
+          set({ pose_operation_id, progress: 25, status_message: 'Atlas is estimating camera poses and depth' });
           return;
         }
-        next('downloading', 'Exporting the 100k Gaussian PLY', { world_id });
+        if (!job.posed_frames) {
+          const posed_frames = await pollAtlasPose(config, job.pose_operation_id);
+          set(posed_frames ? { posed_frames, progress: 40, status_message: 'Atlas camera poses and depth are ready' } : {});
+          return;
+        }
+        const refine = job.model_tier === 'atlas-refined';
+        if (!job.provider_task_id) {
+          const provider_task_id = await submitAtlasSplats(config, job.id, job.posed_frames, refine);
+          set({ provider_task_id, progress: 50, status_message: `Atlas is generating the ${refine ? 'refined' : 'draft'} splat` });
+          return;
+        }
+        const atlas_splat = await pollAtlasSplats(config, job.provider_task_id, refine);
+        if (!atlas_splat) {
+          set({}); // Let other jobs advance while Atlas is still running.
+          return;
+        }
+        next('downloading', 'Saving the Atlas SPZ', { atlas_splat });
       } else {
+        if (!job.provider_task_id) {
+          if (job.submission_pending) throw new Error(failedSubmission);
+          const provider_task_id = await submitTrellis(config, inputs()[0], () => set({ submission_pending: true }));
+          set({ provider_task_id, submission_pending: false, progress: 25 });
+          return;
+        }
         const result = await pollTrellis(config, job.provider_task_id);
         if (!result) {
           set({ progress: 45, status_message: 'Waiting for TRELLIS prediction' });
@@ -99,17 +117,16 @@ async function advance(store: Store, config: Config, initialJob: JobRecord) {
         await copyAtomically(source, original);
         set({ original_ply_path: original });
         if (job.kind === 'dish') await useReferencePreview();
-      } else if (job.provider === 'marble-1.1') {
-        if (!job.world_id) {
-          if (!job.provider_task_id) throw new Error('Marble operation ID is missing');
-          const worldId = await pollMarble(config, job.provider_task_id);
-          if (!worldId) return;
-          set({ world_id: worldId });
+      } else if (job.provider === 'atlas-v2') {
+        const spz = resolve(config.outputs, `${job.id}-original.spz`);
+        if (!existsSync(spz)) {
+          if (!job.provider_task_id) throw new Error('Atlas splat operation ID is missing');
+          const atlas_splat = job.atlas_splat ?? await pollAtlasSplats(config, job.provider_task_id, job.model_tier === 'atlas-refined');
+          if (!atlas_splat) return;
+          if (!job.atlas_splat) set({ atlas_splat });
+          await downloadAtlasSplat(config, atlas_splat, spz);
         }
-        const original_ply_path = existsSync(original)
-          ? original
-          : await downloadFile(await exportMarblePly(config, job.world_id!), () => original);
-        set({ original_ply_path });
+        set({ original_spz_path: spz });
       } else {
         if (!job.provider_task_id) throw new Error('Replicate prediction ID is missing');
         const preview = savedPreview();
@@ -129,17 +146,19 @@ async function advance(store: Store, config: Config, initialJob: JobRecord) {
     }
 
     if (job.status === 'converting') {
-      if (!job.original_ply_path) throw new Error('Original PLY checkpoint is missing');
-      const converted = await convertSplat(config, job.id, job.kind, job.original_ply_path);
+      const original = job.original_spz_path ?? job.original_ply_path;
+      if (!original) throw new Error('Original splat checkpoint is missing');
+      const converted = await convertSplat(config, job.id, job.kind, original);
       const scale = measureScale(job.plate_diameter_m, converted.metadata.measured_width);
       const spawn_point: Vector3 | null = job.kind === 'room' ? [0, 1.55, 2] : null;
       const asset: Asset = {
-        id: job.id, kind: job.kind, backend: job.provider === 'marble-1.1' ? marbleModel(job.model_tier) : job.provider,
+        id: job.id, kind: job.kind, backend: job.provider === 'atlas-v2' ? job.model_tier ?? 'atlas-draft' : job.provider,
         provenance: job.provider === 'demo-sim' ? 'demo_splat' : job.kind === 'room' ? 'ai_spatial_preview' : 'trellis_dish_splat',
         provenance_label: job.provider === 'demo-sim' ? 'Demo simulation using a prebuilt splat'
           : job.kind === 'room' ? 'AI spatial preview from restaurant photos' : 'TRELLIS Gaussian splat from a dish photo',
         ...scale, gaussian_count: converted.count, format: converted.format, url: outputUrl(converted.path),
-        original_ply_url: outputUrl(job.original_ply_path),
+        ...(job.original_ply_path ? { original_ply_url: outputUrl(job.original_ply_path) } : {}),
+        ...(job.original_spz_path ? { original_spz_url: outputUrl(job.original_spz_path) } : {}),
         preview_url: job.preview_image_path ? outputUrl(job.preview_image_path) : null,
         thumbnail_url: job.preview_image_path ? outputUrl(job.preview_image_path) : null,
         spawn_point, transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: scale.scale_factor },

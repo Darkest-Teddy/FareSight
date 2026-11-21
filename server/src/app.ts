@@ -40,7 +40,7 @@ export async function createApp(config: Config = getConfig(), options: { logger?
   });
   await app.register(staticFiles, {
     root: config.outputs, prefix: '/storage/outputs/', index: false, redirect: false,
-    decorateReply: false, allowedPath: (path) => !path.endsWith('.part'),
+    decorateReply: false, allowedPath: (path) => !/\.part(?:\.sog)?$/.test(path),
   });
 
   app.get<{ Params: { file: string } }>('/assets-demo/:file', async ({ params }, reply) => {

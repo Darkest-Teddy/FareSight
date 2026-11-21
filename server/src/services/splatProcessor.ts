@@ -1,7 +1,9 @@
 import { execFile } from 'node:child_process';
-import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { createReadStream } from 'node:fs';
+import { open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { extname, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { createGunzip } from 'node:zlib';
 import type { Asset, Vector3 } from '@faresight/shared';
 import type { Config } from '../config.ts';
 
@@ -121,31 +123,38 @@ function splatCli(): Promise<string[] | undefined> {
 }
 
 export async function convertSplat(config: Config, jobId: string, kind: 'room' | 'dish', original: string) {
-  const normalized = resolve(config.outputs, `${jobId}-normalized.ply`);
+  const format: 'spz' | 'ply' = extname(original) === '.spz' ? 'spz' : 'ply';
+  const normalized = format === 'spz' ? original : resolve(config.outputs, `${jobId}-normalized.ply`);
   const limited = resolve(config.outputs, `${jobId}-decimated.ply`);
   const sog = resolve(config.outputs, `${jobId}.sog`);
-  const payload = await readFile(original);
-  const geometry = inspectSplat(payload, kind === 'dish');
-  await writeFile(`${normalized}.part`, payload);
-  await rename(`${normalized}.part`, normalized);
+  const temporary = resolve(config.outputs, `${jobId}.part.sog`);
+  let geometry: { count: number; bounds?: NonNullable<Asset['metadata']>['bounds']; width?: number };
+  if (format === 'spz') {
+    geometry = { count: await readSpzCount(original) };
+  } else {
+    const payload = await readFile(original);
+    geometry = inspectSplat(payload, kind === 'dish');
+    await writeFile(`${normalized}.part`, payload);
+    await rename(`${normalized}.part`, normalized);
+  }
   const target = kind === 'room' ? 100_000 : 60_000;
   const command = await splatCli();
   const decimate = geometry.count > target;
+  // SplatTransform requires .ply output when --decimate is the final action.
   const commands = [
     ...(decimate ? [['--gpu', 'cpu', normalized, '--decimate', String(target), limited]] : []),
-    ['--gpu', 'cpu', decimate ? limited : normalized, sog],
+    ['--gpu', 'cpu', decimate ? limited : normalized, temporary],
   ];
   const executable = command ?? ['splat-transform'];
-  const quote = (value: string) => /^[a-zA-Z0-9_@./-]+$/.test(value) ? value : "'" + value.replaceAll("'", "'\\''") + "'";
   const metadata: NonNullable<Asset['metadata']> = {
     bounds: geometry.bounds, measured_width: geometry.width, target_gaussians: target,
-    splat_transform_command: commands.map((args) => [...executable, ...args].map(quote).join(' ')).join(' && '),
-    conversion_status: 'ply_fallback',
+    splat_transform_command: commands.map((args) => displayCommand([...executable, ...args])).join(' && '),
+    conversion_status: format === 'spz' ? 'spz_fallback' : 'ply_fallback',
   };
   if (command) {
     try {
       const [binary, ...prefix] = command;
-      await rm(sog, { force: true });
+      await rm(temporary, { force: true });
       await rm(limited, { force: true });
       let count = geometry.count;
       if (decimate) {
@@ -153,16 +162,42 @@ export async function convertSplat(config: Config, jobId: string, kind: 'room' |
         count = inspectSplat(await readFile(limited)).count;
       }
       await run(binary, [...prefix, ...commands.at(-1)!], options);
-      if (!(await stat(sog)).size) throw new Error('SplatTransform produced an empty SOG');
+      if (!(await stat(temporary)).size) throw new Error('SplatTransform produced an empty SOG');
+      await rename(temporary, sog);
       metadata.conversion_status = 'compressed';
       return { path: sog, count, format: 'sog' as const, metadata };
     } catch {
-      await rm(sog, { force: true });
+      await rm(temporary, { force: true });
     } finally {
       await rm(limited, { force: true });
     }
   }
-  return { path: normalized, count: geometry.count, format: 'ply' as const, metadata };
+  return { path: normalized, count: geometry.count, format, metadata };
+}
+
+function displayCommand(args: string[]) {
+  return args.map((value) => /^[a-zA-Z0-9_@./-]+$/.test(value) ? value : "'" + value.replaceAll("'", "'\\''") + "'").join(' ');
+}
+
+async function readSpzCount(path: string) {
+  const header = Buffer.alloc(16);
+  const file = await open(path, 'r');
+  let length: number;
+  try {
+    ({ bytesRead: length } = await file.read(header));
+  } finally {
+    await file.close();
+  }
+  if (length >= 2 && header[0] === 0x1f && header[1] === 0x8b) {
+    length = 0;
+    for await (const chunk of createReadStream(path).compose(createGunzip())) {
+      length += (chunk as Buffer).copy(header, length);
+      if (length === header.length) break;
+    }
+  }
+  const count = header.readUInt32LE(8);
+  if (length < header.length || header.toString('ascii', 0, 4) !== 'NGSP' || !count) throw new Error('Invalid SPZ header');
+  return count;
 }
 
 export function measureScale(plateDiameter: number | null | undefined, width: number | undefined) {

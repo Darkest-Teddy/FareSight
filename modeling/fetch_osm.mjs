@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 // Bounding areas centered so every curated place + iconic neighborhood landmark sits cleanly on the 0.856 m cartridge deck.
@@ -12,8 +12,9 @@ const AREAS = [
 
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
-  'https://lz4.overpass-api.de/api/interpreter',
 ];
 
 function bboxFor(area) {
@@ -64,7 +65,7 @@ async function queryOverpass(ql) {
         return json;
       } catch (err) {
         lastError = err;
-        await new Promise((r) => setTimeout(r, 1200));
+        await new Promise((r) => setTimeout(r, 2500 * (attempt + 1)));
       }
     }
   }
@@ -162,12 +163,15 @@ out body geom;
   };
 }
 
-const out = {};
-for (const area of AREAS) {
-  out[area.stopId] = await fetchArea(area);
-  await new Promise((r) => setTimeout(r, 700));
-}
-
 const outPath = fileURLToPath(new URL('./osm-data.json', import.meta.url));
-writeFileSync(outPath, JSON.stringify({ fetchedAt: new Date().toISOString(), attribution: 'OpenStreetMap contributors (ODbL)', areas: out }));
+const out = existsSync(outPath) ? (JSON.parse(readFileSync(outPath, 'utf8')).areas ?? {}) : {};
+for (const area of AREAS) {
+  if (out[area.stopId]?.buildings?.length) {
+    console.log(`${area.stopId} (${area.name}): cached (${out[area.stopId].buildings.length} buildings)`);
+    continue;
+  }
+  out[area.stopId] = await fetchArea(area);
+  writeFileSync(outPath, JSON.stringify({ fetchedAt: new Date().toISOString(), attribution: 'OpenStreetMap contributors (ODbL)', areas: out }));
+  await new Promise((r) => setTimeout(r, 2500));
+}
 console.log('Saved real OSM dataset to ' + outPath);

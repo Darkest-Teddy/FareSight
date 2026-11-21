@@ -4,10 +4,19 @@ import { CanvasPanel3D, CanvasSurface } from './CanvasPanel3D';
 import { amber, assetBase, child, clamp, cyan, damp, fetchAssetJson, material, shape, target,
   type DebugLog, type HitTarget, type ModelLibrary, type XYZ } from './sceneSupport';
 
+interface SegmentProjection {
+  centerLat: number;
+  centerLon: number;
+  spanMeters: number;
+  deckSize: number;
+}
+
 interface SegmentAnchor {
   lcdNode: string;
   dialNode: string;
   deckY: number;
+  projection?: SegmentProjection;
+  placeAnchors?: Record<string, XYZ>;
   pinAnchors: XYZ[];
 }
 
@@ -15,11 +24,11 @@ interface Pin {
   place: XRPlaceData;
   root: pc.Entity;
   panel: CanvasPanel3D;
+  stem: pc.Entity;
   surface: pc.StandardMaterial;
   targets: HitTarget[];
   index: number;
   matched: boolean;
-  height: number;
   opacity: number;
 }
 
@@ -30,12 +39,25 @@ interface Telemetry {
 
 const oneWayFare = 2.4;
 const startAngle = 125;
+const nearbyPinDistance = 0.15;
+const labelClearance = 0.105;
+const labelTierSpacing = 0.20;
 const defaultFilters: XRFilterSummary = { craving: '', maxBudget: 20, startStopId: '', groupSize: 1, familyVisit: false };
+
+function projectToDeck(proj: SegmentProjection, lat?: number, lon?: number): [number, number] | undefined {
+  if (lat === undefined || lon === undefined || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  const scale = proj.deckSize / proj.spanMeters;
+  const dxMeters = (lon - proj.centerLon) * 111320 * Math.cos((proj.centerLat * Math.PI) / 180);
+  const dzMeters = -(lat - proj.centerLat) * 110540;
+  const limit = proj.deckSize * 0.48;
+  return [clamp(dxMeters * scale, -limit, limit), clamp(dzMeters * scale, -limit, limit)];
+}
 
 export class StationDioramaScene {
   readonly root: pc.Entity;
   private base: pc.Entity;
-  private pinRoot: pc.Entity;
+  private deckContent: pc.Entity;
+  private stationRing: pc.Entity;
   private fallback: pc.Entity;
   private fallbackDial: pc.Entity;
   private dial?: pc.Entity;
@@ -64,7 +86,7 @@ export class StationDioramaScene {
   ) {
     this.root = child(parent, 'Station diorama');
     this.base = child(this.root, 'Station deck');
-    this.pinRoot = child(this.base, 'Venue pins');
+    this.deckContent = child(this.base, 'Station segment and markers');
     this.fallback = child(this.base, 'Station model fallback');
     this.lcd = new CanvasSurface(device, 512, 256, false);
 
@@ -72,7 +94,10 @@ export class StationDioramaScene {
     const deck = material('#21405c', 0.22);
     const trim = material('#da6fc7', 0.38);
     const glass = material('#3f7d98', 0.20);
-    this.materials.push(plinth, deck, trim, glass);
+    const ring = material(cyan, 0.46, 0.68);
+    this.materials.push(plinth, deck, trim, glass, ring);
+    this.stationRing = shape(this.deckContent, 'T-station marker ring', 'torus', ring, [0, 0, 0], [0.068, 0.011, 0.068]);
+    this.stationRing.enabled = false;
     shape(this.fallback, 'Pedestal', 'box', plinth, [0, -0.09, 0], [0.90, 0.18, 0.9]);
     shape(this.fallback, 'Deck', 'box', deck, [0, -0.008, 0], [0.91, 0.016, 0.91]);
     shape(this.fallback, 'Pedestal trim', 'box', trim, [0, -0.146, 0], [0.912, 0.006, 0.913]);
@@ -97,7 +122,7 @@ export class StationDioramaScene {
       if (!data || !this.alive) return;
       this.anchors = data;
       if (this.model) this.bindModel(this.model);
-      this.positionPins();
+      this.positionMarkers();
     });
   }
 
@@ -108,6 +133,7 @@ export class StationDioramaScene {
     this.model?.destroy();
     this.model = undefined;
     this.dial = undefined;
+    this.deckContent.setLocalPosition(0, 0, 0);
     this.fallback.enabled = true;
     this.rise = -0.20;
     this.base.setLocalPosition(0, this.rise, 0);
@@ -124,8 +150,8 @@ export class StationDioramaScene {
     if (!resource || revision !== this.revision) return;
     this.model = resource.instantiateRenderEntity();
     this.modelRise = -0.065;
-    this.model.setLocalPosition(0, this.modelRise, 0);
-    this.base.addChild(this.model);
+    this.deckContent.setLocalPosition(0, this.modelRise, 0);
+    this.deckContent.addChild(this.model);
     this.bindModel(this.model);
     this.fallback.enabled = false;
   }
@@ -208,15 +234,14 @@ export class StationDioramaScene {
       let pin = previous.get(place.id);
       if (pin) previous.delete(place.id);
       else {
-        const root = child(this.pinRoot, place.name);
+        const root = child(this.deckContent, place.name);
         const panel = new CanvasPanel3D(this.device, root, place.name, 0.225, 0.075);
-        panel.entity.setLocalPosition(0, 0.082, 0);
         const surface = material(cyan, 0.52, 0.99);
-        shape(root, 'Pin stem', 'cylinder', surface, [0, -0.015, 0], [0.009, 0.16, 0.009]);
-        shape(root, 'Pin tip', 'sphere', surface, [0, 0.052, 0], [0.022, 0.022, 0.022]);
+        const stem = shape(root, 'Pin stem', 'cylinder', surface, [0, 0, 0], [0.006, 1, 0.006]);
+        shape(root, 'Pin tip', 'sphere', surface, [0, 0, 0], [0.022, 0.022, 0.022]);
         const select = () => this.selectPlace(place.id);
-        pin = { place, root, panel, surface, targets: [panel.hit(select), target(root, [0.054, 0.10, 0.054], select)],
-          index, matched: false, height: -0.055, opacity: 0.28 };
+        pin = { place, root, panel, stem, surface, targets: [panel.hit(select), target(root, [0.054, 0.054, 0.054], select)],
+          index, matched: false, opacity: 0.28 };
       }
       pin.place = place;
       pin.index = place.pin_index ?? index;
@@ -224,17 +249,43 @@ export class StationDioramaScene {
       return pin;
     });
     for (const pin of previous.values()) this.destroyPin(pin);
-    this.positionPins();
+    this.positionMarkers();
     this.updatePinLabels();
   }
 
-  private positionPins(): void {
-    const anchor = this.stop && this.anchors[this.stop.stop_id];
-    this.pins.forEach((pin) => {
-      const position = anchor?.pinAnchors[pin.index] ??
-        [(pin.index % 3 - 1) * 0.25, 0.11, Math.floor(pin.index / 3) * 0.23 - 0.08];
-      pin.root.setLocalPosition(position[0], position[1] + pin.height, position[2]);
-    });
+  private positionMarkers(): void {
+    const stop = this.stop;
+    const anchor = stop && this.anchors[stop.stop_id];
+    const projection = anchor?.projection;
+    const deckY = anchor?.deckY ?? 0;
+    const station = projection && projectToDeck(projection, stop?.lat, stop?.lon);
+    this.stationRing.enabled = !!station;
+    if (station) this.stationRing.setLocalPosition(station[0], deckY + 0.006, station[1]);
+
+    const placements = this.pins.map((pin) => {
+      const exact = anchor?.placeAnchors?.[pin.place.id];
+      const projected = !exact && projection && projectToDeck(projection, pin.place.lat, pin.place.lon);
+      const position: XYZ = exact ?? (projected ? [projected[0], deckY + 0.08, projected[1]]
+        : anchor?.pinAnchors?.[pin.index] ?? [(pin.index % 3 - 1) * 0.25, 0.11, Math.floor(pin.index / 3) * 0.23 - 0.08]);
+      return { pin, position };
+    }).sort((a, b) => a.position[1] - b.position[1] || a.pin.index - b.pin.index);
+
+    const labels: { x: number; y: number; z: number }[] = [];
+    for (const { pin, position: [x, baseY, z] } of placements) {
+      const nearbyHeights = labels.filter((label) => Math.hypot(x - label.x, z - label.z) <= nearbyPinDistance)
+        .map((label) => label.y).sort((a, b) => a - b);
+      let labelY = baseY + labelClearance;
+      for (const height of nearbyHeights) {
+        if (Math.abs(labelY - height) < labelTierSpacing) labelY = height + labelTierSpacing;
+      }
+      labels.push({ x, y: labelY, z });
+
+      const stemHeight = labelY - baseY;
+      pin.root.setLocalPosition(x, baseY, z);
+      pin.panel.entity.setLocalPosition(0, stemHeight, 0);
+      pin.stem.setLocalPosition(0, stemHeight / 2, 0);
+      pin.stem.setLocalScale(0.006, stemHeight, 0.006);
+    }
   }
 
   private updatePinLabels(): void {
@@ -259,7 +310,7 @@ export class StationDioramaScene {
     this.base.setLocalPosition(0, this.rise, 0);
     if (this.model && this.modelRise !== 0) {
       this.modelRise = Math.min(0, this.modelRise * (1 - damp(dt, 8)) + 0.0002);
-      this.model.setLocalPosition(0, this.modelRise, 0);
+      this.deckContent.setLocalPosition(0, this.modelRise, 0);
     }
     const targetAngle = startAngle - clamp((this.filters.maxBudget - 8) / 52, 0, 1) * 250;
     this.dialAngle = pc.math.lerp(this.dialAngle, targetAngle, damp(dt, 9));
@@ -270,13 +321,11 @@ export class StationDioramaScene {
     }
 
     for (const pin of this.pins) {
-      pin.height = pc.math.lerp(pin.height, pin.matched ? 0.085 : -0.055, damp(dt, 8));
       pin.opacity = pc.math.lerp(pin.opacity, pin.matched ? 1 : 0.29, damp(dt, 10));
       pin.surface.opacity = pin.opacity * 0.99;
       pin.panel.setOpacity(pin.opacity);
+      pin.panel.face(camera);
     }
-    this.positionPins();
-    for (const pin of this.pins) pin.panel.face(camera);
   }
 
   private destroyPin(pin: Pin): void {

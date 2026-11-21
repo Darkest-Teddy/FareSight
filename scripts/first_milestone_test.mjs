@@ -9,14 +9,16 @@ import { crc32, deflateSync } from 'node:zlib';
 const defaultOrigin = 'http://localhost:3001';
 const defaultPlace = 'bu-ramen-01';
 const geminiModel = 'gemini-4-hydrogen';
-const marbleTier = 'marble-1.1';
+const draftTier = 'atlas-draft';
+const spzPrefixes = [Buffer.from('NG'), Buffer.from('1f8b', 'hex')];
 const stages = ['queued', 'generating', 'downloading', 'converting', 'needs_review'];
 const mimeTypes = new Map([
   ['.jpg', 'image/jpeg'], ['.jpeg', 'image/jpeg'], ['.png', 'image/png'], ['.webp', 'image/webp'],
 ]);
 const usage = `Usage: node scripts/first_milestone_test.mjs [--base-url ${defaultOrigin}]
   [--place ${defaultPlace}] [--dish-name "First Milestone Ramen"] [--plate-cm 24]
-  [--passcode <ADMIN_PASSCODE>] --room <path1> [path2 ... path8] --dish <path>
+  [--passcode <ADMIN_PASSCODE>] [--room-tier atlas-draft|atlas-refined]
+  --room <path1> <path2> [path3 ... path32] --dish <path>
   or use --demo in place of the photo flags.`;
 
 function parseOptions(args) {
@@ -24,6 +26,7 @@ function parseOptions(args) {
   const keys = new Map([
     ['--base-url', 'origin'], ['--place', 'place'], ['--dish-name', 'dishName'],
     ['--plate-cm', 'plateCm'], ['--dish', 'dishPath'], ['--passcode', 'passcode'],
+    ['--room-tier', 'roomTier'],
   ]);
   for (let index = 0; index < args.length; index++) {
     const flag = args[index];
@@ -46,6 +49,7 @@ function parseOptions(args) {
   assert(['http:', 'https:'].includes(url.protocol) && !url.username && !url.password
     && url.pathname === '/' && !url.search && !url.hash, '--base-url must be an HTTP(S) origin');
   options.origin = url.origin;
+  if (options.roomTier !== undefined) assert([draftTier, 'atlas-refined'].includes(options.roomTier), 'Use atlas-draft or atlas-refined with --room-tier');
   options.dishName = options.dishName.trim();
   assert(options.dishName.length > 0 && options.dishName.length <= 120, '--dish-name must contain 1–120 characters');
   if (options.plateCm !== undefined) {
@@ -54,7 +58,7 @@ function parseOptions(args) {
     options.plateDiameter = cm / 100;
   }
   if (!options.demo) {
-    assert(options.roomPaths.length >= 1 && options.roomPaths.length <= 8, 'Provide 1–8 room photos with --room');
+    assert(options.roomPaths.length >= 2 && options.roomPaths.length <= 32, 'Provide 2–32 overlapping room photos with --room');
     assert(options.dishPath, 'Provide one dish photo with --dish');
   } else {
     assert(!options.roomPaths.length && !options.dishPath, '--demo supplies its own room and dish photos');
@@ -117,7 +121,7 @@ export async function withDemoServer(passcode, run) {
       host: '127.0.0.1', port: 0, mode: 'demo', adminPasscode: passcode,
       database: join(directory, 'data', 'faresight.db'),
       uploads: join(directory, 'storage', 'uploads'), outputs: join(directory, 'storage', 'outputs'),
-      geminiKey: undefined, marbleKey: undefined, replicateKey: undefined, mbtaKey: undefined,
+      geminiKey: undefined, atlasKey: undefined, replicateKey: undefined, mbtaKey: undefined,
     });
     const origin = await app.listen({ host: '127.0.0.1', port: 0 });
     return await run(origin);
@@ -159,15 +163,16 @@ export function assertSpawnPoint(point) {
 
 export async function servedFileSize(origin, path, magic) {
   assert(typeof path === 'string' && path.startsWith('/') && !path.startsWith('//'), `Invalid asset URL: ${path}`);
+  const prefixes = [magic].flat();
   const response = await fetch(origin + path, {
-    headers: { range: `bytes=0-${magic.length - 1}` }, redirect: 'error', signal: AbortSignal.timeout(10_000),
+    headers: { range: `bytes=0-${prefixes[0].length - 1}` }, redirect: 'error', signal: AbortSignal.timeout(10_000),
   });
   if (response.status !== 206) {
     await response.body?.cancel();
     assert.fail(`GET ${path} expected HTTP 206 for the asset header, got ${response.status}`);
   }
   const bytes = Buffer.from(await response.arrayBuffer());
-  assert.deepEqual(bytes, magic, `GET ${path} returned an invalid asset header`);
+  assert(prefixes.some((prefix) => prefix.equals(bytes)), `GET ${path} returned an invalid asset header`);
   const range = response.headers.get('content-range');
   const count = Number(range?.match(/^bytes 0-\d+\/(\d+)$/)?.[1]);
   assert(Number.isSafeInteger(count) && count > bytes.length, `GET ${path} returned an invalid asset size: ${range}`);
@@ -196,6 +201,9 @@ async function waitForReview(request, jobs, demo) {
       if (job.provider_task_id && job.provider_task_id !== previous.provider_task_id) {
         console.log(`  ${job.kind} provider task ${job.provider_task_id}`);
       }
+      if (job.pose_operation_id && job.pose_operation_id !== previous.pose_operation_id) {
+        console.log(`  ${job.kind} Atlas pose operation ${job.pose_operation_id}`);
+      }
       assert.notEqual(job.status, 'failed', `${job.kind} job ${job.id} failed: ${job.error ?? job.status_message}`);
       const stageDistance = stages.indexOf(job.status) - stages.indexOf(previous.status);
       assert(stageDistance >= 0, `${job.kind} moved backwards or reached an unexpected status: ${job.status}`);
@@ -207,7 +215,7 @@ async function waitForReview(request, jobs, demo) {
 }
 
 export async function runMilestone({ origin, passcode, place = defaultPlace, dishName = 'First Milestone Ramen',
-  plateDiameter, demo, roomPhotos, dishPhoto }) {
+  plateDiameter, demo, roomTier = draftTier, roomPhotos, dishPhoto }) {
   const request = apiClient(origin, passcode);
   const apiPlace = `/api/restaurants/${encodeURIComponent(place)}`;
   async function upload(photo) {
@@ -245,8 +253,10 @@ export async function runMilestone({ origin, passcode, place = defaultPlace, dis
   }
   assert.equal(intake.used_model, demo ? 'manual-heuristic-fallback' : geminiModel,
     `Expected ${demo ? 'demo selection' : geminiModel}, got ${intake.used_model}`);
-  const selectedRooms = intake.recommended_room_upload_ids.filter((id) => roomIds.has(id));
-  assert(selectedRooms.length >= 1 && selectedRooms.length <= 8, 'Intake did not recommend any of the supplied room photos');
+  const recommendedRooms = intake.recommended_room_upload_ids.filter((id) => roomIds.has(id));
+  if (recommendedRooms.length < 2) console.log('  Using explicitly supplied room photos because intake suggested fewer than two.');
+  const selectedRooms = recommendedRooms.length >= 2 ? recommendedRooms : [...roomIds];
+  assert(selectedRooms.length >= 2 && selectedRooms.length <= 32, 'Atlas requires 2–32 distinct overlapping room photos');
   if (intake.recommended_dish_upload_id !== dish.id) console.log(`  Using explicitly supplied dish photo ${dish.inputName}`);
   console.log(`  Selected room photos: ${selectedRooms.map((id) => uploads.get(id).inputName).join(', ')}`);
 
@@ -262,8 +272,8 @@ export async function runMilestone({ origin, passcode, place = defaultPlace, dis
     assert.deepEqual(job.input_upload_ids, uploadIds, `${kind} job ${job.id} selected different uploads`);
     return job;
   }
-  const roomJob = await submit('room', selectedRooms, { model_tier: marbleTier }, marbleTier);
-  assert.equal(roomJob.model_tier, marbleTier);
+  const roomJob = await submit('room', selectedRooms, { model_tier: roomTier }, 'atlas-v2');
+  assert.equal(roomJob.model_tier, roomTier);
   const dishJob = await submit('dish', [dish.id], { dish_name: dishName, plate_diameter_m: plateDiameter }, 'trellis-replicate');
   assert.notEqual(roomJob.id, dishJob.id, 'Room and dish must have independent jobs');
 
@@ -271,6 +281,8 @@ export async function runMilestone({ origin, passcode, place = defaultPlace, dis
   const jobs = await waitForReview(request, [roomJob, dishJob], demo);
   const assets = await Promise.all(jobs.map(async (job) => {
     assert(job.provider_task_id && job.asset_id, `${job.kind} review job is missing its provider task or asset ID`);
+    const atlas = job.provider === 'atlas-v2';
+    if (atlas) assert(job.pose_operation_id, 'Atlas room is missing its pose operation ID');
     const asset = await request(`/api/assets/${job.asset_id}`);
     assert.equal(asset.id, job.asset_id);
     assert.equal(asset.kind, job.kind);
@@ -279,26 +291,29 @@ export async function runMilestone({ origin, passcode, place = defaultPlace, dis
     assert(asset.scale_label && Number.isFinite(asset.scale_factor) && asset.scale_factor > 0, `${job.kind} is missing valid scale metadata`);
     assert.equal(asset.transform?.scale, asset.scale_factor, `${job.kind} transform scale is inconsistent`);
     assert.deepEqual(asset.source_photos, job.input_upload_ids.map((id) => uploads.get(id).url));
-    assert(['sog', 'ply'].includes(asset.format), `PlayCanvas cannot load reported format ${asset.format}`);
-    assert.equal(asset.metadata?.conversion_status, asset.format === 'sog' ? 'compressed' : 'ply_fallback');
+    assert(['sog', atlas ? 'spz' : 'ply'].includes(asset.format), `PlayCanvas cannot load reported format ${asset.format}`);
+    assert.equal(asset.metadata?.conversion_status, asset.format === 'sog' ? 'compressed' : `${asset.format}_fallback`);
     if (job.kind === 'dish' && plateDiameter !== undefined) {
       assert.equal(asset.plate_diameter_m, plateDiameter);
       assert.equal(asset.scale_status, 'measured');
       assert.equal(asset.scale_factor, plateDiameter / asset.metadata.measured_width);
     }
-    const original = job.original_ply_path;
+    const original = atlas ? job.original_spz_path : job.original_ply_path;
+    const originalUrl = atlas ? asset.original_spz_url : asset.original_ply_url;
+    const originalMagic = atlas ? spzPrefixes : Buffer.from('ply');
     const converted = job.converted_asset_path;
-    assert(original && converted && original !== converted, `${job.kind} must retain a separate original PLY`);
-    assert.equal(asset.original_ply_url, `/storage/outputs/${basename(original)}`);
+    assert(original && converted, `${job.kind} is missing a splat file`);
+    if (asset.format !== 'spz') assert.notEqual(original, converted, `${job.kind} must retain a separate original`);
+    assert.equal(originalUrl, `/storage/outputs/${basename(original)}`);
     assert.equal(asset.url, `/storage/outputs/${basename(converted)}`);
-    assert.equal(extname(original), '.ply');
+    assert.equal(extname(original), atlas ? '.spz' : '.ply');
     assert.equal(extname(converted), `.${asset.format}`);
     const [originalBytes, convertedBytes] = await Promise.all([
-      servedFileSize(origin, asset.original_ply_url, Buffer.from('ply')),
-      servedFileSize(origin, asset.url, asset.format === 'sog' ? Buffer.from('504b0304', 'hex') : Buffer.from('ply')),
+      servedFileSize(origin, originalUrl, originalMagic),
+      servedFileSize(origin, asset.url, asset.format === 'sog' ? Buffer.from('504b0304', 'hex') : originalMagic),
     ]);
     console.log(`  ${job.kind}: ${asset.gaussian_count.toLocaleString('en-US')} Gaussians · ${asset.scale_label}`);
-    console.log(`    Original PLY ${original} (${originalBytes} bytes)`);
+    console.log(`    Original ${extname(original).slice(1).toUpperCase()} ${original} (${originalBytes} bytes)`);
     console.log(`    Converted ${asset.format.toUpperCase()} ${converted} (${convertedBytes} bytes, ${asset.metadata.conversion_status})`);
     return asset;
   }));
