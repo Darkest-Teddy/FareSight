@@ -105,9 +105,9 @@ function storefront() {
 }
 // Modern towers: a unitised curtain wall with spandrel panels at each slab.
 function curtainWall() {
-  const t = new Tile().fill('#55697a');
-  t.rect(0, 0, 1, 0.5, '#7b93a6', 0.55);
-  t.rect(0, 0.74, 1, 1, '#aeb6ba');
+  const t = new Tile().fill('#5f7b92');
+  t.rect(0, 0, 1, 0.5, '#8ba5b8', 0.55);
+  t.rect(0, 0.74, 1, 1, '#a3b1bb');
   t.rect(0, 0.72, 1, 0.75, '#e8ebec');
   t.rect(0, 0.985, 1, 1, '#e8ebec');
   for (const u of [0, 0.5]) t.rect(u, 0, u + 0.035, 1, '#e8ebec');

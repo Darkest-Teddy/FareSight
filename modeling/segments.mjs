@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { places } from '../server/src/db/seed.ts';
 import {
   Model,
@@ -17,10 +17,10 @@ import {
 } from './geometry.mjs';
 import { focal, json } from './transit.mjs';
 import { island, palette } from './segment-island.mjs';
+import { TAU } from './geometry.mjs';
 import { FACADES, facadeTexture } from './facades.mjs';
 
 const deckSize = 0.856;
-const edge = 0.424;
 const to3 = ([x, z], y) => [x, y, z];
 const turn = (a, b, p) =>
   (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
@@ -103,29 +103,85 @@ function triangulate(ring) {
   if (turn(...active.map((i) => ring[i])) > 1e-14) triangles.push(active);
   return triangles.map((tri) => tri.map((i) => ring[i]));
 }
+// The city is cropped to a convex, slightly irregular outline rather than a square, so its edge
+// reads as a natural shoreline. Set per station by setOutline().
+let outline = [];
+let outlineEdges = [];
+function setOutline(points) {
+  outline = points;
+  outlineEdges = points.map((a, i) => {
+    const b = points[(i + 1) % points.length];
+    return { a, b, sign: Math.sign(turn(a, b, [0, 0])), length: Math.hypot(b[0] - a[0], b[1] - a[1]) };
+  });
+}
+// Signed distance to the outline: positive inside.
+const depthInside = (p) =>
+  Math.min(...outlineEdges.map(({ a, b, sign, length }) => (sign * turn(a, b, p)) / length));
+// Where the ray from the deck centre through `angle` leaves the outline.
+export function outlineRadius(angle) {
+  const d = [Math.cos(angle), Math.sin(angle)];
+  let best = Infinity;
+  for (const { a, b } of outlineEdges) {
+    const e = [b[0] - a[0], b[1] - a[1]],
+      det = d[0] * e[1] - d[1] * e[0];
+    if (Math.abs(det) < 1e-12) continue;
+    const t = (a[0] * e[1] - a[1] * e[0]) / det,
+      u = (a[0] * d[1] - a[1] * d[0]) / det;
+    if (t > 0 && u >= -1e-9 && u <= 1 + 1e-9) best = Math.min(best, t);
+  }
+  return best;
+}
 // Clip convex pieces independently so a concave polygon can leave two separate islands.
 function clip(poly) {
-  for (const axis of [0, 1])
-    for (const sign of [-1, 1]) {
-      if (!poly.length) return poly;
-      const output = [];
-      let a = poly.at(-1);
-      for (const b of poly) {
-        const insideA = sign * a[axis] <= edge,
-          insideB = sign * b[axis] <= edge;
-        if (insideA !== insideB) {
-          const p = mix(a, b, (sign * edge - a[axis]) / (b[axis] - a[axis]));
-          p[axis] = sign * edge;
-          output.push(p);
-        }
-        if (insideB) output.push(b);
-        a = b;
-      }
-      poly = output;
+  for (const { a: p0, b: p1, sign } of outlineEdges) {
+    if (!poly.length) return poly;
+    const output = [];
+    let a = poly.at(-1),
+      da = sign * turn(p0, p1, a);
+    for (const b of poly) {
+      const db = sign * turn(p0, p1, b);
+      if (da >= 0 !== db >= 0) output.push(mix(a, b, da / (da - db)));
+      if (db >= 0) output.push(b);
+      a = b;
+      da = db;
     }
+    poly = output;
+  }
   return poly;
 }
-const inBounds = (p) => p.every((v) => Math.abs(v) <= edge);
+const inBounds = (p) => depthInside(p) >= 0;
+// True when a wall lies along the crop line, i.e. it is a section through a clipped building.
+const onOutline = (a, b) =>
+  outlineEdges.some(
+    ({ a: p0, b: p1, length }) =>
+      Math.abs(turn(p0, p1, a)) / length < 1e-7 && Math.abs(turn(p0, p1, b)) / length < 1e-7,
+  );
+function convexHull(points) {
+  const pts = points.toSorted((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const half = (list) => {
+    const out = [];
+    for (const p of list) {
+      while (out.length >= 2 && turn(out.at(-2), out.at(-1), p) <= 0) out.pop();
+      out.push(p);
+    }
+    return out.slice(0, -1);
+  };
+  return [...half(pts), ...half(pts.toReversed())];
+}
+// A rounded, gently lopsided shoreline that stays within the surveyed crop.
+function shoreline(random) {
+  const waves = [2, 3, 5].map((k) => [k, random() * TAU, 0.5 + random() * 0.5]);
+  const count = 44;
+  return convexHull(
+    Array.from({ length: count }, (_, i) => {
+      const a = (i * TAU) / count,
+        squircle = 1 / (Math.abs(Math.cos(a)) ** 3 + Math.abs(Math.sin(a)) ** 3) ** (1 / 3),
+        noise = waves.reduce((n, [k, phase, gain]) => n + gain * Math.sin(k * a + phase), 0) / 2.2;
+      const r = Math.min(0.404 * squircle * (0.955 + 0.045 * noise), 0.418 / Math.max(Math.abs(Math.cos(a)), Math.abs(Math.sin(a))));
+      return [r * Math.cos(a), r * Math.sin(a)];
+    }),
+  );
+}
 function polygon(feature, scale, tolerance) {
   const raw = feature.ring.map((p) => p.map((v) => v * scale));
   let ring = simplify(raw, tolerance, true);
@@ -301,9 +357,12 @@ function exposedShells(buildings) {
 const VERTICAL = 1.3;
 const LEVEL_M = 3.2;
 const GROUND_Y = 0.00255;
-// Venues inside this half-extent sit on the deck; the rest become markers on the turf rim.
-export const VENUE_RANGE = 0.4;
-const RIM = 0.4328;
+// Venues at least this far inside the shoreline sit on the deck; the rest become rim markers.
+export const VENUE_INSET = 0.012;
+const VENUE_LIMIT = 0.4; // venues this close to the deck centre are always on the island
+const PLOT_LIMIT = 0.432; // furthest a kept building may reach from the deck centre
+const PLOT_PAD = 0.004;
+const RIM_OFFSET = 0.007; // rim markers stand on the turf just outside the city's edge
 const compress = (h) => (h <= 90 ? h : 90 + (h - 90) * 0.55);
 
 const FAMILY = {
@@ -325,10 +384,12 @@ const PALETTE = {
   retail: ['#cbc4b6', '#b8ad9d', '#a69d91', '#a86d58', '#c9b79c'],
   institutional: ['#d1c8b6', '#bfb7a8', '#aa6550', '#d8d2c6', '#b97a62'],
   utility: ['#a9a69e', '#b7b2a7', '#9c9a94', '#aea491'],
-  tower: ['#ffffff', '#e4edf2', '#f3ede2', '#d7e2ea'],
+  // Towers are a soft blue-grey glass that sits with the masonry around them.
+  tower: ['#ffffff', '#e4edf2', '#eef1f4', '#d7e2ea'],
 };
 const FLAT_ROOFS = ['#77756f', '#8a877f', '#6c6f73', '#a39d90'];
 const PITCHED_ROOFS = ['#5f5b57', '#6e5f54', '#585d63', '#7a6a5c'];
+const GROUND_COLOR = '#c3bdad';
 const NAMED_COLOURS = {
   white: '#e8e5dd',
   grey: '#a9a8a4',
@@ -533,7 +594,7 @@ function renderBuilding(s, b, pins, scale) {
   for (const [a, end, base] of b.visibleWalls) {
     const lengthM = Math.hypot(...sub(a, end)) / scale;
     if (lengthM < 1e-4) continue;
-    const atEdge = a.some((n, j) => Math.abs(Math.abs(n) - edge) < 1e-8 && Math.abs(n - end[j]) < 1e-8);
+    const atEdge = onOutline(a, end);
     const top = y - cornice;
     if (!b.facade || atEdge || lengthM < 2.2 || top - base < storeyY * 0.45) {
       wall(s.city, a, end, base, y, atEdge ? shade(b.finish, 0.7) : tint(base), atEdge ? shade(b.finish, 0.7) : tint(y));
@@ -565,7 +626,9 @@ function renderBuilding(s, b, pins, scale) {
   }
 }
 
+const LEAVES = ['#719c74', '#7da67a', '#68936d'];
 function tree(s, [x, z], h, pine, simple) {
+  const leaf = LEAVES[Math.floor((Math.abs(x * 7919 + z * 104729) * 1000) % LEAVES.length)];
   rod(s.city, [x, 0.0015, z], [x, h * 0.58, z], h * 0.045, '#826b51', simple ? 3 : 5);
   if (pine) {
     for (let i = 0; i < (simple ? 2 : 3); i++) {
@@ -577,7 +640,7 @@ function tree(s, [x, z], h, pine, simple) {
         face(s.city, [ring[k], tip, ring[(k + 1) % 6]], ['#317365', '#438e6b', '#6aa573'][i]);
     }
   } else {
-    ellipsoid(s.city, [x, h * 0.66, z], [h * 0.3, h * 0.33, h * 0.28], '#719c74', simple ? 6 : 7, simple ? 3 : 4);
+    ellipsoid(s.city, [x, h * 0.66, z], [h * 0.3, h * 0.33, h * 0.28], leaf, simple ? 6 : 7, simple ? 3 : 4);
     if (!simple)
       ellipsoid(s.city, [x + h * 0.1, h * 0.8, z], [h * 0.19, h * 0.22, h * 0.18], '#94b67a', 6, 3);
   }
@@ -590,7 +653,7 @@ function distanceTo(b, p) {
 function plant(s, area, parks, buildings, roads, venues, random, scale, limit) {
   const trees = [];
   const blocked = (p, r, roadClear) =>
-    p.some((n) => Math.abs(n) + r > edge) ||
+    depthInside(p) < r ||
     buildings.some((b) => distanceTo(b, p) < r * 0.5) ||
     venues.some((q) => Math.hypot(...sub(q, p)) < r + 0.004) ||
     trees.some((q) => Math.hypot(...sub(q, p)) < r * 1.2) ||
@@ -793,22 +856,77 @@ export function segments(dir, only) {
     const random = rng(700 + index),
       m = new Model(),
       s = palette(m);
-    island(s, 9100 + index);
-    s.facades = {};
-    for (const [kind, { label }] of Object.entries(FACADES)) {
-      const material = m.material(label, { rough: kind === 'curtain' ? 0.38 : 0.86, metal: kind === 'curtain' ? 0.25 : 0 });
-      s.facades[kind] = m.surface(material);
-      m.textures.push({ bytes: facadeTexture(kind), material, name: label });
-    }
-    box(s.city, 0, -0.0035, 0, deckSize, 0.007, deckSize, '#c3bdad', 0.017);
-
     const toDeck = (lat, lon) => [
       (lon - centerLon) * 111320 * Math.cos((centerLat * Math.PI) / 180) * scale,
       -(lat - centerLat) * 110540 * scale,
     ];
     const stationAt = toDeck(...stops[stationName]);
     const all = places.filter((p) => p.stop_id === id).map((v) => ({ id: v.id, p: toDeck(v.lat, v.lon) }));
-    const venues = all.filter((v) => v.p.every((n) => Math.abs(n) <= VENUE_RANGE));
+    // Grow the shoreline around any building it would cut, so footprints are never sliced.
+    // The shoreline also reaches out to every venue inside the surveyed crop.
+    const reach = all
+      .map((v) => v.p)
+      .concat([stationAt])
+      .filter((p) => Math.max(Math.abs(p[0]), Math.abs(p[1])) <= VENUE_LIMIT)
+      .flatMap((p) => circle(p[0], 0, p[1], VENUE_INSET + 0.012, 8).map(([x, , z]) => [x, z]));
+    const base = convexHull([...shoreline(rng(4200 + index)), ...reach]);
+    const rings = area.buildings.map((b) => b.ring.map((p) => p.map((n) => n * scale)));
+    const crossing = (ring) => {
+      const inside = ring.filter((p) => depthInside(p) >= 0).length;
+      return inside > 0 && inside < ring.length;
+    };
+    const whole = new Set();
+    setOutline(base);
+    for (let pass = 0; pass < 8; pass++) {
+      let grew = false;
+      for (const [i, ring] of rings.entries()) {
+        if (whole.has(i) || !crossing(ring)) continue;
+        const c = [0, 1].map((k) => ring.reduce((n, p) => n + p[k], 0) / ring.length);
+        // Only buildings centred on the island that fit inside the surveyed crop are taken in.
+        if (depthInside(c) < 0 || ring.some((p) => Math.max(Math.abs(p[0]), Math.abs(p[1])) > PLOT_LIMIT)) continue;
+        whole.add(i);
+        grew = true;
+      }
+      if (!grew) break;
+      const padded = [...whole].flatMap((i) => {
+        const ring = rings[i],
+          c = [0, 1].map((k) => ring.reduce((n, p) => n + p[k], 0) / ring.length);
+        return ring.map((p) => {
+          const d = Math.hypot(p[0] - c[0], p[1] - c[1]) || 1;
+          return p.map((n, k) => n + ((n - c[k]) / d) * PLOT_PAD);
+        });
+      });
+      setOutline(convexHull([...base, ...padded]));
+    }
+    // A building centred beyond the edge is left out whole. One centred on the island but too
+    // large for the surveyed crop (a stadium, a campus block) has to end at the edge.
+    let trimmed = 0;
+    const kept = area.buildings.filter((_, i) => {
+      if (!crossing(rings[i])) return true;
+      const c = [0, 1].map((k) => rings[i].reduce((n, p) => n + p[k], 0) / rings[i].length);
+      if (depthInside(c) < 0) return false;
+      trimmed++;
+      return true;
+    });
+    island(s, 9100 + index, outline, outlineRadius);
+    s.facades = {};
+    for (const [kind, { label }] of Object.entries(FACADES)) {
+      const material = m.material(label, { rough: kind === 'curtain' ? 0.38 : 0.86, metal: kind === 'curtain' ? 0.25 : 0 });
+      s.facades[kind] = m.surface(material);
+      m.textures.push({ bytes: facadeTexture(kind), material, name: label });
+    }
+    // The ground plate follows the shoreline; the island's turf meets it edge to edge.
+    for (let i = 0; i < outline.length; i++)
+      face(
+        s.city,
+        outlineEdges[i].sign > 0
+          ? [[0, 0, 0], to3(outline[(i + 1) % outline.length], 0), to3(outline[i], 0)]
+          : [[0, 0, 0], to3(outline[i], 0), to3(outline[(i + 1) % outline.length], 0)],
+        GROUND_COLOR,
+      );
+
+    const venues = all.filter((v) => depthInside(v.p) >= VENUE_INSET);
+    if (depthInside(stationAt) < VENUE_INSET) throw new Error(id + ' station falls outside the shoreline');
     const venuePoints = venues.map((v) => v.p);
 
     // Ground cover: parks, water and surface car parks share one trimmed layer.
@@ -856,7 +974,7 @@ export function segments(dir, only) {
       for (const [a, end] of slab.walls) wall(s.city, a, end, 0.0015, y, '#b9b5ab', '#b9b5ab');
     }
 
-    let buildings = area.buildings
+    let buildings = kept
       .map((b) => polygon(b, scale, 0.00036))
       .filter((b) => b && b.area >= 12 * scale * scale);
     // Where OSM models a building as parts, the parts replace its overall outline.
@@ -891,11 +1009,12 @@ export function segments(dir, only) {
     // Venues beyond the crop are pinned to the turf rim on their bearing from the deck centre.
     const offDeck = {};
     for (const v of all.filter((v) => !venues.includes(v))) {
-      const reach = RIM / Math.max(...v.p.map(Math.abs));
+      const bearing = Math.atan2(v.p[1], v.p[0]);
+      const reach = (outlineRadius(bearing) + RIM_OFFSET) / Math.hypot(...v.p);
       const east = (v.p[0] - stationAt[0]) / scale,
         south = (v.p[1] - stationAt[1]) / scale;
       offDeck[v.id] = {
-        position: [v.p[0] * reach, 0.018, v.p[1] * reach],
+        position: topAt(meshes, [v.p[0] * reach, v.p[1] * reach]),
         distanceM: Math.round(Math.hypot(east, south) / 10) * 10,
         compass: COMPASS[(Math.round(Math.atan2(south, east) / (Math.PI / 4)) + 8) % 8],
       };
@@ -914,10 +1033,12 @@ export function segments(dir, only) {
       rendered.length + ' buildings (' + surveyed + ' with surveyed heights)',
       treeCount + ' trees',
       venues.length + '/' + all.length + ' venues on deck',
+      trimmed + ' oversize buildings end at the edge',
       tris + ' triangles',
       meshes.filter((s) => s.indices.length).length + ' primitives',
     );
   }
-  if (only) return;
-  json(dir + 'segment-anchors.json', anchors);
+  // A partial rebuild keeps the other stations' existing anchors.
+  const file = dir + 'segment-anchors.json';
+  json(file, only && existsSync(file) ? { ...JSON.parse(readFileSync(file)), ...anchors } : anchors);
 }

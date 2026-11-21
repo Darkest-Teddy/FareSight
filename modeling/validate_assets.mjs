@@ -354,7 +354,7 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
   // The city floats on an island: a turf rim inside the 0.9 m footprint and a rock wedge below.
   for (const k of [0, 2])
     assert.ok(bounds.min[k] >= -0.4500001 && bounds.max[k] <= 0.4500001, id + ' footprint ' + reportBounds(bounds));
-  assert.ok(bounds.min[1] >= -0.3400001 && bounds.min[1] <= -0.22, id + ' island depth ' + reportBounds(bounds));
+  assert.ok(bounds.min[1] >= -0.4500001 && bounds.min[1] <= -0.3, id + ' island depth ' + reportBounds(bounds));
   // Building heights are true to scale, so a low-rise neighbourhood stays low.
   assert.ok(bounds.max[1] >= 0.03 && bounds.max[1] <= 0.62);
   assert.ok(!('lcdNode' in s) && !('dialNode' in s), id + ' stale hardware anchors');
@@ -369,13 +369,6 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
     islandTris += part.indices.length / 3;
   }
   assert.ok(islandTris <= 2500, id + ' island triangles ' + islandTris);
-  // Off-deck markers stand on the turf rim, which is flat at deck level all the way round.
-  for (let i = 0; i < 720; i++) {
-    const angle = (i * Math.PI) / 360,
-      reach = 1 / Math.max(Math.abs(Math.cos(angle)), Math.abs(Math.sin(angle)));
-    for (const half of [0.4245, 0.4328, 0.437])
-      approx(topAt(meshes, half * reach * Math.cos(angle), half * reach * Math.sin(angle)), 0, 1e-7, id + ' turf rim');
-  }
   const { centerLat, centerLon, spanMeters, buildings } = areas[id];
   assert.deepEqual(s.projection, {
     centerLat,
@@ -388,25 +381,22 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
     (place.lon - centerLon) * 111320 * Math.cos((centerLat * Math.PI) / 180) * scale,
     (centerLat - place.lat) * 110540 * scale,
   ];
-  // Venues within 0.4 m of the deck centre are modelled in place; the rest are markers on the turf rim.
+  // The shoreline is organic, so the generator decides which venues are modelled in place and
+  // which become markers on the turf rim. Every venue must be exactly one of the two, and any
+  // venue within 0.4 m of the deck centre must be on the island.
   const allPlaces = places.filter((place) => place.stop_id === id);
-  const stopPlaces = allPlaces.filter((place) =>
-    deckPoint(place).every((n) => Math.abs(n) <= 0.4),
-  );
-  const farPlaces = allPlaces.filter((place) => !stopPlaces.includes(place));
-  assert.deepEqual(
-    Object.keys(s.placeAnchors).sort(),
-    stopPlaces.map((p) => p.id).sort(),
-  );
-  assert.deepEqual(
-    Object.keys(s.offDeck).sort(),
-    farPlaces.map((p) => p.id).sort(),
-  );
+  const stopPlaces = allPlaces.filter((place) => place.id in s.placeAnchors);
+  const farPlaces = allPlaces.filter((place) => place.id in s.offDeck);
+  assert.equal(stopPlaces.length + farPlaces.length, allPlaces.length);
+  assert.equal(Object.keys(s.placeAnchors).length + Object.keys(s.offDeck).length, allPlaces.length);
+  const turf = new Map([['turf', meshes.get('Island turf')]]);
   for (const place of farPlaces) {
     const { position, distanceM, compass } = s.offDeck[place.id];
     const [x, z] = deckPoint(place);
-    approx(Math.max(Math.abs(position[0]), Math.abs(position[2])), 0.4328, 1e-9);
+    assert.ok(Math.max(Math.abs(x), Math.abs(z)) > 0.4, place.id + ' should be on the island');
+    assert.ok(Math.hypot(position[0], position[2]) < Math.hypot(x, z), place.id + ' marker beyond venue');
     approx(position[0] * z, position[2] * x, 1e-9, place.id + ' bearing');
+    approx(topAt(turf, position[0], position[2]), 0, 1e-7, place.id + ' marker off the turf rim');
     approx(position[1], topAt(meshes, position[0], position[2]) + 0.018, 2e-7);
     assert.ok(distanceM >= 100 && /^(N|NE|E|SE|S|SW|W|NW)$/.test(compass));
     offDeckCount++;
@@ -426,11 +416,11 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
         id + ' emissive building',
       );
     }
-    // Above deck level there is only the city, plus at most tiny turf tufts outside the plate.
+    // Above deck level there is only the city, inside the furthest reach of the shoreline.
     for (let i = 0; i < p.length; i += 3) {
       const y = p[i + 1] + offset[1],
         reach = Math.max(Math.abs(p[i] + offset[0]), Math.abs(p[i + 2] + offset[2]));
-      if (y > 1e-7) assert.ok(reach <= 0.4240001 || (reach > 0.428 && y <= 0.004), id + ' city crosses the rim');
+      if (y > 1e-7) assert.ok(reach <= 0.437, id + ' city crosses the rim');
     }
   }
   for (const place of stopPlaces) {

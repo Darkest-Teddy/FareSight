@@ -1,12 +1,7 @@
 import { face, mix, rgb, rng, TAU } from './geometry.mjs';
 
-// The deck plate the city stands on: a chamfered square the turf has to meet exactly.
-const DECK = 0.428,
-  CHAMFER = 0.017;
-// The turf rim is flat at y = 0 out to at least RIM_MIN; the shoreline wobbles between the two.
-const RIM_MIN = 0.4372,
-  RIM_MAX = 0.4472;
-const SOIL_DEPTH = 0.03;
+const BOUND = 0.45; // nothing may reach beyond this half-extent in x or z
+const DEPTH = 0.385; // how far the rock hangs below the deck
 
 export function palette(m) {
   const b = (name, opts) => m.surface(m.material(name, opts));
@@ -26,7 +21,6 @@ const tone = (a, b, t, gain = 1) =>
         .padStart(2, '0'),
     )
     .join('');
-const square = (a) => 1 / Math.max(Math.abs(Math.cos(a)), Math.abs(Math.sin(a)));
 const polar = (a, r, y, c = [0, 0]) => [c[0] + r * Math.cos(a), y, c[1] + r * Math.sin(a)];
 
 // Joins two rings of different vertex counts. Both run in increasing angle, upper ring first.
@@ -47,140 +41,132 @@ function stitch(s, upper, lower, paint) {
   }
 }
 
-// A floating chunk of land: flat turf rim around the deck, a ragged grass skirt, and a faceted
-// wedge of earth and rock tapering to an off-centre point with a few fragments adrift below it.
-export function island(s, seed) {
+// A floating chunk of land under the city: a turf margin that follows the city's shoreline, a
+// ragged grass skirt, and a slim, craggy wedge of earth and rock with a few fragments below the tip.
+// `outline` is the city's convex shoreline (XZ points); `radiusAt(angle)` measures it from the centre.
+export function island(s, seed, outline, radiusAt) {
   const random = rng(seed);
   for (let i = 0; i < 8; i++) random();
   const between = (lo, hi) => lo + (hi - lo) * random();
-  const waves = [2, 3, 5, 7].map((k) => [k, between(0, TAU), between(0.5, 1)]);
+
+  const waves = [3, 5, 8].map((k) => [k, between(0, TAU), between(0.5, 1)]);
   const wobble = (a) => {
     const n = waves.reduce((n, [k, phase, gain]) => n + gain * Math.sin(k * a + phase), 0);
-    return Math.min(1, Math.max(0, 0.5 + n / 3.2));
+    return Math.min(1, Math.max(0, 0.5 + n / 3.4));
   };
-
-  // Shoreline angles include the deck plate's corners and the diagonals, so the turf meets the
-  // plate edge to edge and the rim never dips inside RIM_MIN.
-  const corner = Math.atan2(DECK - CHAMFER, DECK);
-  const fixed = [0, 1, 2, 3].flatMap((q) =>
-    [corner, Math.PI / 4, Math.PI / 2 - corner].map((a) => a + (q * Math.PI) / 2),
-  );
-  const count = 60;
-  const angles = Array.from({ length: count }, (_, i) => ((i + between(0.3, 0.7)) * TAU) / count)
-    .filter((a) => fixed.every((f) => Math.abs(a - f) > 0.045))
-    .concat(fixed)
-    .sort((a, b) => a - b);
-  const shore = angles.map((a) => polar(a, (RIM_MIN + (RIM_MAX - RIM_MIN) * wobble(a)) * square(a), 0));
-  const plate = angles.map((a) =>
-    polar(a, Math.min(DECK * square(a), (2 * DECK - CHAMFER) / (Math.abs(Math.cos(a)) + Math.abs(Math.sin(a)))), 0),
-  );
-  const n = angles.length;
-
-  const grass = '#84ab68';
-  // A sliver of turf tucked under the plate edge closes any hairline between plate and rim.
+  // The turf margin is 1.2-3.2 cm wide and never crosses the model bound.
+  const shoreRadius = (a) =>
+    Math.min(radiusAt(a) + 0.012 + 0.02 * wobble(a), BOUND / Math.max(Math.abs(Math.cos(a)), Math.abs(Math.sin(a))));
+  // Shoreline vertices share the outline's own angles, so turf meets the ground plate exactly.
+  const inner = outline
+    .map((p) => ({ a: (Math.atan2(p[1], p[0]) + TAU) % TAU, p: [p[0], 0, p[1]] }))
+    .sort((u, v) => u.a - v.a);
+  const rim = inner.map(({ a }) => ({ a, p: polar(a, shoreRadius(a), 0) }));
+  const n = rim.length;
+  const greens = ['#84ab68', '#7aa35e', '#6f9a55', '#76a05a'];
+  const green = () => greens[Math.floor(random() * greens.length)];
   for (let i = 0; i < n; i++) {
-    const k = (i + 1) % n,
-      under = (p, f) => [p[0] * f, -0.0012, p[2] * f];
-    face(s.turf, [under(plate[i], 0.985), under(plate[k], 0.985), under(plate[k], 1.012), under(plate[i], 1.012)], grass);
-    face(s.turf, [plate[i], plate[k], shore[k], shore[i]], grass);
+    const k = (i + 1) % n;
+    face(s.turf, [inner[i].p, inner[k].p, rim[k].p, rim[i].p], greens[0]);
   }
-
-  // The skirt lies just proud of the soil band beneath the rim and ends in uneven teeth.
+  // The grass skirt hangs over the cliff edge and ends in uneven teeth.
   const drape = (p, depth) => {
-    const f = 1 - (0.015 * depth) / SOIL_DEPTH;
+    const f = 1 - 0.3 * depth;
     return [p[0] * f, -depth, p[2] * f];
   };
-  const blades = ['#7aa35e', '#6f9a55', '#648e4c', '#76a05a'];
-  const hem = shore.map((p) => drape(p, between(0.008, 0.015)));
+  const hem = rim.map(({ p }) => drape(p, between(0.009, 0.016)));
   for (let i = 0; i < n; i++) {
     const k = (i + 1) % n,
-      tip = drape(mix(shore[i], shore[k], between(0.35, 0.65)), between(0.017, 0.025));
-    const pick = () => blades[Math.floor(random() * blades.length)];
-    face(s.turf, [shore[i], tip, hem[i]], pick());
-    face(s.turf, [shore[i], shore[k], tip], pick());
-    face(s.turf, [shore[k], hem[k], tip], pick());
+      tip = drape(mix(rim[i].p, rim[k].p, between(0.35, 0.65)), between(0.02, 0.03));
+    face(s.turf, [rim[i].p, tip, hem[i]], green());
+    face(s.turf, [rim[i].p, rim[k].p, tip], green());
+    face(s.turf, [rim[k].p, hem[k], tip], green());
   }
 
-  // Earth: a soil band under the turf, then irregular rings shrinking toward the apex.
-  const bottom = between(-0.316, -0.302);
-  const lean = between(0, TAU),
-    reach = between(0.07, 0.11);
-  const apex = [reach * Math.cos(lean), reach * Math.sin(lean)];
-  const centre = (y) => apex.map((v) => v * (y / bottom) ** 1.4);
-  const soilTop = shore.map((p, i) => ({ a: angles[i], p: [p[0] * 0.995, -0.0004, p[2] * 0.995] })),
-    soilBase = shore.map((p, i) => ({ a: angles[i], p: [p[0] * 0.98, -SOIL_DEPTH, p[2] * 0.98] }));
-  // Rings that reuse the angles of the one above keep its buttresses, so cliffs read as columns.
-  const ring = (y, scale, points, yJitter, rJitter, above) =>
-    Array.from({ length: above?.length ?? points }, (_, i) => {
-      const a = above ? above[i].a : ((i + between(0.25, 0.75)) * TAU) / points,
-        swell = above ? above[i].swell : between(-1, 1),
-        h = 0.44 * scale,
-        round = Math.min(1, Math.max(0, (y / bottom - 0.3) * 1.6)),
-        level = y + between(-yJitter, yJitter);
-      const r =
-        h * square(a) ** (1 - round) * (1 + 0.1 * round * round) * (1 + rJitter * (0.65 * swell + between(-0.35, 0.35)));
-      const p = polar(a, r, level, centre(level)),
-        over = Math.max(Math.abs(p[0]), Math.abs(p[2])) / 0.44;
-      return { a, swell, p: over > 1 ? [p[0] / over, level, p[2] / over] : p };
+  const bottom = -DEPTH;
+  const apex = [between(-0.015, 0.015), between(-0.015, 0.015)];
+  const centre = (y) => apex.map((v) => v * (y / bottom) ** 1.5);
+  // Fraction of the shoreline radius left at depth t (0 at the deck, 1 at the tip): a slim cone
+  // that narrows quickly under the crust.
+  const taper = (t) => (1 - t ** 0.92) ** 1.05;
+  // Crags: each ring gets its own run of outcrops and notches around the circumference.
+  const crags = (points) => {
+    const phase = between(0, TAU),
+      lobes = 3 + Math.floor(random() * 3);
+    return (a) => 0.5 * Math.sin(lobes * a + phase) + (random() < 0.3 ? between(0.5, 1) : between(-0.6, 0.3));
+  };
+  const ring = (t, points, yJitter, rJitter) => {
+    const crag = crags(points);
+    return Array.from({ length: points }, (_, i) => {
+      const a = ((i + between(0.2, 0.8)) * TAU) / points,
+        y = bottom * t + between(-yJitter, yJitter),
+        r = shoreRadius(a) * taper(t) * (1 + rJitter * crag(a));
+      return { a, p: polar(a, Math.min(r, shoreRadius(a) * 0.975), y, centre(y)) };
     });
+  };
   // An undercut pulls the ring above it inward and down, leaving a shelf of rock overhanging.
   const undercut = (above, pull, drop) =>
     above.map(({ a, p }) => {
-      const y = p[1] - between(drop * 0.6, drop * 1.3),
+      const y = p[1] - between(drop * 0.5, drop * 1.5),
         c = centre(y),
-        f = pull * between(0.94, 1.06);
+        f = pull * between(0.9, 1.06);
       return { a, p: [c[0] + (p[0] - c[0]) * f, y, c[1] + (p[2] - c[1]) * f] };
     });
-  const depth = bottom / -0.31;
-  const r1 = ring(-0.07 * depth, 0.945, 24, 0.008, 0.03),
-    r2 = ring(-0.14 * depth, 0.83, 24, 0.012, 0.07, r1),
-    u2 = undercut(r2, 0.9, 0.012),
-    r3 = ring(-0.21 * depth, 0.55, 16, 0.012, 0.09),
-    u3 = undercut(r3, 0.86, 0.01),
-    r4 = ring(-0.265 * depth, 0.28, 10, 0.008, 0.1),
-    r5 = ring(-0.295 * depth, 0.09, 6, 0.003, 0.12);
+  // A thin crust of soil directly under the streets, then seven craggy tiers.
+  const crust = rim.map(({ a, p }) => {
+    const f = between(0.95, 0.975);
+    return { a, p: [p[0] * f, -between(0.014, 0.024), p[2] * f] };
+  });
+  const r1 = ring(0.13, 34, 0.012, 0.07),
+    u1 = undercut(r1, 0.93, 0.012),
+    r2 = ring(0.28, 30, 0.014, 0.11),
+    r3 = ring(0.42, 26, 0.014, 0.13),
+    u3 = undercut(r3, 0.88, 0.014),
+    r4 = ring(0.56, 20, 0.013, 0.15),
+    r5 = ring(0.7, 15, 0.012, 0.17),
+    u5 = undercut(r5, 0.85, 0.012),
+    r6 = ring(0.83, 10, 0.01, 0.18),
+    r7 = ring(0.93, 6, 0.005, 0.15);
 
-  const ledges = [between(0, TAU), between(0, TAU)];
-  const near = (a, b, width) => Math.abs(((a - b + TAU * 1.5) % TAU) - Math.PI) < width;
   const paint = (kind) => (a, b, c) => {
-    const y = (a[1] + b[1] + c[1]) / 3,
-      t = y / bottom,
-      gain = between(0.9, 1.1);
-    if (kind === 'soil') return tone('#6b4a33', '#5c3f2c', random(), gain);
-    if (kind === 'under') return tone('#4d3427', '#33231d', t, gain);
-    const angle = (Math.atan2((a[2] + b[2] + c[2]) / 3, (a[0] + b[0] + c[0]) / 3) + TAU) % TAU;
-    if ((kind === 'shelf2' && near(angle, ledges[0], 0.85)) || (kind === 'shelf3' && near(angle, ledges[1], 1.1)))
-      return tone('#a89a86', '#8f8272', random(), gain);
-    return tone('#8c6344', '#4a3126', t ** 0.85, gain);
+    const t = (a[1] + b[1] + c[1]) / 3 / bottom,
+      gain = between(0.86, 1.14);
+    if (kind === 'soil') return tone('#7a5236', '#69442e', random(), gain);
+    if (kind === 'under') return tone('#4e3426', '#34231c', t, gain);
+    if (kind === 'stone' || random() < 0.12) return tone('#b08a5c', '#8c6a48', random(), gain);
+    return tone('#96693f', '#523626', t ** 0.9, gain);
   };
   const bands = [
-    [soilTop, soilBase, 'soil'],
-    [soilBase, r1, 'earth'],
-    [r1, r2, 'shelf2'],
-    [r2, u2, 'under'],
-    [u2, r3, 'shelf3'],
+    [rim, crust, 'soil'],
+    [crust, r1, 'earth'],
+    [r1, u1, 'under'],
+    [u1, r2, 'earth'],
+    [r2, r3, 'stone'],
     [r3, u3, 'under'],
     [u3, r4, 'earth'],
     [r4, r5, 'earth'],
+    [r5, u5, 'under'],
+    [u5, r6, 'stone'],
+    [r6, r7, 'earth'],
   ];
   for (const [upper, lower, kind] of bands) stitch(s.earth, upper, lower, paint(kind));
-  const tipY = bottom,
-    tip = [...centre(tipY)];
+  const tip = [...centre(bottom)];
   const cap = paint('earth');
-  for (let i = 0; i < r5.length; i++) {
-    const a = r5[i].p,
-      b = r5[(i + 1) % r5.length].p,
-      c = [tip[0], tipY, tip[1]];
+  for (let i = 0; i < r7.length; i++) {
+    const a = r7[i].p,
+      b = r7[(i + 1) % r7.length].p,
+      c = [tip[0], bottom, tip[1]];
     face(s.earth, [a, b, c], cap(a, b, c));
   }
 
-  // Fragments drifting below the point, all above y = -0.34.
+  // Fragments drift below the tip, spaced evenly around it and clear of the rock.
   const signs = [-1, 1];
+  const start = between(0, TAU);
   for (let i = 0; i < 5; i++) {
-    const a = lean + between(-1.3, 1.3) + (i % 2 ? Math.PI : 0),
-      out = between(0.05, 0.2),
-      r = between(0.009, 0.016) * (i === 0 ? 1.6 : 1),
-      y = Math.max(bottom + 0.42 * out - between(0.048, 0.07), -0.336 + r * 1.35);
+    const a = start + (i * TAU) / 5 + between(-0.4, 0.4),
+      out = between(0.03, 0.08),
+      r = between(0.007, 0.013) * (i === 0 ? 1.5 : 1),
+      y = bottom - between(0.012, 0.035);
     const at = [tip[0] + out * Math.cos(a), y, tip[1] + out * Math.sin(a)];
     const axis = (k, sign) => at.map((v, j) => v + (j === k ? sign * r * between(0.6, 1.3) : r * between(-0.45, 0.45)));
     const x = signs.map((sign) => axis(0, sign)),
@@ -191,7 +177,7 @@ export function island(s, seed) {
         for (const k of [0, 1]) {
           const pts = [x[i], v[j], z[k]];
           if ((i + j + k) % 2 === 0) pts.reverse();
-          face(s.earth, pts, random() < 0.35 ? tone('#9f907d', '#6a5f56', random()) : tone('#7a553b', '#49322a', random()));
+          face(s.earth, pts, random() < 0.35 ? tone('#b08a5c', '#75685c', random()) : tone('#8a5f3d', '#553828', random()));
         }
   }
 }
