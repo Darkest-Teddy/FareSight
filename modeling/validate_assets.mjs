@@ -338,6 +338,7 @@ function inFootprint(x, z, ring) {
   }
   return inside;
 }
+let movedCount = 0;
 let venueCount = 0,
   offDeckCount = 0,
   roofCount = 0;
@@ -439,11 +440,18 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
     const east =
       (place.lon - centerLon) * 111320 * Math.cos((centerLat * Math.PI) / 180);
     const south = (centerLat - place.lat) * 110540;
-    approx(x, east * scale, 1e-9, place.id + ' X');
-    approx(z, south * scale, 1e-9, place.id + ' Z');
+    // A pin stands at its surveyed coordinate. The one exception is a door point mapped on the
+    // pavement, which may move at most 17.5 m, and only to stand inside a building footprint.
+    const moved = Math.hypot(x / scale - east, z / scale - south);
+    if (moved > 1e-6) {
+      assert.ok(moved <= 17.5, place.id + ' moved ' + moved.toFixed(1) + ' m from its coordinate');
+      assert.ok(!buildings.some((b) => inFootprint(east, south, b.ring)), place.id + ' moved off its own building');
+      assert.ok(buildings.some((b) => inFootprint(x / scale, z / scale, b.ring)), place.id + ' moved outside a footprint');
+      movedCount++;
+    }
     const top = topAt(meshes, x, z);
     approx(y, top + 0.018, 2e-7, place.id + ' surface clearance');
-    if (buildings.some((b) => inFootprint(east, south, b.ring))) {
+    if (buildings.some((b) => inFootprint(x / scale, z / scale, b.ring))) {
       assert.ok(top > 0.005, place.id + ' missing roof');
       approx(
         topAt(roofs, x, z),
@@ -495,7 +503,7 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
 assert.equal(venueCount + offDeckCount, 28);
 console.log(
   venueCount +
-    ' exact venue coordinates, ' +
+    ' venue pins (' + movedCount + ' door points moved onto their building), ' +
     roofCount +
     ' on surveyed roofs and ' +
     (venueCount - roofCount) +

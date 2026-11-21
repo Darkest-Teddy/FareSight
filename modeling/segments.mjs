@@ -362,6 +362,7 @@ export const VENUE_INSET = 0.012;
 const VENUE_LIMIT = 0.4; // venues this close to the deck centre are always on the island
 const PLOT_LIMIT = 0.432; // furthest a kept building may reach from the deck centre
 const PLOT_PAD = 0.004;
+const STATION_DISC = 0.021; // clearance radius kept under the station medallion
 const RIM_OFFSET = 0.007; // rim markers stand on the turf just outside the city's edge
 const compress = (h) => (h <= 90 ? h : 90 + (h - 90) * 0.55);
 
@@ -462,7 +463,9 @@ function classify(b, scale) {
   const box = orientedBox(b.ring);
   const tagged = b.heightM ?? (b.levels ? b.levels * LEVEL_M + 1 : null);
   let heightM =
-    tagged ?? (LOW_UTILITY.test(b.kind) ? 3 : b.kind === 'parking' ? 9 : DEFAULT_HEIGHT[family]);
+    tagged ??
+    // An unsurveyed station building is a street-level headhouse over an underground station.
+    (LOW_UTILITY.test(b.kind) ? 3 : b.kind === 'train_station' ? 5 : b.kind === 'parking' ? 9 : DEFAULT_HEIGHT[family]);
   heightM = Math.max(heightM, 2.4);
 
   const pitchedTag = /^(gabled|hipped|pyramidal|gambrel|half-hipped|saltbox|mansard)$/.test(b.roofShape ?? '');
@@ -775,25 +778,119 @@ function ribbon(s, source, scale, widthM, y, color) {
 const isFoot = (road) => /^(footway|path|cycleway|pedestrian)$/.test(road.kind);
 function roadWidth(road) {
   const table = ROAD_WIDTH[road.kind] ?? 6;
-  return Math.min(
-    22,
-    road.widthM ?? (road.lanes && !isFoot(road) ? Math.max(table * 0.8, road.lanes * 3.4 + 2.4) : table),
-  );
+  const lanes = road.lanes && !isFoot(road) ? Math.max(table * 0.8, road.lanes * 3.4 + 2.4) : table;
+  // Many Boston widths are surveyed in feet but tagged without a unit. A width far beyond what
+  // the lane count allows is read as feet, and ignored if it is still implausible.
+  let tagged = road.widthM;
+  if (tagged && tagged > lanes * 1.5) tagged *= 0.3048;
+  if (tagged && (tagged > lanes * 1.5 || tagged < lanes * 0.45)) tagged = null;
+  return Math.min(22, tagged ?? lanes);
 }
+// Every way is drawn flat on the plate, so the network stays connected end to end. Crossings at
+// different levels are told apart by stacking: a bridge lies a millimetre above what it crosses
+// on a pale deck, and a road tunnel shows as a darker band beneath the streets over it.
+const roadColor = (road) =>
+  road.tunnel === 'yes'
+    ? '#3d4048'
+    : isFoot(road)
+      ? '#e2dbc9'
+      : road.major
+        ? '#484c56'
+        : road.kind === 'service'
+          ? '#777a82'
+          : '#5b5f69';
+const roadY = (road) =>
+  (isFoot(road) ? 0.00184 : road.major ? 0.0024 : 0.0021) + (road.lift ?? 0) - (road.tunnel === 'yes' ? 0.00035 : 0);
+const hasSidewalk = (road) =>
+  road.tunnel !== 'yes' && (road.bridge || !(isFoot(road) || road.kind === 'service' || road.kind === 'motorway'));
+const sidewalkWidth = (road) => roadWidth(road) + (isFoot(road) ? 1.2 : road.kind === 'motorway' ? 2.4 : 5);
 function sidewalk(s, road, scale) {
-  if (isFoot(road) || road.kind === 'service' || road.kind === 'motorway') return;
-  ribbon(s, road.points, scale, roadWidth(road) + 5, 0.0017, '#dcd7cb');
+  if (hasSidewalk(road)) ribbon(s, road.points, scale, sidewalkWidth(road), 0.0017 + (road.lift ?? 0), '#dcd7cb');
 }
 function street(s, road, scale) {
   const foot = isFoot(road);
   const widthM = roadWidth(road);
-  const y = foot ? 0.00184 : road.major ? 0.0024 : 0.0021;
-  const color = foot ? '#e2dbc9' : road.major ? '#484c56' : road.kind === 'service' ? '#777a82' : '#5b5f69';
-  const out = ribbon(s, road.points, scale, widthM, y, color);
+  const out = ribbon(s, road.points, scale, widthM, roadY(road), roadColor(road));
   // Two-way arterials carry a painted centre line.
-  if (road.major && !road.oneway && widthM >= 9)
-    ribbon(s, road.points, scale, 0.45, 0.0025, '#e6c65c');
+  if (road.major && !road.oneway && widthM >= 9 && road.tunnel !== 'yes')
+    ribbon(s, road.points, scale, 0.45, 0.0025 + (road.lift ?? 0), '#e6c65c');
   return { ...out, foot, kind: road.kind };
+}
+// A round joint at each end of a carriageway closes the notch where two ways meet at an angle.
+function roadJoints(s, roads, scale) {
+  const done = new Set();
+  const disc = (p, radius, y, color) => {
+    const key = [p[0], p[1], radius.toFixed(6), y.toFixed(6), color].join(',');
+    if (done.has(key) || depthInside(p) < radius) return;
+    done.add(key);
+    face(s.city, circle(p[0], y, p[1], radius, 10).reverse(), color);
+  };
+  for (const road of roads) {
+    if (isFoot(road) || road.points.length < 2) continue;
+    for (const end of [road.points[0], road.points.at(-1)]) {
+      const p = end.map((n) => n * scale);
+      if (hasSidewalk(road) && !road.bridge) disc(p, (sidewalkWidth(road) * scale) / 2, 0.0017 + (road.lift ?? 0), '#dcd7cb');
+      disc(p, (roadWidth(road) * scale) / 2, roadY(road), roadColor(road));
+    }
+  }
+}
+// ---- Grade separation ------------------------------------------------------------------------
+// Roads and rails become one list of ways. A bridge is lifted a millimetre per level so it lies
+// over what it crosses; subway tunnels are left out; buildings are never altered.
+function gradeWays(area) {
+  const ways = [
+    ...area.roads.map((r) => ({ ...r, width: roadWidth(r), foot: isFoot(r) })),
+    ...(area.rails ?? []).map((r) => ({ ...r, rail: true, width: 3, foot: false })),
+  ];
+  for (const w of ways) {
+    w.hidden = w.rail && w.tunnel === 'yes';
+    w.lift = w.bridge && !w.hidden ? 0.001 * Math.max(1, w.layer || 1) : 0;
+  }
+  return ways;
+}
+// A road that runs on beneath a building shows as a dark archway where it meets the wall.
+function archways(s, ways, buildings, scale) {
+  let count = 0;
+  for (const w of ways) {
+    if (w.rail || w.bridge) continue;
+    const pts = w.points.map((p) => p.map((n) => n * scale));
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1],
+        c = pts[i],
+        length = Math.hypot(...sub(c, a));
+      if (length < 1e-9) continue;
+      const dir = sub(c, a).map((n) => n / length),
+        bounds = boundsOf([a, c]);
+      for (const b of buildings) {
+        if (!overlaps(bounds, b.bounds)) continue;
+        for (const [u, v, base] of b.visibleWalls) {
+          if (base > GROUND_Y + 1e-6) continue;
+          const d0 = turn(u, v, a),
+            d1 = turn(u, v, c);
+          if (d0 * d1 >= 0 || turn(a, c, u) * turn(a, c, v) >= 0) continue;
+          const x = mix(a, c, d0 / (d0 - d1));
+          // Only where the road really carries on under the building, not where it clips a corner.
+          const reach = (m) => contains(b.ring, x.map((n, k) => n + dir[k] * m * scale));
+          if (!((reach(2) && reach(7)) || (reach(-2) && reach(-7)))) continue;
+          const wallLength = Math.hypot(...sub(v, u)),
+            along = sub(v, u).map((n) => n / wallLength),
+            out = [along[1], -along[0]];
+          const t = Math.hypot(...sub(x, u)),
+            half = Math.min((w.width * scale) / 2, t - 0.4 * scale, wallLength - t - 0.4 * scale);
+          const rise = Math.min((w.foot ? 2.8 : 4.3) * scale * VERTICAL, (b.height - GROUND_Y) * 0.8);
+          if (half < 0.7 * scale || inBounds(x) === false) continue;
+          for (const sign of [-1, 1]) {
+            const corner = (k) => x.map((n, j) => n + along[j] * k * half + out[j] * sign * 0.00012);
+            const quad = [to3(corner(-1), 0.0015), to3(corner(-1), GROUND_Y + rise), to3(corner(1), GROUND_Y + rise), to3(corner(1), 0.0015)];
+            face(s.city, sign > 0 ? quad : quad.toReversed(), '#1b1e23');
+            face(s.city, sign > 0 ? quad.toReversed() : quad, '#1b1e23');
+          }
+          count++;
+        }
+      }
+    }
+  }
+  return count;
 }
 
 // Use the same float32 positions and indexed triangles that Model.save writes to the GLB.
@@ -861,7 +958,32 @@ export function segments(dir, only) {
       -(lat - centerLat) * 110540 * scale,
     ];
     const stationAt = toDeck(...stops[stationName]);
-    const all = places.filter((p) => p.stop_id === id).map((v) => ({ id: v.id, p: toDeck(v.lat, v.lon) }));
+    const rings = area.buildings.map((b) => b.ring.map((p) => p.map((n) => n * scale)));
+    // OSM maps a shop as a point at its door, which can sit on the pavement just outside the
+    // footprint. Such a pin is moved a couple of metres inside the building it belongs to, so it
+    // stands on that roof. Open-air venues stay exactly where they are surveyed.
+    const indoors = (v, p) => {
+      if (v.category === 'outdoor' || v.category === 'stadium' || rings.some((ring) => contains(ring, p))) return p;
+      let best;
+      for (const ring of rings)
+        for (let i = 0; i < ring.length; i++) {
+          const a = ring[i],
+            b = ring[(i + 1) % ring.length],
+            dx = b[0] - a[0],
+            dz = b[1] - a[1];
+          const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dz) / (dx * dx + dz * dz || 1)));
+          const q = [a[0] + t * dx, a[1] + t * dz],
+            d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+          if (!best || d < best.d) best = { d, q, ring };
+        }
+      if (!best || best.d > 15 * scale || best.d < 1e-9) return p;
+      for (const inset of [2.5, 1.2, 0.5]) {
+        const moved = best.q.map((n, k) => n + ((n - p[k]) / best.d) * inset * scale);
+        if (contains(best.ring, moved)) return moved;
+      }
+      return p;
+    };
+    const all = places.filter((p) => p.stop_id === id).map((v) => ({ id: v.id, p: indoors(v, toDeck(v.lat, v.lon)) }));
     // Grow the shoreline around any building it would cut, so footprints are never sliced.
     // The shoreline also reaches out to every venue inside the surveyed crop.
     const reach = all
@@ -870,14 +992,13 @@ export function segments(dir, only) {
       .filter((p) => Math.max(Math.abs(p[0]), Math.abs(p[1])) <= VENUE_LIMIT)
       .flatMap((p) => circle(p[0], 0, p[1], VENUE_INSET + 0.012, 8).map(([x, , z]) => [x, z]));
     const base = convexHull([...shoreline(rng(4200 + index)), ...reach]);
-    const rings = area.buildings.map((b) => b.ring.map((p) => p.map((n) => n * scale)));
     const crossing = (ring) => {
       const inside = ring.filter((p) => depthInside(p) >= 0).length;
       return inside > 0 && inside < ring.length;
     };
     const whole = new Set();
     setOutline(base);
-    for (let pass = 0; pass < 8; pass++) {
+    for (let pass = 0; pass < 16; pass++) {
       let grew = false;
       for (const [i, ring] of rings.entries()) {
         if (whole.has(i) || !crossing(ring)) continue;
@@ -898,16 +1019,38 @@ export function segments(dir, only) {
       });
       setOutline(convexHull([...base, ...padded]));
     }
-    // A building centred beyond the edge is left out whole. One centred on the island but too
-    // large for the surveyed crop (a stadium, a campus block) has to end at the edge.
-    let trimmed = 0;
-    const kept = area.buildings.filter((_, i) => {
-      if (!crossing(rings[i])) return true;
-      const c = [0, 1].map((k) => rings[i].reduce((n, p) => n + p[k], 0) / rings[i].length);
-      if (depthInside(c) < 0) return false;
-      trimmed++;
-      return true;
-    });
+    // No footprint is ever sliced by the shoreline. A building the shoreline could not grow
+    // around (centred beyond the edge, or reaching past the surveyed crop) is left out whole,
+    // together with any outline or building part that belongs to it.
+    const centreOf = (ring) => [0, 1].map((k) => ring.reduce((n, p) => n + p[k], 0) / ring.length);
+    const crosses = (a, b, c, d) => turn(a, b, c) * turn(a, b, d) < 0 && turn(c, d, a) * turn(c, d, b) < 0;
+    const cut = (ring) => {
+      const inside = ring.filter((p) => depthInside(p) >= 0).length;
+      if (inside === ring.length) return false;
+      return (
+        inside > 0 ||
+        outline.some((p) => contains(ring, p)) ||
+        ring.some((a, i) =>
+          outlineEdges.some((e) => crosses(a, ring[(i + 1) % ring.length], e.a, e.b)),
+        )
+      );
+    };
+    const dropped = new Set(rings.keys().filter((i) => cut(rings[i])));
+    const onIsland = [...rings.keys()].filter((i) => !dropped.has(i) && rings[i].every((p) => depthInside(p) >= 0));
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const i of onIsland) {
+        if (dropped.has(i)) continue;
+        const c = centreOf(rings[i]);
+        if ([...dropped].some((k) => contains(rings[k], c) || contains(rings[i], centreOf(rings[k])))) {
+          dropped.add(i);
+          grew = true;
+        }
+      }
+    }
+    const trimmed = dropped.size;
+    const kept = area.buildings.filter((_, i) => !dropped.has(i));
+    const droppedNames = [...new Set([...dropped].map((i) => area.buildings[i].name).filter(Boolean))];
     island(s, 9100 + index, outline, outlineRadius);
     s.facades = {};
     for (const [kind, { label }] of Object.entries(FACADES)) {
@@ -955,12 +1098,15 @@ export function segments(dir, only) {
               : ['#8fae7f', '#9ab887', '#86a678'][p.id % 3],
       );
     // Pale sidewalks under every carriageway outline the city blocks.
-    for (const r of area.roads) sidewalk(s, r, scale);
-    const roads = area.roads.map((r) => street(s, r, scale));
+    const ways = gradeWays(area);
+    const atGrade = ways.filter((w) => !w.hidden);
+    for (const w of atGrade) if (!w.rail) sidewalk(s, w, scale);
+    const roads = atGrade.filter((w) => !w.rail).map((w) => street(s, w, scale));
     // Surface rail: a ballast bed with the line colour running down the centre.
-    for (const rail of area.rails ?? []) {
-      ribbon(s, rail.points, scale, 3, 0.00245, '#9c9588');
-      ribbon(s, rail.points, scale, 0.8, 0.0025, rail.kind === 'rail' ? '#5f636b' : lineColor);
+    roadJoints(s, atGrade.filter((w) => !w.rail), scale);
+    for (const rail of atGrade.filter((w) => w.rail)) {
+      ribbon(s, rail.points, scale, 3, 0.00245 + rail.lift, '#9c9588');
+      ribbon(s, rail.points, scale, 0.8, 0.0025 + rail.lift, rail.kind === 'rail' ? '#5f636b' : lineColor);
     }
     for (const platform of area.platforms ?? []) {
       const y = GROUND_Y + 0.5 * scale * VERTICAL;
@@ -975,6 +1121,7 @@ export function segments(dir, only) {
     }
 
     let buildings = kept
+      .filter((b) => b.ring.some((p) => depthInside(p.map((n) => n * scale)) >= 0))
       .map((b) => polygon(b, scale, 0.00036))
       .filter((b) => b && b.area >= 12 * scale * scale);
     // Where OSM models a building as parts, the parts replace its overall outline.
@@ -998,7 +1145,10 @@ export function segments(dir, only) {
     const sites = fallbackSites(rendered);
     const pins = sites.concat(venuePoints);
     for (const b of rendered) renderBuilding(s, b, pins, scale);
-    const treeCount = plant(s, area, cover, buildings, roads, venuePoints.concat(sites), random, scale, 130);
+    const archCount = archways(s, ways, rendered, scale);
+    // A wider crop covers more parks and streets, so it carries proportionally more trees.
+    const treeLimit = spanMeters > 480 ? 300 : 130;
+    const treeCount = plant(s, area, cover, buildings, roads, venuePoints.concat(sites), random, scale, treeLimit);
 
     const meshes = m.surfaces.map((surface) => ({
       ...surface,
@@ -1019,8 +1169,31 @@ export function segments(dir, only) {
         compass: COMPASS[(Math.round(Math.atan2(south, east) / (Math.PI / 4)) + 8) % 8],
       };
     }
+    // The station medallion stands on a post that clears every roof and tree under its disc.
+    const groundAt = (p) => topAt(meshes, p)[1] - 0.018;
+    // Among spots within about 40 m of the entrance it takes the one needing the shortest post,
+    // so a tower beside the station never lifts the medallion out of sight.
+    const discTop = (c) => {
+      const under = [c];
+      for (const r of [STATION_DISC * 0.5, STATION_DISC])
+        for (let k = 0; k < 10; k++) under.push([c[0] + r * Math.cos((k * TAU) / 10), c[1] + r * Math.sin((k * TAU) / 10)]);
+      return under.some((p) => depthInside(p) < 0) ? Infinity : Math.max(...under.map(groundAt));
+    };
+    let stand = { at: stationAt, top: discTop(stationAt), cost: discTop(stationAt) };
+    for (const r of [0.011, 0.022, 0.033, 0.044])
+      for (let k = 0; k < 16; k++) {
+        const at = [stationAt[0] + r * Math.cos((k * TAU) / 16), stationAt[1] + r * Math.sin((k * TAU) / 16)];
+        const top = discTop(at),
+          cost = top + 0.35 * r;
+        if (cost < stand.cost - 1e-9) stand = { at, top, cost };
+      }
+    const stationAnchor = {
+      base: [stand.at[0], groundAt(stand.at), stand.at[1]],
+      top: stand.top + 0.02,
+    };
     anchors[id] = {
       deckY: 0,
+      stationAnchor,
       projection: { centerLat, centerLon, spanMeters, deckSize },
       placeAnchors: Object.fromEntries(venues.map(({ id, p }) => [id, topAt(meshes, p)])),
       offDeck,
@@ -1033,7 +1206,8 @@ export function segments(dir, only) {
       rendered.length + ' buildings (' + surveyed + ' with surveyed heights)',
       treeCount + ' trees',
       venues.length + '/' + all.length + ' venues on deck',
-      trimmed + ' oversize buildings end at the edge',
+      trimmed + ' edge buildings left out whole' + (droppedNames.length ? ' (' + droppedNames.join(', ') + ')' : ''),
+      ways.filter((w) => w.lift).length + ' bridge spans, ' + archCount + ' archways',
       tris + ' triangles',
       meshes.filter((s) => s.indices.length).length + ' primitives',
     );
