@@ -4,7 +4,6 @@ import {
   box,
   face,
   loft,
-  cross,
   circle,
   sweep,
   spline,
@@ -13,7 +12,6 @@ import {
   mix,
   mul,
   add,
-  TAU,
 } from './geometry.mjs';
 
 // Station coordinate snapshot from api-v3.mbta.com/stops, parent stations only.
@@ -197,53 +195,71 @@ function roundedTube(surface, points, radius, sides) {
   }
 }
 
-function stationRing(surface, center, axis, radius, thickness, color, sides) {
-  const u = norm(cross(Math.abs(axis[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0], axis));
-  const v = cross(axis, u);
-  const first = surface.positions.length / 3;
-  const profile = 6;
-  for (let j = 0; j < sides; j++) {
-    const angle = (TAU * j) / sides;
-    const radial = add(mul(u, Math.cos(angle)), mul(v, Math.sin(angle)));
-    const spine = add(center, mul(radial, radius));
-    for (let k = 0; k < profile; k++) {
-      const phi = (TAU * k) / profile;
-      const n = add(mul(radial, Math.cos(phi)), mul(axis, Math.sin(phi)));
-      surface.vertex(add(spine, mul(n, thickness)), n, color);
-      const row = first + j * profile,
-        next = first + ((j + 1) % sides) * profile;
-      const l = (k + 1) % profile;
-      surface.indices.push(
-        row + k,
-        next + k,
-        next + l,
-        row + k,
-        next + l,
-        row + l,
-      );
-    }
-  }
+// Sculpture layout: a grounded slab with the network stacked in three shallow layers.
+const slabTop = 0.04;
+const tubeRadius = 0.0058;
+const layerBase = slabTop + 0.011;
+const layerStep = 0.012;
+const layerOf = { Orange: 0, Green: 1, Red: 2, Blue: 2 };
+const puckRise = 0.0075;
+const tubeHeight = (routeId) =>
+  layerBase + layerStep * layerOf[routeId.split('-')[0]];
+
+const mixHex = (a, b, t) =>
+  '#' +
+  [1, 3, 5]
+    .map((i) => {
+      const u = parseInt(a.slice(i, i + 2), 16),
+        v = parseInt(b.slice(i, i + 2), 16);
+      return Math.round(u + (v - u) * t)
+        .toString(16)
+        .padStart(2, '0');
+    })
+    .join('');
+
+function drum(surface, [x, , z], bottom, top, radius, color, sides = 14) {
+  loft(
+    surface,
+    [circle(x, bottom, z, radius, sides), circle(x, top, z, radius, sides)],
+    color,
+    { bottom: false },
+  );
 }
 
 export function mapSculpture(dir) {
   const m = new Model();
   const batch = (name, options) => m.surface(m.material(name, options));
-  const collar = batch('Station collars', {
-    metal: 0.68,
-    rough: 0.22,
-    emission: '#536c74',
-  });
-  const halo = batch('Station halo highlights', {
-    color: '#d7ffff',
-    emission: '#c2fffa',
-    rough: 0.2,
+  const base = batch('Map base', { rough: 0.82 });
+  const trim = batch('Base trim', {
+    metal: 0.55,
+    rough: 0.3,
+    color: '#7f8aa3',
   });
   const water = batch('Charles River and Boston Harbor', {
-    alpha: 0.3,
-    rough: 0.35,
-    double: true,
-    emission: '#1c414d',
+    rough: 0.28,
+    emission: '#0c2a36',
   });
+  const marker = batch('Station markers', {
+    rough: 0.35,
+    emission: '#6b7078',
+  });
+
+  box(base, 0, 0.006, 0, 1.5, 0.012, 1.05, '#0d111b', 0.03);
+  box(trim, 0, 0.0135, 0, 1.492, 0.003, 1.042, '#ffffff', 0.03);
+  box(base, 0, 0.0275, 0, 1.484, 0.025, 1.034, '#1a2233', 0.03);
+  // Street grid, inlaid a hair above the deck so it never z-fights.
+  const gridY = slabTop + 0.0002;
+  for (let i = -14; i <= 14; i++) {
+    const x = i * 0.05,
+      w = i % 5 === 0 ? 0.0016 : 0.0008;
+    box(base, x, gridY, 0, w, 0.0002, 1.0, i % 5 === 0 ? '#34405c' : '#283350');
+  }
+  for (let i = -9; i <= 9; i++) {
+    const z = i * 0.05,
+      w = i % 5 === 0 ? 0.0016 : 0.0008;
+    box(base, 0, gridY, z, 1.45, 0.0002, w, i % 5 === 0 ? '#34405c' : '#283350');
+  }
+
   // Center and half-width of the Charles, from the Allston bend to the harbor mouth.
   const banks = [
     [-0.739, -0.058, 0.028],
@@ -276,6 +292,7 @@ export function mapSculpture(dir) {
     banks.map(([x, z, w]) => [x, w, z]),
     0.011,
   );
+  const waterY = slabTop + 0.0007;
   let prev;
   for (let i = 0; i < stream.length; i++) {
     const [x, w, z] = stream[i],
@@ -285,22 +302,20 @@ export function mapSculpture(dir) {
           stream[Math.max(0, i - 1)],
         ),
       );
-    const row = Array.from({ length: 9 }, (_, j) => {
-      const v = j / 4 - 1;
+    const row = Array.from({ length: 5 }, (_, j) => {
+      const v = j / 2 - 1;
       return [
-        Math.max(-0.746, Math.min(0.746, x - tangent[2] * v * w)),
-        0.245 +
-          0.0013 * Math.sin(i * 0.127 + v * 3) +
-          0.0008 * Math.cos(v * 6 - i * 0.041),
-        z + tangent[0] * v * w,
+        Math.max(-0.738, Math.min(0.738, x - tangent[2] * v * w)),
+        waterY,
+        Math.max(-0.513, Math.min(0.513, z + tangent[0] * v * w)),
       ];
     });
     if (prev)
-      for (let j = 0; j < 8; j++)
+      for (let j = 0; j < 4; j++)
         face(
           water,
           [prev[j], prev[j + 1], row[j + 1], row[j]],
-          j === 0 || j === 7 ? '#b8f2fa' : '#86cfdf',
+          j === 0 || j === 3 ? '#27667c' : '#1b4f64',
         );
     prev = row;
   }
@@ -308,33 +323,50 @@ export function mapSculpture(dir) {
   const anchors = {},
     lines = [],
     shells = new Map(),
-    marked = new Set();
+    marked = new Set(),
+    levels = new Map();
   for (const [id, routeId, name, color, core, knots] of routes) {
     if (!shells.has(color)) {
       shells.set(color, [
         batch('Lacquer ' + color, {
-          alpha: 0.63,
-          rough: 0.13,
-          metal: 0.08,
-          color,
+          rough: 0.34,
+          metal: 0.05,
+          color: mixHex(color, core, 0.45),
+          emission: mixHex('#000000', core, 0.42),
         }),
-        batch('Luminous filament ' + color, {
-          emission: core,
+        batch('Station enamel ' + color, {
+          rough: 0.3,
           color: core,
-          rough: 0.23,
+          emission: mixHex('#000000', core, 0.5),
         }),
       ]);
     }
-    const [shell, filament] = shells.get(color);
-    const controls = knots.map(([key, y]) =>
+    const [shell, enamel] = shells.get(color);
+    const y = tubeHeight(routeId);
+    const controls = knots.map(([key]) =>
       project(...(Array.isArray(key) ? key : stops[key]), y),
     );
     const points = clipToFootprint(spline(controls, 0.015));
     lines.push({ id, routeId, name, color, points });
-    roundedTube(shell, points, 0.0058, 14);
-    roundedTube(filament, points, 0.0029, 10);
+    roundedTube(shell, points, tubeRadius, 14);
 
-    // Shared Green junctions have one collar, while stacked transfer platforms have one per level.
+    // A soft contact shadow grounds each line on the deck.
+    const shadowY = slabTop + 0.0004;
+    let edge;
+    for (let i = 0; i < points.length; i++) {
+      const t = norm(
+        sub(
+          points[Math.min(i + 1, points.length - 1)],
+          points[Math.max(i - 1, 0)],
+        ),
+      );
+      const side = [-t[2] * 0.0105, 0, t[0] * 0.0105];
+      const p = [points[i][0], shadowY, points[i][2]];
+      const row = [sub(p, side), add(p, side)];
+      if (edge) face(base, [edge[1], edge[0], row[0], row[1]], '#0e131f');
+      edge = row;
+    }
+
     const sampleIndex = new Map(points.map((p, i) => [p.join(','), i]));
     for (const [k, [key]] of knots.entries()) {
       if (typeof key !== 'string') continue;
@@ -343,37 +375,36 @@ export function mapSculpture(dir) {
       if (index === undefined || marked.has(sample)) continue;
       marked.add(sample);
       const p = points[index];
-      const tangent = norm(
-        sub(
-          points[Math.min(index + 1, points.length - 1)],
-          points[Math.max(index - 1, 0)],
-        ),
-      );
-      stationRing(collar, p, tangent, 0.0062, 0.00155, '#d6e5eb', 16);
+      levels.set(key, [...(levels.get(key) ?? []), p]);
 
       const focus = focal.find((f) => f[1] === key && f[4] === routeId);
-      if (!focus) continue;
+      if (!focus) {
+        // Ordinary stop: a white pin through the tube that reads as a dot from above.
+        drum(marker, p, p[1], p[1] + tubeRadius + 0.0007, 0.0034, '#f4f6fa', 12);
+        continue;
+      }
+      // Explorable stop: a white-rimmed drum on the deck with the line colour on top.
       const [stationId, , label, areaCode] = focus;
       const [lat, lon] = stops[key];
-      const up = [0, 1, 0];
-      stationRing(
-        filament,
-        add(p, mul(up, 0.004)),
-        up,
-        0.018,
-        0.00165,
-        '#ffffff',
-        32,
+      const top = p[1] + puckRise;
+      loft(
+        marker,
+        [
+          circle(p[0], slabTop, p[2], 0.0185, 40),
+          circle(p[0], slabTop + 0.002, p[2], 0.0165, 40),
+          circle(p[0], top - 0.0012, p[2], 0.0165, 40),
+          circle(p[0], top, p[2], 0.0153, 40),
+        ],
+        '#f4f6fa',
+        { bottom: false, top: false },
       );
-      stationRing(
-        halo,
-        add(p, mul(up, 0.009)),
-        up,
-        0.023,
-        0.0011,
-        '#ffffff',
-        32,
-      );
+      const outer = circle(p[0], top, p[2], 0.0153, 40),
+        inner = circle(p[0], top, p[2], 0.0108, 40);
+      for (let j = 0; j < 40; j++) {
+        const l = (j + 1) % 40;
+        face(marker, [outer[j], inner[j], inner[l], outer[l]], '#f4f6fa');
+      }
+      face(enamel, [...inner].reverse(), '#ffffff');
       anchors[stationId] = {
         name: label,
         areaCode: 'AREA - ' + areaCode,
@@ -382,10 +413,18 @@ export function mapSculpture(dir) {
         lat,
         lon,
         tubePos: p,
-        topPos: add(p, mul(up, 0.045)),
+        topPos: add(p, [0, puckRise, 0]),
         segmentFile: 'segment-' + stationId + '.glb',
       };
     }
+  }
+  // Transfer posts tie stacked platforms of different lines together.
+  for (const platforms of levels.values()) {
+    const heights = platforms.map((p) => p[1]);
+    const low = Math.min(...heights),
+      high = Math.max(...heights);
+    if (high - low < 1e-6) continue;
+    drum(marker, platforms[0], low, high + tubeRadius + 0.0012, 0.0046, '#f4f6fa', 16);
   }
   m.save(dir + 'boston-map-sculpture.glb');
   json(dir + 'station-anchors.json', anchors);
