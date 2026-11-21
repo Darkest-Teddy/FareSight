@@ -25,7 +25,16 @@ app.start();
 
 const camera = new pc.Entity('camera');
 camera.addComponent('camera', { clearColor: new pc.Color(0.043, 0.047, 0.051), fov: 40, nearClip: 0.005, farClip: 100 });
-app.root.addChild(camera);
+// The rig is the VR play-space origin; on desktop it stays at identity.
+const rig = new pc.Entity('rig');
+app.root.addChild(rig);
+rig.addChild(camera);
+let cameraClip = { near: 0.005, far: 100 };
+function setClip(near, far) {
+  cameraClip = { near, far };
+  camera.camera.nearClip = near;
+  camera.camera.farClip = far;
+}
 const light = new pc.Entity('light');
 light.addComponent('light', { type: 'directional', intensity: 0.9 });
 light.setEulerAngles(50, 30, 0);
@@ -134,6 +143,8 @@ function flyControls(upm, origin) {
       pitch = Math.asin(Math.max(-1, Math.min(1, d.y))) * R2D;
       apply();
     },
+    pose: () => ({ pos: pos.clone(), yaw }),
+    refresh: () => apply(),
     drag(dx, dy) { yaw -= dx * 0.15; pitch = Math.max(-89, Math.min(89, pitch - dy * 0.15)); apply(); },
     wheel(dy) { pos.add(tmp.copy(camera.forward).mulScalar(-dy * 0.0008 * upm)); apply(); },
     update(dt) {
@@ -171,6 +182,7 @@ function orbitControls() {
     camera.lookAt(target);
   };
   return {
+    refresh: () => apply(),
     set({ yaw: a = yaw, elev: b = elev, dist: c = dist, x }) {
       yaw = a; elev = b; dist = c;
       if (x != null) target.set(x, 0.035, 0);
@@ -200,8 +212,94 @@ function orbitControls() {
   };
 }
 
+// ---------- VR ----------
+// Rooms: the scene is scaled to metres and the play space starts at the current desktop
+// viewpoint. Dishes: the row of dishes sits at table height in front of the viewer.
+const VR = { tableHeight: 0.75, standBack: 0.55, eyeHeight: 1.55, moveSpeed: 0.9, snapDeg: 30 };
+let vrStart = null;
+let snapReady = true;
+let resetHeld = false;
+
+function vrAvailable() {
+  return !!app.xr && app.xr.supported && app.xr.isAvailable(pc.XRTYPE_VR);
+}
+
+function placeRig(start) {
+  rig.setPosition(start.pos);
+  rig.setEulerAngles(0, start.yaw, 0);
+}
+
+function enterVr() {
+  if (app.xr.active || !vrAvailable()) return;
+  if (state.mode === 'rooms') {
+    const cfg = catalog.rooms.find((r) => r.id === state.roomConfig);
+    const upm = cfg?.poses?.units_per_meter_estimate ?? 1;
+    const eye = cfg?.poses?.reference_height_m_estimate ?? VR.eyeHeight;
+    const p = controls?.pose?.() ?? { pos: new pc.Vec3(), yaw: 0 };
+    world.setLocalScale(1 / upm, 1 / upm, 1 / upm);
+    vrStart = { pos: new pc.Vec3(p.pos.x / upm, p.pos.y / upm - eye, p.pos.z / upm), yaw: p.yaw };
+  } else {
+    world.setLocalPosition(0, VR.tableHeight, 0);
+    vrStart = { pos: new pc.Vec3(0, 0, VR.standBack), yaw: 0 };
+  }
+  placeRig(vrStart);
+  camera.camera.nearClip = 0.03;
+  camera.camera.farClip = 200;
+  overlay.style.display = 'none';
+  camera.camera.startXr(pc.XRTYPE_VR, pc.XRSPACE_LOCALFLOOR, {
+    callback: (err) => {
+      if (!err) return;
+      showStatus(`Could not start VR: ${err.message}`);
+      leaveVr();
+    },
+  });
+}
+
+function leaveVr() {
+  rig.setPosition(0, 0, 0);
+  rig.setEulerAngles(0, 0, 0);
+  world.setLocalScale(1, 1, 1);
+  world.setLocalPosition(0, 0, 0);
+  camera.camera.nearClip = cameraClip.near;
+  camera.camera.farClip = cameraClip.far;
+  controls?.refresh?.();
+  applyOverlay();
+}
+
+function snapTurn(deg) {
+  const head = camera.getPosition().clone();
+  rig.rotate(0, deg, 0);
+  rig.translate(head.sub(camera.getPosition()));
+}
+
+function vrUpdate(dt) {
+  for (const src of app.xr.input.inputSources) {
+    const gp = src.gamepad;
+    if (!gp) continue;
+    const [x, y] = gp.axes.length >= 4 ? [gp.axes[2], gp.axes[3]] : [gp.axes[0] ?? 0, gp.axes[1] ?? 0];
+    if (src.handedness === 'left') {
+      if (Math.hypot(x, y) < 0.15) continue;
+      const fwd = camera.forward.clone(); fwd.y = 0; fwd.normalize();
+      const right = camera.right.clone(); right.y = 0; right.normalize();
+      rig.translate(fwd.mulScalar(-y).add(right.mulScalar(x)).mulScalar(VR.moveSpeed * dt));
+    } else if (src.handedness === 'right') {
+      if (snapReady && Math.abs(x) > 0.7) { snapTurn(x > 0 ? -VR.snapDeg : VR.snapDeg); snapReady = false; }
+      else if (Math.abs(x) < 0.3) snapReady = true;
+      const reset = !!gp.buttons[4]?.pressed; // A: back to the starting spot
+      if (reset && !resetHeld && vrStart) placeRig(vrStart);
+      resetHeld = reset;
+    }
+  }
+}
+
+if (app.xr) {
+  app.xr.on('end', leaveVr);
+  app.xr.on(`available:${pc.XRTYPE_VR}`, () => renderPanel());
+}
+
 app.on('update', (dt) => {
-  controls?.update(dt);
+  if (app.xr?.active) vrUpdate(dt);
+  else controls?.update(dt);
   const w = canvas.clientWidth, hgt = canvas.clientHeight;
   const out = new pc.Vec3();
   for (const l of labels) {
@@ -255,8 +353,7 @@ async function showRoom(keepView = false) {
   applyOverlay();
   app.scene.ambientLight = new pc.Color(0, 0, 0); // unlit depth mesh would otherwise wash out
   camera.camera.fov = photo1?.vertical_fov_deg ?? 50;
-  camera.camera.nearClip = Math.max(0.001, photo1?.near ?? 0.005);
-  camera.camera.farClip = 60;
+  setClip(Math.max(0.001, photo1?.near ?? 0.005), 60);
   controls = flyControls(upm, new pc.Vec3(...(photo1?.position ?? [0, 0, 0])));
   if (keepView && previous?.setView) {
     // keep the user's viewpoint when switching tiers/configs of the same room
@@ -393,8 +490,7 @@ async function showDish(keepView = false) {
   applyOverlay();
   app.scene.ambientLight = new pc.Color(0.45, 0.45, 0.45);
   camera.camera.fov = 35;
-  camera.camera.nearClip = 0.005;
-  camera.camera.farClip = 20;
+  setClip(0.005, 20);
   if (!(keepView && previous?.set)) {
     controls = orbitControls();
     controls.set({ yaw: 0, elev: 35, dist: shown.length > 1 ? 0.55 + 0.2 * shown.length : 0.5, x: 0 });
@@ -490,7 +586,12 @@ function dishPanel() {
 // ---------- shell ----------
 function renderPanel() {
   document.querySelectorAll('.tabs button').forEach((b) => b.setAttribute('aria-pressed', pressed(b.dataset.mode === state.mode)));
-  panel.replaceChildren(...(state.mode === 'rooms' ? roomPanel() : dishPanel()).flat(Infinity).filter(Boolean),
+  const vr = vrAvailable()
+    ? h('div', { class: 'vr' },
+      h('button', { onclick: enterVr }, state.mode === 'rooms' ? 'Enter VR at this viewpoint' : 'Enter VR at the table'),
+      h('p', { class: 'help' }, 'Left stick moves · right stick turns · A returns to the start. Use the Quest-sized files in VR.'))
+    : h('p', { class: 'help vr' }, 'An "Enter VR" button appears when this page is opened in a headset browser over HTTPS.');
+  panel.replaceChildren(vr, ...(state.mode === 'rooms' ? roomPanel() : dishPanel()).flat(Infinity).filter(Boolean),
     h('h2', {}, 'Data'),
     h('button', { onclick: async () => { await fetchCatalog(); show(true); } }, 'Reload results'));
 }

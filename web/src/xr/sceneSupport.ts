@@ -122,6 +122,12 @@ export interface HitTarget {
   key?: string;
 }
 
+export interface HitResult {
+  target: HitTarget;
+  point: pc.Vec3;
+  distance: number;
+}
+
 export function target(entity: pc.Entity, size: XYZ, action: () => void, key?: string): HitTarget {
   return { entity, halfExtents: new pc.Vec3(...size).mulScalar(0.5), action, key };
 }
@@ -132,28 +138,57 @@ export class ScenePicker {
   private localRay = new pc.Ray();
   private point = new pc.Vec3();
 
-  pick(ray: pc.Ray, targets: readonly HitTarget[]): boolean {
-    const best = this.find(ray, targets);
-    best?.action();
-    return best !== undefined;
-  }
-
-  find(ray: pc.Ray, targets: readonly HitTarget[]): HitTarget | undefined {
-    let best: HitTarget | undefined;
-    let closest = Infinity;
+  raycast(ray: pc.Ray, targets: readonly HitTarget[], maxDistance = Infinity): HitResult | null {
+    let best: HitResult | null = null;
+    if (ray.direction.lengthSq() === 0) return null;
     for (const target of targets) {
       if (!target.entity.enabled) continue;
-      this.inverse.copy(target.entity.getWorldTransform()).invert();
+      const transform = target.entity.getWorldTransform();
+      this.inverse.invert(transform);
       this.inverse.transformPoint(ray.origin, this.localRay.origin);
       this.inverse.transformVector(ray.direction, this.localRay.direction);
       this.bounds.halfExtents.copy(target.halfExtents);
       if (!this.bounds.intersectsRay(this.localRay, this.point)) continue;
-      target.entity.getWorldTransform().transformPoint(this.point, this.point);
+      transform.transformPoint(this.point, this.point);
       const distance = this.point.distance(ray.origin);
-      if (distance >= closest) continue;
-      closest = distance;
-      best = target;
+      if (distance <= maxDistance && (!best || distance < best.distance)) {
+        if (best) {
+          best.target = target;
+          best.point.copy(this.point);
+          best.distance = distance;
+        } else {
+          best = { target, point: this.point.clone(), distance };
+        }
+      }
     }
     return best;
+  }
+
+  find(ray: pc.Ray, targets: readonly HitTarget[]): HitTarget | undefined {
+    return this.raycast(ray, targets)?.target;
+  }
+
+  nearPanel(point: pc.Vec3, targets: readonly HitTarget[], radius: number): HitTarget | null {
+    let nearest: HitTarget | null = null;
+    let distanceSq = radius * radius;
+    for (const target of targets) {
+      if (!target.entity.enabled) continue;
+      const transform = target.entity.getWorldTransform();
+      this.inverse.invert(transform).transformPoint(point, this.point);
+      const { x, y } = target.halfExtents;
+      this.point.set(clamp(this.point.x, -x, x), clamp(this.point.y, -y, y), 0);
+      transform.transformPoint(this.point, this.point);
+      const candidate = this.point.distanceSq(point);
+      if (candidate >= distanceSq) continue;
+      distanceSq = candidate;
+      nearest = target;
+    }
+    return nearest;
+  }
+
+  pick(ray: pc.Ray, targets: readonly HitTarget[]): boolean {
+    const hit = this.raycast(ray, targets);
+    hit?.target.action();
+    return hit !== null;
   }
 }

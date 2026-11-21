@@ -16,6 +16,7 @@ interface DishSetting {
 export class DishTableScene {
   readonly root: pc.Entity;
   private table: pc.Entity;
+  private tableSupport: pc.Entity;
   private top: pc.Entity;
   private primary: DishSetting;
   private secondary: DishSetting;
@@ -26,6 +27,8 @@ export class DishTableScene {
   private currentAngle = 0;
   private primaryUrl?: string;
   private alive = true;
+  private hasTableModel = false;
+  private grounded = false;
 
   constructor(
     parent: pc.Entity, private device: pc.GraphicsDevice, models: ModelLibrary, private splats: SplatLoader,
@@ -47,10 +50,11 @@ export class DishTableScene {
       ringRadius: 0.5, tubeRadius: 0.006, segments: 64, sides: 6,
     }));
     const fallback = child(this.table, 'Virtual table fallback');
+    this.tableSupport = child(this.table, 'Table support');
     shape(fallback, 'Tabletop', 'cylinder', finish, [0, -0.024, 0], [0.9, 0.048, 0.9]);
     shape(fallback, 'Cyan rim', 'cylinder', trim, [0, -0.045, 0], [0.903, 0.006, 0.903]);
-    shape(fallback, 'Pedestal', 'cylinder', footing, [0, -0.36, 0], [0.18, 0.66, 0.18]);
-    shape(fallback, 'Foot', 'cylinder', footing, [0, -0.69, 0], [0.55, 0.034, 0.55]);
+    shape(this.tableSupport, 'Pedestal', 'cylinder', footing, [0, -0.36, 0], [0.18, 0.66, 0.18]);
+    shape(this.tableSupport, 'Foot', 'cylinder', footing, [0, -0.69, 0], [0.55, 0.034, 0.55]);
     this.primary = this.makeSetting('Primary dish', porcelain, ruler);
     this.secondary = this.makeSetting('Comparison dish', porcelain, ruler);
 
@@ -58,6 +62,8 @@ export class DishTableScene {
       if (!resource || !this.alive) return;
       this.table.addChild(resource.instantiateRenderEntity());
       fallback.enabled = false;
+      this.hasTableModel = true;
+      this.setGrounded(this.grounded);
     });
   }
 
@@ -136,6 +142,13 @@ export class DishTableScene {
   setPose(position: XYZ, yaw = 0): void {
     this.root.setPosition(...position);
     this.root.setEulerAngles(0, yaw, 0);
+    this.setGrounded(this.grounded);
+  }
+
+  setGrounded(grounded: boolean): void {
+    this.grounded = grounded;
+    this.tableSupport.enabled = grounded || !this.hasTableModel;
+    this.tableSupport.setLocalScale(1, grounded ? Math.max(0.1, this.root.getPosition().y) / 0.707 : 1, 1);
   }
 
   setRotation(radians: number): void {

@@ -10,6 +10,7 @@ import { OrbitCamera } from './OrbitCamera';
 import { SplatLoader } from './SplatLoader';
 import { StationDioramaScene } from './StationDioramaScene';
 import { VenueSplatScene } from './VenueSplatScene';
+import { XRPresence } from './XRPresence';
 import { assetBase, brass, child, clamp, damp, material, ModelLibrary, ScenePicker, shape, smooth,
   type HitTarget, type XYZ } from './sceneSupport';
 
@@ -56,6 +57,11 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private venue!: VenueSplatScene;
   private dish!: DishTableScene;
   private actions!: XRActionBar;
+  private presence?: XRPresence;
+  private gallery?: pc.Entity;
+  private plinth!: pc.Entity;
+  private pedestal!: pc.Entity;
+  private galleryMaterials: pc.StandardMaterial[] = [];
   private reticle!: pc.Entity;
   private reticleMaterial!: pc.StandardMaterial;
   private resizeObserver?: ResizeObserver;
@@ -68,7 +74,11 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private sessionEnding = false;
   private exitAfterStart = false;
   private virtualTable = false;
+  private waitingForXRFrame = false;
   private xrFramePending = false;
+  private tabletopYaw = 0;
+  private tabletopTurn = 0;
+  private tabletopAngle = 0;
   private hitTestSource?: pc.XrHitTestSource;
   private hitPosition = new pc.Vec3();
   private normal = new pc.Vec3();
@@ -131,6 +141,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
         station: () => this.navigate('station'),
         back: () => this.navigate(this.mode === 'dish' ? 'venue' : this.mode === 'venue' ? 'station' : 'map'),
         virtualTable: () => this.setPassthroughFallback(!this.virtualTable),
+        recenter: () => this.resetCamera(),
       });
       this.reticleMaterial = material(brass, 0.22);
       this.reticle = shape(app.root, 'Table placement indicator', 'torus', this.reticleMaterial, [0, 0, 0], [0.12, 0.011, 0.12]);
@@ -551,16 +562,29 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   }
 
   private setupXR(xr: pc.XrManager): void {
+    this.presence = new XRPresence(xr, xr.app.root, this.rig, this.camera, this.picker, {
+      buttons: this.actions.targets,
+      targets: () => [...this.actions.targets, ...this.sceneTargets()],
+      selectEmpty: () => {
+        if (this.awaitingPlacement() && this.hasRecentHit()) this.placeOnTable();
+      },
+      recenter: () => this.resetCamera(),
+      spin: (radians) => {
+        if (this.mode === 'dish' && !this.awaitingPlacement()) this.dish.drag(radians);
+        if (this.mode === 'map' || this.mode === 'station') this.tabletopTurn += radians * pc.math.RAD_TO_DEG;
+      },
+    });
     xr.on('available', () => this.emitXRState());
     xr.on('start', () => {
       if (this.destroyed) { this.endSession(xr); return; }
       this.settleDive();
       this.activeXR = xr.type === pc.XRTYPE_AR ? 'ar' : 'vr';
+      if (this.activeXR === 'vr' && !this.gallery) this.buildGallery(xr.app.root, xr.app.graphicsDevice);
       this.orbit.enabled = false;
       this.canvas.style.cursor = '';
       this.setHover(undefined);
+      this.waitingForXRFrame = true;
       this.xrFramePending = true;
-      this.actions.entity.enabled = true;
       this.applyPresentation();
       this.emitXRState();
       if (this.exitAfterStart) this.endSession(xr);
@@ -582,13 +606,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
       this.resize();
       this.emitXRState();
     });
-    xr.input.on('select', (source: pc.XrInputSource) => {
-      if (this.destroyed) return;
-      this.ray.origin.copy(source.getOrigin());
-      this.ray.direction.copy(source.getDirection());
-      if (this.picker.pick(this.ray, this.actions.targets) || this.picker.pick(this.ray, this.sceneTargets())) return;
-      if (this.awaitingPlacement() && this.hasRecentHit()) this.placeOnTable();
-    });
+    xr.on('update', () => { this.waitingForXRFrame = false; });
     xr.hitTest.on('available', () => this.startHitTest(xr));
     this.emitXRState();
   }
@@ -619,7 +637,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
 
   enterAR(): Promise<void> { return this.enterXR(pc.XRTYPE_AR); }
 
-  private enterXR(type: string): Promise<void> {
+  private enterXR(type: typeof pc.XRTYPE_VR | typeof pc.XRTYPE_AR): Promise<void> {
     const xr = this.app?.xr;
     if (!xr?.isAvailable(type)) {
       const error = new Error(`${type} is unavailable on this device`);
@@ -631,6 +649,8 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     this.exitAfterStart = false;
     return new Promise((resolve, reject) => {
       xr.start(this.lens, type, pc.XRSPACE_LOCALFLOOR, {
+        // PlayCanvas also requests hand tracking by default, and adds hit-test for immersive AR.
+        optionalFeatures: ['hand-tracking', 'bounded-floor'],
         planeDetection: type === pc.XRTYPE_AR,
         callback: (error) => {
           this.sessionStarting = false;
@@ -672,8 +692,40 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     return this.activeXR === 'ar' && !this.virtualTable;
   }
 
+  private buildGallery(root: pc.Entity, device: pc.GraphicsDevice): void {
+    this.gallery = child(root, 'VR gallery');
+    const floor = material('#141821', 1);
+    const rings = material('#2a3242', 1);
+    for (const surface of [floor, rings]) {
+      surface.diffuse.set(0, 0, 0);
+      surface.useLighting = false;
+      surface.update();
+    }
+    const finish = material('#292e39', 0.12);
+    this.galleryMaterials.push(floor, rings, finish);
+    const deck = child(this.gallery, 'Gallery floor');
+    const disk = pc.Mesh.fromGeometry(device, new pc.CircleGeometry({ radius: 8, sectors: 128, rings: 1 }));
+    deck.addComponent('render', { meshInstances: [new pc.MeshInstance(disk, floor, deck)] });
+    for (const radius of [1.5, 3.2]) {
+      const ring = child(this.gallery, `Floor ring ${radius} m`, [0, 0.002, 0]);
+      const mesh = pc.Mesh.fromGeometry(device, new pc.TorusGeometry({
+        ringRadius: radius, tubeRadius: 0.003, segments: 160, sides: 6,
+      }));
+      ring.setLocalScale(1, 0.2, 1);
+      ring.addComponent('render', { meshInstances: [new pc.MeshInstance(mesh, rings, ring)] });
+    }
+    this.plinth = child(this.gallery, 'Tabletop plinth');
+    this.pedestal = shape(this.plinth, 'Plinth column', 'cylinder', finish, [0, 0.4, 0], [0.36, 0.8, 0.36]);
+    shape(this.plinth, 'Plinth foot', 'cylinder', finish, [0, 0.016, 0], [0.53, 0.032, 0.53]);
+  }
+
   private applyPresentation(): void {
     const passthrough = this.isPassthrough();
+    const vr = this.activeXR === 'vr';
+    if (this.gallery) {
+      this.gallery.enabled = vr;
+      this.plinth.enabled = this.mode === 'map' || this.mode === 'station';
+    }
     this.lens.clearColor = passthrough ? new pc.Color(0, 0, 0, 0) : new pc.Color().fromString(studioBackdrop);
     const flat = this.activeXR === 'none';
     this.map.setImmersive(!flat);
@@ -683,19 +735,22 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     this.venue.setPresentation(this.mode === 'venue', this.mode === 'venue' || !passthrough);
     this.dish.root.enabled = this.mode === 'dish';
     this.dish.setPresentation(!passthrough, !passthrough || !!this.placement);
+    this.dish.setGrounded(vr);
   }
 
   private frameXR(): void {
     this.xrFramePending = false;
-    this.rig.setLocalPosition(0, 0, 0);
-    this.rig.setLocalEulerAngles(0, 0, 0);
+    this.presence?.resetGrip();
+    if (this.activeXR === 'ar' || this.mode === 'venue') {
+      this.rig.setLocalPosition(0, 0, 0);
+      this.rig.setLocalEulerAngles(0, 0, 0);
+    }
     if (this.mode === 'venue') {
       this.venue.root.setLocalPosition(0, 0, 0);
       const [x, y, z] = this.venue.spawn;
       this.rig.setLocalEulerAngles(0, -this.headYaw(), 0);
       this.rig.getRotation().transformVector(this.camera.getLocalPosition(), this.normal);
-      this.rig.setLocalPosition(x - this.normal.x, y - this.normal.y, z - this.normal.z);
-      this.actions.update(this.camera, 1);
+      this.rig.setLocalPosition(x - this.normal.x, this.activeXR === 'vr' ? 0 : y - this.normal.y, z - this.normal.z);
       return;
     }
 
@@ -713,15 +768,24 @@ export class PlayCanvasApp implements FareSightSceneEngine {
       const root = this.mode === 'map' ? this.map.root : this.station.root;
       this.map.root.setLocalScale(1, 1, 1);
       this.map.setOpacity(1);
-      root.setPosition(x, this.mode === 'map' ? y + 0.1 : y, z);
+      this.tabletopYaw = yaw;
+      this.tabletopTurn = 0;
+      this.tabletopAngle = 0;
+      const rootY = this.mode === 'map' ? y + 0.1 : y;
+      root.setPosition(x, rootY, z);
       root.setEulerAngles(0, yaw, 0);
       if (this.mode === 'map') this.parkStation();
       else {
         this.station.root.setLocalScale(1, 1, 1);
         this.station.setPinsShown(true);
       }
+      if (this.activeXR === 'vr') {
+        const height = Math.max(0.1, rootY - (this.mode === 'station' ? 0.16 : 0.02));
+        this.plinth.setPosition(x, 0, z);
+        this.pedestal.setLocalPosition(0, height / 2, 0);
+        this.pedestal.setLocalScale(0.36, height, 0.36);
+      }
     }
-    this.actions.update(this.camera, 1);
   }
 
   private headYaw(): number {
@@ -774,19 +838,29 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     if (this.dive) this.stepDive(Math.min(dt, 1 / 30));
     if (this.activeXR === 'none') this.orbit.update(dt);
     else {
+      if (this.waitingForXRFrame) return;
+      const turned = this.presence?.updateControls(dt, this.activeXR === 'vr');
+      const framing = this.xrFramePending;
       if (this.xrFramePending) this.frameXR();
-      this.actions.update(this.camera, damp(dt, 6));
+      if (this.mode === 'map' || this.mode === 'station') {
+        this.tabletopAngle = pc.math.lerp(this.tabletopAngle, this.tabletopTurn, damp(dt, 12));
+        const root = this.mode === 'map' ? this.map.root : this.station.root;
+        root.setLocalEulerAngles(0, this.tabletopYaw + this.tabletopAngle, 0);
+      }
       const placing = this.awaitingPlacement();
       const found = placing && this.hasRecentHit();
       this.reticle.enabled = found;
       if (found) this.reticle.setPosition(this.hitPosition.x, this.hitPosition.y + 0.006, this.hitPosition.z);
       const placementText = placing ? (found ? 'Select to place dishes' : 'Look at a tabletop or use Virtual Table') : '';
+      this.actions.entity.enabled = true;
       this.actions.setState(this.activeXR === 'ar', this.virtualTable, placementText);
+      this.actions.update(this.camera, dt, this.presence?.leftPalmWrist() ?? null, !!turned || framing);
     }
     const labels = this.dive ? 1 - smooth(this.dive.u / 0.14) : this.mode === 'map' ? 1 : 0;
     this.map.update(dt, this.camera, this.lens, labels);
     if (this.mode === 'station' || this.dive) this.station.update(dt, this.camera);
     if (this.mode === 'dish') this.dish.update(dt, this.camera);
+    if (this.activeXR !== 'none') this.presence?.updatePointers();
     if (dt <= 0) return;
     this.fps = this.fps ? pc.math.lerp(this.fps, 1 / dt, damp(dt, 2.8)) : 1 / dt;
     this.statsTime += dt;
@@ -810,7 +884,10 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     this.canvas.style.cursor = '';
     this.resizeObserver?.disconnect();
     this.orbit?.destroy();
+    this.presence?.destroy();
     this.actions?.destroy();
+    this.gallery?.destroy();
+    for (const surface of this.galleryMaterials) surface.destroy();
     this.reticle?.destroy();
     this.reticleMaterial?.destroy();
     this.dish?.destroy();

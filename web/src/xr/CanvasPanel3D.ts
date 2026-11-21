@@ -1,5 +1,5 @@
 import * as pc from 'playcanvas';
-import { brass, calloutAmber, child, cyan, ivory, shape, target, type HitTarget, type XYZ } from './sceneSupport';
+import { brass, calloutAmber, child, cyan, damp, ivory, shape, target, type HitTarget, type XYZ } from './sceneSupport';
 
 interface PanelLine {
   text: string;
@@ -204,26 +204,27 @@ export class XRActionBar {
   private showDebug = false;
   private position = new pc.Vec3();
   private destination = new pc.Vec3();
-  private offset = new pc.Vec3(0, -0.31, -0.70);
+  private heading = new pc.Vec3();
+  private dockBlend = 0;
 
   constructor(
     device: pc.GraphicsDevice, parent: pc.Entity,
-    actions: { map: () => void; station: () => void; back: () => void; virtualTable: () => void },
+    actions: { map: () => void; station: () => void; back: () => void; virtualTable: () => void; recenter: () => void },
   ) {
     this.entity = child(parent, 'XR actions');
     this.entity.enabled = false;
     const buttons = [
-      ['Map', actions.map], ['Station', actions.station], ['Back', actions.back],
+      ['Map', actions.map], ['Station', actions.station], ['Back', actions.back], ['Recenter', actions.recenter],
       ['Virtual Table', actions.virtualTable], ['Debug FPS', () => { this.showDebug = !this.showDebug; }],
     ] as const;
-    this.panels = buttons.map(([label], index) => {
-      const panel = new CanvasPanel3D(device, this.entity, label, 0.125, 0.044, [(index - 2) * 0.134, 0, 0]);
+    this.panels = buttons.map(([label]) => {
+      const panel = new CanvasPanel3D(device, this.entity, label, 0.125, 0.044);
       panel.setText([{ text: label, size: 139 }]);
       return panel;
     });
     this.targets = buttons.map(([, action], index) => this.panels[index].hit(action));
-    this.virtualButton = this.panels[3];
-    this.debugButton = this.panels[4];
+    this.virtualButton = this.panels[4];
+    this.debugButton = this.panels[5];
     this.status = new CanvasPanel3D(device, this.entity, 'Placement status', 0.37, 0.044, [0, 0.055, 0]);
     this.status.entity.enabled = false;
   }
@@ -239,12 +240,41 @@ export class XRActionBar {
     this.debugButton.setText([{ text: this.showDebug ? `${fps} FPS` : 'Debug FPS', size: 140 }]);
   }
 
-  update(camera: pc.Entity, blend: number): void {
-    camera.getRotation().transformVector(this.offset, this.destination).add(camera.getPosition());
+  update(camera: pc.Entity, dt: number, wrist: pc.Vec3 | null, snap: boolean): void {
+    const blend = snap ? 1 : damp(dt, wrist ? 13 : 7);
+    this.dockBlend = pc.math.lerp(this.dockBlend, wrist ? 1 : 0, blend);
+    this.heading.copy(camera.forward);
+    this.heading.y = 0;
+    if (this.heading.lengthSq() < 0.0001) this.heading.copy(pc.Vec3.FORWARD);
+    this.destination.copy(this.heading.normalize()).mulScalar(0.72).add(camera.getPosition());
+    this.destination.y -= 0.36;
+    if (wrist) {
+      this.destination.set(
+        wrist.x - this.heading.z * 0.13 + this.heading.x * 0.09,
+        wrist.y + 0.10,
+        wrist.z + this.heading.x * 0.13 + this.heading.z * 0.09,
+      );
+    }
     this.position.lerp(this.entity.getPosition(), this.destination, blend);
     this.entity.setPosition(this.position);
     this.entity.lookAt(camera.getPosition());
     this.entity.rotateLocal(0, 180, 0);
+    const hasVirtualTable = this.virtualButton.entity.enabled;
+    const count = this.panels.length - Number(!hasVirtualTable);
+    // Clear the row vertically before moving buttons across each other.
+    const columns = Math.max(0, (this.dockBlend - 0.76) / 0.24);
+    let index = 0;
+    for (const panel of this.panels) {
+      if (panel === this.virtualButton && !hasVirtualTable) continue;
+      const row = Math.floor(index / 3);
+      const rowSize = Math.min(3, count - row * 3);
+      panel.entity.setLocalPosition(
+        pc.math.lerp(index - (count - 1) / 2, index % 3 - (rowSize - 1) / 2, columns) * 0.134,
+        (0.5 - row) * 0.060 * Math.min(1, this.dockBlend / 0.76),
+        0,
+      );
+      index++;
+    }
   }
 
   destroy(): void {

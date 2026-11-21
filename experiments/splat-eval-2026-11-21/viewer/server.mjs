@@ -192,7 +192,13 @@ createServer((req, res) => {
       return send(res, 200, JSON.stringify({ rooms: roomCatalog(), dishes: dishCatalog() }), TYPES['.json']);
     }
     if (path.startsWith('/pc/')) return serveFile(req, res, PLAYCANVAS, path.slice(4));
-    if (path.startsWith('/files/')) return serveFile(req, res, ROOT, path.slice(7));
+    if (path.startsWith('/files/')) {
+      // Serve experiment data only — not the tool caches the runs left in outputs/.
+      if (/(^|\/)(node_modules|npm-cache|venv|\.venv|cache|validator|__pycache__)(\/|$)|(^|\/)\./.test(path.slice(7))) {
+        return send(res, 404, 'Not found');
+      }
+      return serveFile(req, res, ROOT, path.slice(7));
+    }
     send(res, 404, 'Not found');
   } catch (error) {
     send(res, 500, String(error?.stack ?? error));
