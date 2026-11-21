@@ -1,8 +1,9 @@
 import * as pc from 'playcanvas';
 import type { XRFilterSummary, XRPlaceData, XRStopData } from './bridgeTypes';
-import { CanvasPanel3D } from './CanvasPanel3D';
-import { assetBase, brass, child, clamp, damp, easeOutBack, fetchAssetJson, ivory, material, shape, target,
-  type DebugLog, type HitTarget, type ModelLibrary, type XYZ } from './sceneSupport';
+import { PhysicalPlaque } from './CanvasPanel3D';
+import type { JarvisReveal } from './JarvisReveal';
+import { assetBase, brass, child, clamp, damp, fetchAssetJson, ivory, material, pickBounds, shape,
+  type DebugLog, type HitTarget, type ModelLibrary, type PickBounds, type XYZ } from './sceneSupport';
 
 interface SegmentProjection {
   centerLat: number;
@@ -29,11 +30,9 @@ interface OffDeckAnchor {
 interface Pin {
   place: XRPlaceData;
   root: pc.Entity;
-  panel: CanvasPanel3D;
+  panel: PhysicalPlaque;
   stem: pc.Entity;
-  head: pc.Entity;
   stemSurface: pc.StandardMaterial;
-  headSurface: pc.StandardMaterial;
   targets: HitTarget[];
   index: number;
   matched: boolean;
@@ -50,11 +49,12 @@ const labelTierSpacing = 0.16;
 const anchorClearance = 0.018;
 const stemWidth = 0.006;
 const pinStagger = 0.07;
-const pinGrow = 0.42;
+const pinRevealTime = 0.45;
+const stationRevealTime = 1.48;
 const stemColor = new pc.Color().fromString(brass);
-const headColor = new pc.Color().fromString('#e8a849');
-const offDeckColor = new pc.Color().fromString('#8fd3e6');
 const mutedColor = new pc.Color().fromString('#93979c');
+const fallbackGrabSize: XYZ = [0.914, 0.54, 0.98];
+const fallbackGrabCenter: XYZ = [0, 0.09, 0.02];
 const defaultFilters: XRFilterSummary = { craving: '', maxBudget: 20, startStopId: '', groupSize: 1, familyVisit: false };
 
 function projectToDeck(proj: SegmentProjection, lat?: number, lon?: number): [number, number] | undefined {
@@ -74,11 +74,14 @@ function categoryTag(place: XRPlaceData & { cravings?: readonly string[] }): str
 
 export class StationDioramaScene {
   readonly root: pc.Entity;
+  readonly grabBounds: PickBounds;
   private base: pc.Entity;
+  private hero: pc.Entity;
   private deckContent: pc.Entity;
   private stationMarker: pc.Entity;
   private stationColor: pc.StandardMaterial;
   private fallback: pc.Entity;
+  private pinModel: Promise<pc.ContainerResource | null>;
   private model?: pc.Entity;
   private materials: pc.StandardMaterial[] = [];
   private anchors: Record<string, SegmentAnchor> = {};
@@ -88,19 +91,23 @@ export class StationDioramaScene {
   private filters = defaultFilters;
   private pins: Pin[] = [];
   private revision = 0;
-  private pinsShown = true;
-  private pinClock = 10;
+  private pinsShown = false;
+  private visible = false;
   private alive = true;
   private abort = new AbortController();
 
   constructor(
-    parent: pc.Entity, private device: pc.GraphicsDevice, private models: ModelLibrary,
+    parent: pc.Entity, private device: pc.GraphicsDevice, private models: ModelLibrary, private reveal: JarvisReveal,
     log: DebugLog, private selectPlace: (id: string) => void,
   ) {
     this.root = child(parent, 'Station diorama');
+    this.grabBounds = pickBounds(this.root, fallbackGrabSize, fallbackGrabCenter);
     this.base = child(this.root, 'Station deck');
+    this.hero = child(this.base, 'Station architecture');
+    this.hero.enabled = false;
     this.deckContent = child(this.base, 'Station segment and markers');
-    this.fallback = child(this.base, 'Station model fallback');
+    this.fallback = child(this.hero, 'Station model fallback');
+    this.pinModel = models.load(`${assetBase}venue-pin-flag.glb`);
 
     const grass = material('#7fa35a');
     const earth = material('#7a5a3c');
@@ -146,10 +153,20 @@ export class StationDioramaScene {
     this.stop = stop;
     this.stationColor.diffuse.fromString(stop.primary_color);
     this.stationColor.update();
-    this.model?.destroy();
+    const old = this.model;
+    if (old) {
+      if (this.visible && this.hero.enabled) {
+        this.reveal.cancel(this.hero);
+        old.reparent(this.base);
+        this.reveal.hide(old, 0.62, 3000, () => old.destroy());
+      } else old.destroy();
+    }
     this.model = undefined;
     this.deckContent.setLocalPosition(0, 0, 0);
     this.fallback.enabled = true;
+    if (this.visible && old) this.reveal.show(this.hero, stationRevealTime, 3000);
+    this.grabBounds.center!.set(...fallbackGrabCenter);
+    this.grabBounds.halfExtents.set(...fallbackGrabSize).mulScalar(0.5);
     this.reconcilePins();
 
     const assetUrl = (file: string): string => /^(?:\/|https?:)/.test(file) ? file : `${assetBase}${file}`;
@@ -161,8 +178,17 @@ export class StationDioramaScene {
     }
     if (!resource || revision !== this.revision) return;
     this.model = resource.instantiateRenderEntity();
-    this.deckContent.addChild(this.model);
+    // The model is still unparented, so its mesh bounds are in the station's local space.
+    const meshes = this.model.findComponents('render').flatMap((render) => render.meshInstances);
+    if (meshes.length) {
+      const bounds = meshes[0].aabb.clone();
+      for (const mesh of meshes.slice(1)) bounds.add(mesh.aabb);
+      this.grabBounds.center!.copy(bounds.center);
+      this.grabBounds.halfExtents.copy(bounds.halfExtents);
+    }
+    this.hero.addChild(this.model);
     this.fallback.enabled = false;
+    this.reveal.refresh(this.hero, stationRevealTime, 3000);
   }
 
   setPlaces(places: XRPlaceData[], filtered: Set<string>): void {
@@ -178,19 +204,25 @@ export class StationDioramaScene {
 
   get targets(): HitTarget[] { return this.pinsShown ? this.pins.flatMap((pin) => pin.targets) : []; }
 
-  /** Pins drop in one by one when shown and retract quickly when hidden. */
-  setPinsShown(shown: boolean, immediate = false): void {
-    if (shown && !this.pinsShown) this.pinClock = Math.min(this.pinClock, 0);
-    this.pinsShown = shown;
-    if (immediate) this.pinClock = shown ? 10 : 0;
-    this.applyPinReveal();
+  setVisible(visible: boolean): void {
+    if (this.visible === visible) return;
+    this.visible = visible;
+    if (visible) this.reveal.show(this.hero, stationRevealTime, 3000);
+    else this.reveal.hide(this.hero, 0.72, 3000);
   }
 
-  private applyPinReveal(): void {
+  seekReveal(progress: number): void {
+    this.reveal.seek(this.hero, progress);
+    this.visible = progress > 0;
+  }
+
+  setPinsShown(shown: boolean, immediate = false): void {
+    if (shown === this.pinsShown && !immediate) return;
+    this.pinsShown = shown;
     this.pins.forEach((pin, rank) => {
-      const grown = easeOutBack((this.pinClock - rank * pinStagger) / pinGrow, 1.9);
-      const scale = Math.max(grown, 0.0001);
-      pin.root.setLocalScale(scale, scale, scale);
+      if (immediate) this.reveal.finish(pin.root, shown);
+      else if (shown) this.reveal.show(pin.root, pinRevealTime, 300, rank * pinStagger);
+      else this.reveal.hide(pin.root, 0.45, 300);
     });
   }
 
@@ -204,17 +236,16 @@ export class StationDioramaScene {
       if (pin) previous.delete(place.id);
       else {
         const root = child(this.deckContent, place.name);
-        const panel = new CanvasPanel3D(this.device, root, place.name, 0.225, 0.075);
+        const panel = new PhysicalPlaque(this.device, root, place.name, 0.225, 0.075, 'flag', this.pinModel, this.reveal);
         const stemSurface = material(brass);
-        const headSurface = material('#e8a849');
         shape(root, 'Roof collar', 'cylinder', stemSurface, [0, 0.002, 0], [0.023, 0.004, 0.023]);
         const stem = shape(root, 'Brass stem', 'cylinder', stemSurface, [0, 0, 0], [stemWidth, 1, stemWidth]);
-        const head = child(root, 'Pin head');
-        shape(head, 'Amber finial', 'sphere', headSurface, [0, 0, 0], [0.025, 0.023, 0.025]);
         const select = () => this.selectPlace(place.id);
-        pin = { place, root, panel, stem, head, stemSurface, headSurface,
-          targets: [panel.hit(select), target(head, [0.054, 0.044, 0.054], select)],
+        pin = { place, root, panel, stem, stemSurface,
+          targets: [panel.hit(select)],
           index, matched, height: labelClearance, visibility: matched ? 1 : 0 };
+        if (this.pinsShown) this.reveal.show(root, pinRevealTime, 300, index * pinStagger);
+        else root.enabled = false;
       }
       pin.place = place;
       pin.index = place.pin_index ?? index;
@@ -224,7 +255,6 @@ export class StationDioramaScene {
     for (const pin of previous.values()) this.destroyPin(pin);
     this.positionMarkers();
     this.updatePinLabels();
-    this.applyPinReveal();
   }
 
   private positionMarkers(): void {
@@ -277,17 +307,11 @@ export class StationDioramaScene {
       const total = subtotal + fare;
       pin.panel.setCallout(pin.place.name, `$${total.toFixed(2)} incl. fare`, {
         category: pin.offDeck ? `${pin.offDeck.distanceM} M ${pin.offDeck.compass}` : categoryTag(pin.place),
-        muted: !pin.matched,
       });
     }
   }
 
   update(dt: number, camera: pc.Entity): void {
-    const settled = this.pins.length * pinStagger + pinGrow;
-    if (this.pinsShown ? this.pinClock < settled : this.pinClock > 0) {
-      this.pinClock = this.pinsShown ? this.pinClock + dt : Math.max(0, Math.min(this.pinClock, settled) - dt * 4);
-      this.applyPinReveal();
-    }
     const fade = damp(dt, 10);
     for (const pin of this.pins) {
       const goal = pin.matched ? 1 : 0;
@@ -295,37 +319,25 @@ export class StationDioramaScene {
         pin.visibility = Math.abs(pin.visibility - goal) < 0.01 ? goal : pc.math.lerp(pin.visibility, goal, fade);
         this.applyPinPose(pin);
       }
-      pin.panel.face(camera);
+      pin.panel.faceYaw(camera, dt);
     }
   }
 
   private applyPinPose(pin: Pin): void {
-    const opacity = pc.math.lerp(0.26, 1, pin.visibility);
     const labelY = pin.height - 0.065 * (1 - pin.visibility);
-    const stemHeight = labelY - pin.panel.height * 0.47;
+    const stemHeight = Math.max(stemWidth, labelY - pin.panel.faceHeight);
     pin.stem.setLocalPosition(0, stemHeight / 2, 0);
     pin.stem.setLocalScale(stemWidth, stemHeight, stemWidth);
-    pin.head.setLocalPosition(0, stemHeight, 0);
     pin.stemSurface.diffuse.lerp(mutedColor, stemColor, pin.visibility);
-    pin.headSurface.diffuse.lerp(mutedColor, pin.offDeck ? offDeckColor : headColor, pin.visibility);
-    const blend = opacity < 1 ? pc.BLEND_NORMAL : pc.BLEND_NONE;
-    for (const surface of [pin.stemSurface, pin.headSurface]) {
-      surface.opacity = opacity;
-      if (surface.blendType !== blend) {
-        surface.blendType = blend;
-        surface.depthWrite = opacity === 1;
-      }
-      surface.update();
-    }
-    pin.panel.entity.setLocalPosition(0, labelY, 0);
-    pin.panel.setOpacity(opacity);
+    pin.stemSurface.update();
+    pin.panel.entity.setLocalPosition(0, stemHeight, 0);
+    pin.panel.setMuted(1 - pin.visibility);
   }
 
   private destroyPin(pin: Pin): void {
     pin.panel.destroy();
     pin.root.destroy();
     pin.stemSurface.destroy();
-    pin.headSurface.destroy();
   }
 
   destroy(): void {

@@ -26,13 +26,51 @@ export function smooth(value: number): number {
   return t * t * (3 - 2 * t);
 }
 
-export function easeOutBack(value: number, overshoot = 1.4): number {
-  const t = Math.max(0, Math.min(value, 1)) - 1;
-  return 1 + t * t * ((overshoot + 1) * t + overshoot);
-}
-
 export function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, max));
+}
+
+export function wrapAngle(radians: number): number {
+  return Math.atan2(Math.sin(radians), Math.cos(radians));
+}
+
+const turnSampleWindow = 60;
+
+export class TurnVelocity {
+  private samples: { time: number; angle: number }[] = [];
+
+  reset(time: number): void {
+    this.samples = [{ time, angle: 0 }];
+  }
+
+  add(delta: number, time: number): void {
+    const samples = this.samples;
+    const last = samples[samples.length - 1];
+    if (!last) return;
+    if (delta !== 0 && time - last.time > turnSampleWindow) {
+      samples.push({ time: time - turnSampleWindow, angle: last.angle });
+    }
+    if (time === last.time) last.angle += delta;
+    else samples.push({ time, angle: last.angle + delta });
+    while (samples.length > 2 && samples[1].time <= time - turnSampleWindow) samples.shift();
+  }
+
+  release(time: number): number {
+    this.add(0, time);
+    const [first, next] = this.samples;
+    if (!next) return 0;
+    const last = this.samples[this.samples.length - 1];
+    const start = Math.max(first.time, time - turnSampleWindow);
+    const angle = pc.math.lerp(first.angle, next.angle, (start - first.time) / (next.time - first.time));
+    return clamp((last.angle - angle) * 1000 / Math.max(8, time - start), -6.5, 6.5);
+  }
+}
+
+export function coastTurntable(velocity: number, dt: number, resistance: number, turn: (radians: number) => void): number {
+  if (Math.abs(velocity) < 0.015) return 0;
+  const remaining = velocity * Math.exp(-resistance * dt);
+  turn((velocity - remaining) / resistance);
+  return Math.abs(remaining) < 0.015 ? 0 : remaining;
 }
 
 export function child(parent: pc.Entity, name: string, position?: XYZ): pc.Entity {
@@ -90,7 +128,14 @@ export class ModelLibrary {
 
     const entry = new Promise<pc.ContainerResource | null>((resolve) => {
       this.app.assets.loadFromUrl(url, 'container', (error, asset) => {
-        if (this.disposed) { resolve(null); return; }
+        if (this.disposed) {
+          if (asset) {
+            asset.unload();
+            this.app.assets.remove(asset);
+          }
+          resolve(null);
+          return;
+        }
         if (asset) this.assets.add(asset);
         if (error || !asset?.resource) {
           this.log(`Could not load ${url}: ${String(error ?? 'missing resource')}`, 'warn');
@@ -115,15 +160,30 @@ export class ModelLibrary {
   }
 }
 
-export interface HitTarget {
+export interface PickBounds {
   entity: pc.Entity;
   halfExtents: pc.Vec3;
+  center?: pc.Vec3;
+  enabled?: boolean;
+}
+
+export interface HitTarget extends PickBounds {
   action: () => void;
   key?: string;
 }
 
+export interface HitResult<T extends PickBounds = HitTarget> {
+  target: T;
+  point: pc.Vec3;
+  distance: number;
+}
+
+export function pickBounds(entity: pc.Entity, size: XYZ, center?: XYZ): PickBounds {
+  return { entity, halfExtents: new pc.Vec3(...size).mulScalar(0.5), center: center && new pc.Vec3(...center) };
+}
+
 export function target(entity: pc.Entity, size: XYZ, action: () => void, key?: string): HitTarget {
-  return { entity, halfExtents: new pc.Vec3(...size).mulScalar(0.5), action, key };
+  return { ...pickBounds(entity, size), action, key };
 }
 
 export class ScenePicker {
@@ -132,28 +192,61 @@ export class ScenePicker {
   private localRay = new pc.Ray();
   private point = new pc.Vec3();
 
-  pick(ray: pc.Ray, targets: readonly HitTarget[]): boolean {
-    const best = this.find(ray, targets);
-    best?.action();
-    return best !== undefined;
+  raycast<T extends PickBounds>(ray: pc.Ray, targets: readonly T[], maxDistance = Infinity, includeInactive = false): HitResult<T> | null {
+    let best: HitResult<T> | null = null;
+    if (ray.direction.lengthSq() === 0) return null;
+    for (const target of targets) {
+      if (!target.entity.enabled || (!includeInactive && target.enabled === false)) continue;
+      const transform = target.entity.getWorldTransform();
+      this.inverse.invert(transform);
+      this.inverse.transformPoint(ray.origin, this.localRay.origin);
+      this.inverse.transformVector(ray.direction, this.localRay.direction);
+      this.bounds.center.copy(target.center ?? pc.Vec3.ZERO);
+      this.bounds.halfExtents.copy(target.halfExtents);
+      if (!this.bounds.intersectsRay(this.localRay, this.point)) continue;
+      transform.transformPoint(this.point, this.point);
+      const distance = this.point.distance(ray.origin);
+      if (distance <= maxDistance && (!best || distance < best.distance)) {
+        if (best) {
+          best.target = target;
+          best.point.copy(this.point);
+          best.distance = distance;
+        } else {
+          best = { target, point: this.point.clone(), distance };
+        }
+      }
+    }
+    return best;
   }
 
   find(ray: pc.Ray, targets: readonly HitTarget[]): HitTarget | undefined {
-    let best: HitTarget | undefined;
-    let closest = Infinity;
+    return this.raycast(ray, targets)?.target;
+  }
+
+  nearPanel<T extends PickBounds>(point: pc.Vec3, targets: readonly T[], radius: number, includeInactive = false): T | null {
+    let nearest: T | null = null;
+    let distanceSq = radius * radius;
     for (const target of targets) {
-      if (!target.entity.enabled) continue;
-      this.inverse.copy(target.entity.getWorldTransform()).invert();
-      this.inverse.transformPoint(ray.origin, this.localRay.origin);
-      this.inverse.transformVector(ray.direction, this.localRay.direction);
-      this.bounds.halfExtents.copy(target.halfExtents);
-      if (!this.bounds.intersectsRay(this.localRay, this.point)) continue;
-      target.entity.getWorldTransform().transformPoint(this.point, this.point);
-      const distance = this.point.distance(ray.origin);
-      if (distance >= closest) continue;
-      closest = distance;
-      best = target;
+      if (!target.entity.enabled || (!includeInactive && target.enabled === false)) continue;
+      const transform = target.entity.getWorldTransform();
+      this.inverse.invert(transform).transformPoint(point, this.point);
+      const center = target.center ?? pc.Vec3.ZERO;
+      this.point.sub(center);
+      const { x, y } = target.halfExtents;
+      this.point.set(clamp(this.point.x, -x, x), clamp(this.point.y, -y, y),
+        clamp(this.point.z, -target.halfExtents.z, target.halfExtents.z)).add(center);
+      transform.transformPoint(this.point, this.point);
+      const candidate = this.point.distanceSq(point);
+      if (candidate >= distanceSq) continue;
+      distanceSq = candidate;
+      nearest = target;
     }
-    return best;
+    return nearest;
+  }
+
+  pick(ray: pc.Ray, targets: readonly HitTarget[]): boolean {
+    const hit = this.raycast(ray, targets);
+    hit?.target.action();
+    return hit !== null;
   }
 }

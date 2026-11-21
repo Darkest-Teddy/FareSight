@@ -35,8 +35,18 @@ export default defineConfig({
       writeFileSync(resolve(destination, 'cache-list.json'), JSON.stringify(cacheList));
     },
   }],
+  build: {
+    rollupOptions: {
+      // The app and the scroll-driven landing page are separate entry points.
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        intro: fileURLToPath(new URL('./intro.html', import.meta.url)),
+      },
+    },
+  },
   server: {
     port: 5173,
+    allowedHosts: true,
     proxy: {
       ...proxy,
       [demoPrefix]: {
@@ -53,6 +63,7 @@ export default defineConfig({
   },
   preview: {
     port: 4173,
+    allowedHosts: true,
     proxy: {
       ...proxy,
       [demoPrefix]: {

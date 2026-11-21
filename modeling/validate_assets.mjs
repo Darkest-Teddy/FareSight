@@ -22,10 +22,19 @@ const gaussians = {
   'dish-katsu-curry': [13000, 0.26, 0.26 * 0.83, 0.065],
   'dish-matcha-tiramisu': [10000, 0.18, 0.18, 0.075],
 };
+const uiModels = [
+  'vr-control-deck',
+  'venue-pin-flag',
+  'station-medallion',
+  'table-menu-stand',
+  'room-plaque-stand',
+  'menu-book',
+];
 const genModels = [
   'boston-map-sculpture',
   'mbta-train-capsule',
   'table-pedestal',
+  ...uiModels,
   ...Object.keys(stationRef).map((k) => 'segment-' + k),
 ];
 const jsonNames = ['station-anchors', 'segment-anchors', 'mbta-3d-paths'];
@@ -197,7 +206,9 @@ function parseModel(name) {
     ? [1, 39999, 16]
     : name.startsWith('boston')
       ? [15000, 55000, 12]
-      : [1, 5000, 8];
+      : uiModels.includes(name)
+        ? [1, 5000, 20]
+        : [1, 5000, 8];
   assert.ok(
     tris >= budget[0] && tris <= budget[1] && draws <= budget[2],
     name + ' complexity',
@@ -579,4 +590,4 @@ for (const name of jsonNames)
     name + '.json',
     readFileSync(dir + name + '.json').length + ' bytes',
   );
-console.log('PASS: all 17 exports');
+console.log('PASS: all ' + expected.length + ' exports');
