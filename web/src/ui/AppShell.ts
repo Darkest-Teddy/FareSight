@@ -40,6 +40,8 @@ export class AppShell {
   private readonly vrButton: HTMLButtonElement;
   private readonly arButton: HTMLButtonElement;
   private readonly xrExit: HTMLButtonElement;
+  private readonly moreButton: HTMLButtonElement;
+  private readonly moreMenu = element('div', 'command-menu');
   private readonly mobileButtons = new Map<string, HTMLButtonElement>();
   private readonly sound = new SoundEngine();
   private readonly logs: string[] = [];
@@ -98,12 +100,32 @@ export class AppShell {
     this.audioButton.setAttribute('aria-pressed', 'false');
     const admin = new AdminModal(() => void this.loadCatalog());
     const credits = attribution(() => admin.open());
-    operations.append(
-      this.vrButton, this.arButton, this.xrExit,
+    // Secondary tools live in one menu so the bar keeps a single clear call to action.
+    this.moreMenu.id = 'command-menu';
+    this.moreMenu.hidden = true;
+    this.moreMenu.append(
       button('Upload 3D', () => this.uploader.open(this.place?.id), 'quiet desktop-action'),
       this.pairButton, this.audioButton, button('Debug', () => this.openDebug(), 'quiet desktop-debug'),
-      button('Info', credits.open, 'quiet'),
+      button('Credits', credits.open, 'quiet'),
     );
+    this.moreButton = button('More', () => this.setMenuOpen(this.moreMenu.hidden), 'quiet menu-toggle');
+    this.moreButton.setAttribute('aria-haspopup', 'true');
+    this.moreButton.setAttribute('aria-controls', this.moreMenu.id);
+    this.moreButton.setAttribute('aria-expanded', 'false');
+    const more = element('div', 'command-more');
+    more.append(this.moreButton, this.moreMenu);
+    this.moreMenu.addEventListener('click', (event) => {
+      if (event.target instanceof HTMLButtonElement && event.target !== this.audioButton) this.setMenuOpen(false);
+    });
+    document.addEventListener('pointerdown', (event) => {
+      if (!this.moreMenu.hidden && !more.contains(event.target as Node)) this.setMenuOpen(false);
+    });
+    more.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || this.moreMenu.hidden) return;
+      this.setMenuOpen(false);
+      this.moreButton.focus();
+    });
+    operations.append(this.vrButton, this.arButton, this.xrExit, more);
     head.append(brand, this.breadcrumbs, operations);
 
     this.status.setAttribute('role', 'status');
@@ -188,6 +210,11 @@ export class AppShell {
     try {
       this.engine = createFareSightEngine(this.canvas, {
         onSelectStop: (id) => { const stop = this.findStop(id); if (stop) this.showStation(stop); },
+        onHoverStop: (id) => {
+          for (const row of this.stationList.querySelectorAll<HTMLElement>('.station-row')) {
+            row.dataset.hover = String(row.dataset.stop === id);
+          }
+        },
         onSelectPlace: (id) => { const place = this.places.find((entry) => entry.id === id); if (place) void this.showVenue(place); },
         onSelectDish: (id) => { const dish = this.manifest.data?.menu_items.find((entry) => entry.dish.id === id)?.dish; if (dish) void this.showDish(dish); },
         onNavigateScene: (mode) => { if (!this.busyScene && mode !== this.mode) this.navigate(mode); },
@@ -197,7 +224,8 @@ export class AppShell {
           this.vrButton.hidden = this.xrMode !== 'none';
           this.xrExit.hidden = this.xrMode === 'none';
           this.arButton.hidden = this.xrMode !== 'none';
-          this.vrButton.textContent = state.vrSupported ? 'Enter VR' : 'Desktop 3D';
+          this.vrButton.textContent = state.vrSupported ? 'Enter VR' : 'Reset view';
+          this.vrButton.classList.toggle('accent', state.vrSupported);
           this.arButton.title = state.arSupported ? 'Open an immersive AR table' : 'Open the virtual table on this device';
           this.arButton.dataset.supported = String(state.arSupported);
           this.vrButton.dataset.supported = String(state.vrSupported);
@@ -227,6 +255,11 @@ export class AppShell {
     }
   }
 
+  private setMenuOpen(open: boolean) {
+    this.moreMenu.hidden = !open;
+    this.moreButton.setAttribute('aria-expanded', String(open));
+  }
+
   private findStop(id: string) { return this.stops.find((stop) => stop.stop_id === id); }
 
   private renderStatus() {
@@ -251,7 +284,7 @@ export class AppShell {
     } catch (error) {
       this.catalogState = 'offline';
       this.log('Catalog: ' + errorText(error));
-      this.routeFeedback.replaceChildren(message('Using the offline catalog.'), button('Retry connection', () => void this.loadCatalog(), 'quiet'));
+      this.routeFeedback.replaceChildren(button('Retry connection', () => void this.loadCatalog(), 'quiet'));
     }
     if (!this.stops.length) this.routeFeedback.replaceChildren(message('The catalog has no stops.'), button('Reload stops', () => void this.loadCatalog(), 'quiet'));
     this.renderStatus();
@@ -305,6 +338,10 @@ export class AppShell {
       const row = button('', () => this.showStation(stop), 'station-row');
       row.append(lineDots(stop), element('strong', '', stop.name), element('span', 'station-count', String(count)));
       row.setAttribute('aria-label', `${stop.name}, ${count} matching ${count === 1 ? 'place' : 'places'}`);
+      row.dataset.stop = stop.stop_id;
+      // Mirror list focus on the 3D map so the two read as one control.
+      for (const type of ['pointerenter', 'focus']) row.addEventListener(type, () => this.engine?.setHoveredStop(stop.stop_id));
+      for (const type of ['pointerleave', 'blur']) row.addEventListener(type, () => this.engine?.setHoveredStop(undefined));
       this.stationList.append(row);
     }
     if (this.filters.familyVisit && !this.stationList.children.length) {
@@ -401,6 +438,10 @@ export class AppShell {
 
   private showStation(stop: Stop) {
     const changed = this.stop?.stop_id !== stop.stop_id || this.mode !== 'station';
+    // Coming from the map, the drawer waits for the 3D dive and slides in as it lands.
+    const arriving = this.mode === 'map';
+    this.drawer.root.classList.toggle('arriving', arriving);
+    if (arriving) this.drawer.root.addEventListener('animationend', () => this.drawer.root.classList.remove('arriving'), { once: true });
     this.stop = stop;
     this.place = undefined;
     this.dish = undefined;
@@ -614,7 +655,6 @@ export class AppShell {
     const supported = (kind === 'vr' ? this.vrButton : this.arButton).dataset.supported === 'true';
     if (!supported && kind === 'vr') {
       engine.resetCamera();
-      this.notify('Desktop 3D view reset.');
       return;
     }
     if (!supported) {

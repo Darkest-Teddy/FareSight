@@ -96,6 +96,8 @@ export interface XRVehicleData {
 
 export interface XRSceneCallbacks {
   onSelectStop: (stopId: string) => void;
+  /** The stop under the pointer in the 3D map, so the stop list can mirror it. */
+  onHoverStop: (stopId: string | undefined) => void;
   onSelectPlace: (placeId: string) => void;
   onSelectDish: (dishId: string) => void;
   onNavigateScene: (scene: SceneMode) => void;
@@ -115,6 +117,8 @@ export interface FareSightSceneEngine {
   setLiveVehicles(vehicles: XRVehicleData[]): void;
   setStationTelemetry(stopId: string, nextArrivalMin: number | null, matchingCount: number): void;
   focusStop(stopId: string): Promise<void>;
+  /** Highlight a stop on the map from outside the 3D view (for example the stop list). */
+  setHoveredStop(stopId: string | undefined): void;
   openVenue(place: XRPlaceData, manifest: XRManifestData | null): Promise<void>;
   openDish(place: XRPlaceData, dish: XRDishData, compareDish?: XRDishData | null, manifest?: XRManifestData | null): Promise<void>;
   setWillWeFit(enabled: boolean, groupSize: number, seating: 'seated' | 'standing'): void;

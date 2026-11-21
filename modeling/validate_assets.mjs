@@ -196,7 +196,7 @@ function parseModel(name) {
   const budget = name.startsWith('segment-')
     ? [1, 24999, 12]
     : name.startsWith('boston')
-      ? [25000, 55000, 19]
+      ? [15000, 55000, 12]
       : [1, 5000, 8];
   assert.ok(
     tris >= budget[0] && tris <= budget[1] && draws <= budget[2],
@@ -219,14 +219,11 @@ function exactBounds(b, lo, hi) {
   }
 }
 const map = models['boston-map-sculpture'];
+// The sculpture is a grounded slab: lines and markers stay within a shallow band above the deck.
+exactBounds(map.bounds, [-0.75, 0, -0.525], [0.75, map.bounds.max[1], 0.525]);
 assert.ok(
-  map.bounds.min[0] >= -0.7501 &&
-    map.bounds.max[0] <= 0.7501 &&
-    map.bounds.min[1] >= 0.05 &&
-    map.bounds.max[1] <= 0.35 &&
-    map.bounds.min[2] >= -0.5251 &&
-    map.bounds.max[2] <= 0.5251,
-  'floating sculpture bounds ' + reportBounds(map.bounds),
+  map.bounds.max[1] > 0.06 && map.bounds.max[1] <= 0.09,
+  'grounded sculpture bounds ' + reportBounds(map.bounds),
 );
 exactBounds(
   models['table-pedestal'].bounds,
@@ -348,7 +345,7 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
     approx(point[0], x, 1e-7);
     approx(point[2], z, 1e-7);
   }
-  approx(a.topPos[1], a.tubePos[1] + 0.045, 1e-6);
+  approx(a.topPos[1], a.tubePos[1] + 0.0075, 1e-6);
   const route = paths.find((l) => l.routeId === line);
   assert.ok(route.points.some((p) => distance(p, a.tubePos) < 1e-7));
   const model = models[a.segmentFile.slice(0, -4)],
