@@ -37,6 +37,7 @@ export default defineConfig({
   }],
   server: {
     port: 5173,
+    allowedHosts: true,
     proxy: {
       ...proxy,
       [demoPrefix]: {
@@ -53,6 +54,7 @@ export default defineConfig({
   },
   preview: {
     port: 4173,
+    allowedHosts: true,
     proxy: {
       ...proxy,
       [demoPrefix]: {
