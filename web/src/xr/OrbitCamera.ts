@@ -1,5 +1,5 @@
 import * as pc from 'playcanvas';
-import { clamp, damp } from './sceneSupport';
+import { clamp, coastTurntable, damp, TurnVelocity, wrapAngle } from './sceneSupport';
 
 interface Pose {
   pivot: pc.Vec3;
@@ -26,12 +26,16 @@ export class OrbitCamera {
   private events = new AbortController();
   private previousTouchAction: string;
   private position = new pc.Vec3();
-  enabled = true;
+  private active = true;
+  private motion = new TurnVelocity();
+  private spinKind: 'yaw' | 'dish' | null = null;
+  private yawVelocity = 0;
+  private dishVelocity = 0;
 
   constructor(
     private canvas: HTMLCanvasElement, private camera: pc.Entity,
     initial: Pose, pick: (x: number, y: number) => void,
-    turnDish: (radians: number) => boolean,
+    private turnDish: (radians: number) => boolean,
     hover: (x: number, y: number) => void = () => {},
   ) {
     this.goal = { ...initial, pivot: initial.pivot.clone() };
@@ -42,6 +46,7 @@ export class OrbitCamera {
     canvas.addEventListener('pointerdown', (event) => {
       if (!this.enabled) return;
       if (event.button !== 0 && event.button !== 1 && event.button !== 2) return;
+      this.cancelSpin();
       if (!this.pointers.size) {
         this.downX = event.clientX;
         this.downY = event.clientY;
@@ -57,9 +62,10 @@ export class OrbitCamera {
       const previous = this.pointers.get(event.pointerId);
       if (this.enabled && !this.pointers.size && event.pointerType === 'mouse') hover(event.clientX, event.clientY);
       if (!this.enabled || !previous) return;
-      const dx = event.clientX - previous.x;
-      const dy = event.clientY - previous.y;
+      const wasMoved = this.moved;
       if (Math.hypot(event.clientX - this.downX, event.clientY - this.downY) > 5) this.moved = true;
+      const dx = event.clientX - (wasMoved ? previous.x : this.downX);
+      const dy = event.clientY - (wasMoved ? previous.y : this.downY);
       const other = [...this.pointers].find(([id]) => id !== event.pointerId)?.[1];
       if (other) {
         const before = Math.hypot(previous.x - other.x, previous.y - other.y);
@@ -69,7 +75,11 @@ export class OrbitCamera {
       } else if (this.moved) {
         if (previous.pan) this.pan(dx, dy);
         else {
-          if (!turnDish(dx * 0.009)) this.goal.yaw -= dx * 0.007;
+          const dish = dx * 0.009;
+          const yaw = -dx * 0.007;
+          this.spinKind = this.turnDish(dish) ? 'dish' : 'yaw';
+          if (this.spinKind === 'yaw') this.goal.yaw += yaw;
+          this.motion.add(this.spinKind === 'dish' ? dish : yaw, performance.now());
           this.goal.pitch = clamp(this.goal.pitch + dy * 0.006, -0.65, 1.42);
         }
       }
@@ -78,9 +88,18 @@ export class OrbitCamera {
     }, { signal });
     const endPointer = (event: PointerEvent): void => {
       if (!this.pointers.delete(event.pointerId)) return;
-      if (this.enabled && event.type === 'pointerup' && !this.moved && this.pointers.size === 0) {
-        pick(event.clientX, event.clientY);
+      if (!this.enabled || event.type !== 'pointerup' || this.pointers.size) {
+        this.cancelSpin();
+        return;
       }
+      if (!this.moved && Math.hypot(event.clientX - this.downX, event.clientY - this.downY) <= 5) {
+        pick(event.clientX, event.clientY);
+      } else if (this.spinKind) {
+        const velocity = this.motion.release(performance.now());
+        if (this.spinKind === 'dish') this.dishVelocity = velocity;
+        else this.yawVelocity = velocity;
+      }
+      this.spinKind = null;
     };
     canvas.addEventListener('pointerup', endPointer, { signal });
     canvas.addEventListener('pointercancel', endPointer, { signal });
@@ -95,9 +114,28 @@ export class OrbitCamera {
     this.update(1);
   }
 
+  get enabled(): boolean { return this.active; }
+
+  set enabled(value: boolean) {
+    this.active = value;
+    if (!value) {
+      this.pointers.clear();
+      this.cancelSpin();
+    }
+  }
+
+  cancelSpin(): void {
+    if (this.yawVelocity !== 0) this.goal.yaw = this.pose.yaw;
+    this.yawVelocity = 0;
+    this.dishVelocity = 0;
+    this.spinKind = null;
+    this.motion.reset(performance.now());
+  }
+
   frame(pose: Pose, immediate = false): void {
+    this.cancelSpin();
     const turn = Math.PI * 2;
-    const yaw = this.pose.yaw + Math.atan2(Math.sin(pose.yaw - this.pose.yaw), Math.cos(pose.yaw - this.pose.yaw));
+    const yaw = this.pose.yaw + wrapAngle(pose.yaw - this.pose.yaw);
     this.goal = { ...pose, yaw, pivot: pose.pivot.clone() };
     if (immediate) {
       this.pose = { ...this.goal, yaw: yaw % turn, pivot: pose.pivot.clone() };
@@ -108,7 +146,10 @@ export class OrbitCamera {
 
   update(dt: number): void {
     if (!this.enabled) return;
-    const progress = damp(dt, 8);
+    const dragging = this.pointers.size > 0 && this.moved;
+    const progress = damp(dt, dragging || this.yawVelocity !== 0 ? 24 : 8);
+    this.yawVelocity = coastTurntable(this.yawVelocity, dt, 5.5, (delta) => { this.goal.yaw += delta; });
+    this.dishVelocity = coastTurntable(this.dishVelocity, dt, 5.5, this.turnDish);
     const pose = this.pose;
     const goal = this.goal;
     pose.pivot.lerp(pose.pivot, goal.pivot, progress);

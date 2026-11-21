@@ -5,14 +5,15 @@ import type {
 } from './bridgeTypes';
 import { XRActionBar } from './CanvasPanel3D';
 import { DishTableScene } from './DishTableScene';
+import { JarvisReveal } from './JarvisReveal';
 import { MapSculptureScene } from './MapSculptureScene';
 import { OrbitCamera } from './OrbitCamera';
 import { SplatLoader } from './SplatLoader';
 import { StationDioramaScene } from './StationDioramaScene';
 import { VenueSplatScene } from './VenueSplatScene';
 import { XRPresence } from './XRPresence';
-import { assetBase, brass, child, clamp, damp, material, ModelLibrary, ScenePicker, shape, smooth,
-  type HitTarget, type XYZ } from './sceneSupport';
+import { assetBase, brass, child, clamp, damp, material, ModelLibrary, pickBounds, ScenePicker, shape, smooth,
+  type HitTarget, type PickBounds, type XYZ } from './sceneSupport';
 
 type ActiveXR = 'none' | 'vr' | 'ar';
 const studioBackdrop = '#151922';
@@ -30,12 +31,14 @@ interface Dive {
   stopId: string;
   anchor: pc.Vec3;
   stage: pc.Vec3;
-  rotation: pc.Quat;
+  mapRotation: pc.Quat;
+  stageRotation: pc.Quat;
   pins: boolean;
 }
 
-const diveInTime = 1.25;
-const diveOutTime = 0.95;
+const diveInTime = 1.48;
+const diveOutTime = 1.28;
+const sceneExitTime = 0.75;
 const seedScale = 0.006;
 // In a headset the neighbourhood's deck lands level with the map surface it replaces.
 const xrDeckLift = 0.04;
@@ -51,11 +54,13 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private rig!: pc.Entity;
   private orbit!: OrbitCamera;
   private models!: ModelLibrary;
+  private reveal!: JarvisReveal;
   private splats!: SplatLoader;
   private map!: MapSculptureScene;
   private station!: StationDioramaScene;
   private venue!: VenueSplatScene;
   private dish!: DishTableScene;
+  private turntables!: Record<'map' | 'station' | 'dish', PickBounds>;
   private actions!: XRActionBar;
   private presence?: XRPresence;
   private gallery?: pc.Entity;
@@ -69,6 +74,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private ray = new pc.Ray();
   private rayEnd = new pc.Vec3();
   private mode: SceneMode = 'map';
+  private leaving = new Map<SceneMode, number>();
   private activeXR: ActiveXR = 'none';
   private sessionStarting = false;
   private sessionEnding = false;
@@ -76,9 +82,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private virtualTable = false;
   private waitingForXRFrame = false;
   private xrFramePending = false;
-  private tabletopYaw = 0;
-  private tabletopTurn = 0;
-  private tabletopAngle = 0;
+  private neighborhoodFramed = false;
   private hitTestSource?: pc.XrHitTestSource;
   private hitPosition = new pc.Vec3();
   private normal = new pc.Vec3();
@@ -104,6 +108,8 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private events = new AbortController();
   private reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   private diveCenter = new pc.Vec3();
+  private diveRotation = new pc.Quat();
+  private plinthVisible = false;
 
   constructor(private canvas: HTMLCanvasElement, private callbacks: XRSceneCallbacks) {}
 
@@ -128,15 +134,21 @@ export class PlayCanvasApp implements FareSightSceneEngine {
       }) as pc.CameraComponent;
       this.addLights(app.root);
       this.models = new ModelLibrary(app, this.callbacks.onDebugLog);
-      this.splats = new SplatLoader(app, this.callbacks.onDebugLog);
-      this.map = new MapSculptureScene(app.root, app.graphicsDevice, this.models, this.callbacks.onDebugLog,
+      this.reveal = new JarvisReveal(app.graphicsDevice, this.reducedMotion);
+      this.splats = new SplatLoader(app, this.callbacks.onDebugLog, this.reducedMotion);
+      this.map = new MapSculptureScene(app.root, app.graphicsDevice, this.models, this.reveal, this.callbacks.onDebugLog,
         (id) => this.selectStop(id), this.canvas, (id) => this.setHover(id));
-      this.station = new StationDioramaScene(app.root, app.graphicsDevice, this.models, this.callbacks.onDebugLog,
+      this.station = new StationDioramaScene(app.root, app.graphicsDevice, this.models, this.reveal, this.callbacks.onDebugLog,
         this.callbacks.onSelectPlace);
-      this.venue = new VenueSplatScene(app.root, app.graphicsDevice, this.splats,
+      this.venue = new VenueSplatScene(app.root, app.graphicsDevice, this.models, this.splats, this.reveal,
         this.callbacks.onSelectDish);
-      this.dish = new DishTableScene(app.root, app.graphicsDevice, this.models, this.splats);
-      this.actions = new XRActionBar(app.graphicsDevice, app.root, {
+      this.dish = new DishTableScene(app.root, app.graphicsDevice, this.models, this.splats, this.reveal, this.callbacks.onSelectDish);
+      this.turntables = {
+        map: pickBounds(this.map.root, [1.50, 0.10, 1.05], [0, 0.04, 0]),
+        station: this.station.grabBounds,
+        dish: pickBounds(this.dish.root, [0.90, 0.24, 0.90], [0, 0.05, 0]),
+      };
+      this.actions = new XRActionBar(app.graphicsDevice, app.root, this.models, this.reveal, {
         map: () => this.navigate('map'),
         station: () => this.navigate('station'),
         back: () => this.navigate(this.mode === 'dish' ? 'venue' : this.mode === 'venue' ? 'station' : 'map'),
@@ -150,13 +162,14 @@ export class PlayCanvasApp implements FareSightSceneEngine {
         (x, y) => this.pickCanvas(x, y),
         (radians) => {
           if (this.mode !== 'dish') return false;
-          this.dish.drag(radians);
+          this.dish.drag(radians, true);
           return true;
         },
         (x, y) => this.hoverCanvas(x, y));
       this.canvas.addEventListener('pointerleave', () => {
         this.canvas.style.cursor = '';
         this.setHover(undefined);
+        this.activeMenu()?.setHoveredDish(undefined);
       }, { signal: this.events.signal });
       this.map.setStops(this.stops);
       this.setPlaces(this.places, this.filtered);
@@ -243,6 +256,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     const hit = this.picker.find(this.ray, this.sceneTargets());
     this.canvas.style.cursor = hit ? 'pointer' : '';
     if (this.mode === 'map') this.setHover(hit?.key);
+    else this.activeMenu()?.setHoveredDish(hit?.key);
   }
 
   setPlaces(places: XRPlaceData[], filteredIds: Set<string>): void {
@@ -339,26 +353,24 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   }
 
   private canDive(): boolean {
-    return !this.reducedMotion.matches && document.visibilityState === 'visible';
+    return !this.reducedMotion.matches && document.visibilityState === 'visible' &&
+      (this.activeXR === 'none' || !this.xrFramePending);
   }
 
   private startDive(stopId: string, dir: 1 | -1): void {
+    this.presence?.resetGrip();
     const flat = this.activeXR === 'none';
     const lift = flat ? 0 : xrDeckLift;
     const mapRoot = this.map.root;
-    if (dir === -1 && !flat) {
-      // Re-form the map exactly underneath the neighbourhood that grew out of it.
-      const at = this.station.root.getPosition();
-      mapRoot.setRotation(this.station.root.getRotation());
-      mapRoot.setPosition(at.x, at.y - lift, at.z);
-    }
     mapRoot.setLocalScale(1, 1, 1);
     const origin = mapRoot.getPosition();
-    const rotation = mapRoot.getRotation().clone();
-    const anchor = rotation.transformVector(this.map.stopPosition(stopId) ?? new pc.Vec3(0, 0.07, 0), new pc.Vec3()).add(origin);
-    const stage = flat ? new pc.Vec3(...stationHome) : new pc.Vec3(origin.x, origin.y + lift, origin.z);
+    const mapRotation = mapRoot.getRotation().clone();
+    const anchor = mapRotation.transformVector(this.map.stopPosition(stopId) ?? new pc.Vec3(0, 0.07, 0)).add(origin);
+    const stage = flat ? new pc.Vec3(...stationHome) : dir === -1 ? this.station.root.getPosition().clone()
+      : new pc.Vec3(origin.x, clamp(origin.y + lift, 0.35, 1.80), origin.z);
+    const stageRotation = !flat && dir === -1 ? this.station.root.getRotation().clone() : mapRotation;
     this.mode = dir === 1 ? 'station' : 'map';
-    this.dive = { u: dir === 1 ? 0 : 1, dir, stopId, anchor, stage, rotation, pins: dir === -1 };
+    this.dive = { u: dir === 1 ? 0 : 1, dir, stopId, anchor, stage, mapRotation, stageRotation, pins: dir === -1 };
     this.station.setPinsShown(false, dir === 1);
     this.canvas.style.cursor = '';
     this.hovered = undefined;
@@ -380,24 +392,20 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private applyDive(): void {
     const dive = this.dive;
     if (!dive) return;
-    const { u, anchor, stage, rotation } = dive;
-    const grow = smooth(u / 0.85);
+    const { u, anchor, stage, mapRotation, stageRotation } = dive;
+    const grow = smooth((u - 0.05) / 0.76);
     const travel = smooth((u - 0.12) / 0.78);
 
-    // The map holds still and dissolves; nothing large moves around the viewer.
-    const fade = 1 - smooth((u - 0.2) / 0.45);
-    this.map.root.enabled = fade > 0;
-    this.map.setOpacity(fade);
-
-    // Growth is exponential, so the neighbourhood starts as a speck on its marker and swells at
-    // an even visual rate, hopping to centre stage and settling with a slight overshoot.
+    // Let the holographic points expand before the architecture solidifies.
     const center = this.diveCenter.lerp(anchor, stage, travel);
     center.y += 0.05 * Math.sin(Math.PI * travel);
     const settle = 1 + 0.045 * Math.sin(Math.PI * clamp((u - 0.8) / 0.2, 0, 1));
-    const size = Math.pow(seedScale, 1 - grow) * settle;
-    this.station.root.setRotation(rotation);
+    const size = pc.math.lerp(seedScale, 1, grow ** 1.12) * settle;
+    this.station.root.setRotation(this.diveRotation.slerp(mapRotation, stageRotation, travel));
     this.station.root.setLocalScale(size, size, size);
     this.station.root.setPosition(center);
+    this.map.seekReveal(1 - clamp((u - 0.11) / 0.65, 0, 1));
+    this.station.seekReveal(clamp((u - 0.22) / 0.75, 0, 1));
 
     const pins = dive.dir === 1 && u > 0.8;
     if (pins !== dive.pins) {
@@ -411,7 +419,6 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     this.dive = undefined;
     if (this.activeXR === 'none') this.placeDesktopScenes();
     else {
-      this.map.setOpacity(1);
       if (this.mode === 'map') this.parkStation();
       else this.station.root.setLocalScale(1, 1, 1);
     }
@@ -423,6 +430,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private parkStation(): void {
     const at = this.map.root.getPosition();
     this.station.root.setPosition(at.x, at.y + 0.02, at.z);
+    this.station.root.setRotation(this.map.root.getRotation());
     this.station.root.setLocalScale(standbyScale, standbyScale, standbyScale);
     this.station.setPinsShown(false, true);
   }
@@ -432,6 +440,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     const dive = this.dive;
     if (!dive) return;
     dive.u = dive.dir === 1 ? 1 : 0;
+    this.applyDive();
     this.finishDive();
   }
 
@@ -439,7 +448,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     if (!this.app) return;
     const changed = this.place?.id !== place.id;
     this.rememberVenue(place, manifest);
-    const loading = this.venue.open(place, manifest);
+    const loading = this.venue.open(place, manifest, this.neighborhood(place));
     this.applyScene('venue', changed);
     await loading;
   }
@@ -450,8 +459,9 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     if (changed) this.dish.clear();
     const venueManifest = manifest === undefined && !changed ? this.manifest : manifest ?? null;
     this.rememberVenue(place, venueManifest);
-    const room = this.venue.open(place, venueManifest);
-    const table = this.dish.open(dish, compareDish ?? null, venueManifest, room);
+    const neighborhood = this.neighborhood(place);
+    const room = this.venue.open(place, venueManifest, neighborhood);
+    const table = this.dish.open(place, neighborhood, dish, compareDish ?? null, venueManifest, room);
     this.applyScene('dish', changed);
     await Promise.all([room, table]);
   }
@@ -462,12 +472,19 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     this.activeStop = place.stop_id;
   }
 
+  private neighborhood(place: XRPlaceData): string {
+    return this.stops.find((stop) => stop.stop_id === place.stop_id)?.name ?? '';
+  }
+
   setWillWeFit(enabled: boolean, groupSize: number, seating: 'seated' | 'standing'): void {
     this.fit = [enabled, groupSize, seating];
     this.venue?.setWillWeFit(...this.fit);
   }
 
-  setDishRotation(angleRad: number): void { this.dish?.setRotation(angleRad); }
+  setDishRotation(angleRad: number): void {
+    this.orbit?.cancelSpin();
+    this.dish?.setRotation(angleRad);
+  }
 
   setPassthroughFallback(useVirtualTable: boolean): void {
     if (this.virtualTable === useVirtualTable) return;
@@ -482,6 +499,9 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     this.settleDive();
     if (this.activeXR === 'none') this.orbit.frame(this.desktopPose());
     else {
+      this.presence?.resetGrip();
+      this.actions.recenter();
+      this.neighborhoodFramed = false;
       if (this.mode === 'dish') this.placement = null;
       this.xrFramePending = true;
     }
@@ -490,14 +510,24 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private applyScene(mode: SceneMode, reframe = false): void {
     this.settleDive();
     const changed = mode !== this.mode;
-    this.mode = mode;
     const atVenue = mode === 'venue' || mode === 'dish';
+    if (changed) {
+      this.activeMenu()?.setHoveredDish(undefined);
+      if (this.reveal.enabled) this.leaving.set(this.mode, sceneExitTime);
+      this.leaving.delete(mode);
+      if (this.mode === 'dish') {
+        this.splats.clear('dish', 0.66);
+        this.splats.clear('compare', 0.66);
+      }
+      if (!atVenue && (this.mode === 'venue' || this.mode === 'dish')) this.splats.clear('room', 0.68);
+    }
+    this.mode = mode;
     if (!atVenue) {
-      this.venue.clear();
+      if (!this.leaving.has('venue') && !this.leaving.has('dish')) this.venue.clear();
       this.place = undefined;
       this.manifest = null;
     }
-    if (mode !== 'dish') this.dish.clear();
+    if (mode !== 'dish' && !this.leaving.has('dish')) this.dish.clear();
     if (!changed && !reframe) {
       this.applyPresentation();
       return;
@@ -509,6 +539,23 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     } else {
       this.xrFramePending = true;
     }
+  }
+
+  private updateSceneExits(dt: number): void {
+    if (!this.leaving.size) return;
+    let changed = false;
+    for (const [scene, time] of this.leaving) {
+      if (this.reveal.enabled && time > dt) {
+        this.leaving.set(scene, time - dt);
+        continue;
+      }
+      this.leaving.delete(scene);
+      if (scene === 'dish' && this.mode !== 'dish') this.dish.clear();
+      changed = true;
+    }
+    if (!changed) return;
+    if (this.mode !== 'venue' && this.mode !== 'dish' && !this.leaving.has('venue') && !this.leaving.has('dish')) this.venue.clear();
+    this.applyPresentation();
   }
 
   private selectStop(id: string): void {
@@ -531,12 +578,15 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     const aspect = this.canvas.clientWidth / Math.max(this.canvas.clientHeight, 1);
     const portrait = clamp(0.79 / Math.max(aspect, 0.4), 1, 1.60);
     if (this.mode === 'dish') {
-      return { pivot: new pc.Vec3(0, 0.035, 0), yaw: 0, pitch: 0.66, distance: 0.86 * portrait, min: 0.21 };
+      return { pivot: new pc.Vec3(-0.06, 0.055, 0.02), yaw: 0, pitch: 0.66, distance: 1.02 * portrait, min: 0.21 };
     }
     if (this.mode === 'venue') {
       const [x, y, z] = this.venue?.spawn ?? [0, 1.55, 2];
-      return { pivot: new pc.Vec3(x, y - 0.09, z - 1), yaw: 0, pitch: Math.atan2(0.09, 1),
-        distance: Math.hypot(1, 0.09), min: 0.16 };
+      const right = aspect < 0.9 ? 0.23 : 0.10;
+      const down = 0.145;
+      const distance = 1.16;
+      return { pivot: new pc.Vec3(x + right, y - down, z - 1), yaw: -Math.atan2(right, distance),
+        pitch: Math.atan2(down, Math.hypot(distance, right)), distance: Math.hypot(distance, right, down), min: 0.16 };
     }
     // Map and station share one framing, so moving between them never needs a camera move.
     return { pivot: new pc.Vec3(-0.13, 0.04, 0.15), yaw: 0.1, pitch: 0.86, distance: 2.1 * portrait };
@@ -545,20 +595,21 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private placeDesktopScenes(): void {
     this.rig.setLocalPosition(0, 0, 0);
     this.rig.setLocalEulerAngles(0, 0, 0);
-    for (const root of [this.map.root, this.station.root, this.venue.root]) {
+    for (const root of [this.map.root, this.venue.root]) {
       root.setLocalPosition(0, 0, 0);
       root.setLocalEulerAngles(0, 0, 0);
     }
     this.map.root.setLocalScale(1, 1, 1);
-    this.map.setOpacity(1);
-    if (this.mode === 'map') this.parkStation();
-    else {
+    if (this.mode === 'map' && !this.leaving.has('station')) this.parkStation();
+    else if (this.mode === 'station') {
       this.station.root.setLocalPosition(...stationHome);
+      this.station.root.setLocalEulerAngles(0, 0, 0);
       this.station.root.setLocalScale(1, 1, 1);
     }
-    this.dish.setPose([0, 0, 0]);
+    if (!this.leaving.has('dish')) this.dish.setPose([0, 0, 0]);
     const [x, , z] = this.venue.spawn;
-    this.venue.root.setLocalPosition(this.mode === 'dish' ? -x : 0, this.mode === 'dish' ? -0.78 : 0, this.mode === 'dish' ? 2 - z : 0);
+    if (this.mode === 'dish') this.venue.roomRoot.setLocalPosition(-x, -0.78, 2 - z);
+    else if (this.mode === 'venue') this.venue.roomRoot.setLocalPosition(0, 0, 0);
   }
 
   private setupXR(xr: pc.XrManager): void {
@@ -569,9 +620,14 @@ export class PlayCanvasApp implements FareSightSceneEngine {
         if (this.awaitingPlacement() && this.hasRecentHit()) this.placeOnTable();
       },
       recenter: () => this.resetCamera(),
+      deck: this.actions.gripBounds,
+      holdDeck: (held) => this.actions.setHeld(held),
+      menu: () => this.activeMenu(),
+      turntable: () => this.activeTurntable(),
+      turntableMoved: () => this.turntableMoved(),
       spin: (radians) => {
-        if (this.mode === 'dish' && !this.awaitingPlacement()) this.dish.drag(radians);
-        if (this.mode === 'map' || this.mode === 'station') this.tabletopTurn += radians * pc.math.RAD_TO_DEG;
+        if (this.mode === 'dish') this.dish.drag(radians, true);
+        else this.activeTurntable()?.entity.rotate(0, radians * pc.math.RAD_TO_DEG, 0);
       },
     });
     xr.on('available', () => this.emitXRState());
@@ -579,6 +635,8 @@ export class PlayCanvasApp implements FareSightSceneEngine {
       if (this.destroyed) { this.endSession(xr); return; }
       this.settleDive();
       this.activeXR = xr.type === pc.XRTYPE_AR ? 'ar' : 'vr';
+      this.neighborhoodFramed = false;
+      this.actions.recenter();
       if (this.activeXR === 'vr' && !this.gallery) this.buildGallery(xr.app.root, xr.app.graphicsDevice);
       this.orbit.enabled = false;
       this.canvas.style.cursor = '';
@@ -597,7 +655,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
       this.hitTestSource = undefined;
       this.placement = null;
       this.lastHit = -Infinity;
-      this.actions.entity.enabled = false;
+      this.actions.setVisible(false);
       this.reticle.enabled = false;
       this.placeDesktopScenes();
       this.orbit.enabled = true;
@@ -724,17 +782,30 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     const vr = this.activeXR === 'vr';
     if (this.gallery) {
       this.gallery.enabled = vr;
-      this.plinth.enabled = this.mode === 'map' || this.mode === 'station';
+      const visible = vr && (this.mode === 'map' || this.mode === 'station');
+      if (this.plinthVisible !== visible) {
+        this.plinthVisible = visible;
+        if (visible) this.reveal.show(this.plinth, 0.76, 420);
+        else this.reveal.hide(this.plinth, 0.60, 420);
+      }
     }
     this.lens.clearColor = passthrough ? new pc.Color(0, 0, 0, 0) : new pc.Color().fromString(studioBackdrop);
     const flat = this.activeXR === 'none';
     this.map.setImmersive(!flat);
-    this.map.root.enabled = this.mode === 'map' || !!this.dive;
-    this.station.root.enabled = this.mode === 'station' || this.mode === 'map' || !!this.dive;
-    this.venue.root.enabled = this.mode === 'venue' || (this.mode === 'dish' && !passthrough);
-    this.venue.setPresentation(this.mode === 'venue', this.mode === 'venue' || !passthrough);
-    this.dish.root.enabled = this.mode === 'dish';
-    this.dish.setPresentation(!passthrough, !passthrough || !!this.placement);
+    this.map.root.enabled = this.mode === 'map' || !!this.dive || this.leaving.has('map');
+    this.station.root.enabled = this.mode === 'station' || this.mode === 'map' || !!this.dive || this.leaving.has('station');
+    if (!this.dive) {
+      this.map.setVisible(this.mode === 'map');
+      this.station.setVisible(this.mode === 'station');
+      this.station.setPinsShown(this.mode === 'station');
+    }
+    const outgoingVenue = this.leaving.has('venue') || this.leaving.has('dish');
+    const venueRoom = this.mode === 'venue' || (this.mode === 'dish' && !passthrough) || outgoingVenue;
+    this.venue.root.enabled = venueRoom;
+    this.venue.setPresentation(this.mode === 'venue', this.mode === 'venue' || (this.mode === 'dish' && !passthrough));
+    const dish = this.mode === 'dish';
+    this.dish.root.enabled = dish || this.leaving.has('dish');
+    this.dish.setPresentation(dish && !passthrough, dish && (!passthrough || !!this.placement));
     this.dish.setGrounded(vr);
   }
 
@@ -747,6 +818,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     }
     if (this.mode === 'venue') {
       this.venue.root.setLocalPosition(0, 0, 0);
+      this.venue.roomRoot.setLocalPosition(0, 0, 0);
       const [x, y, z] = this.venue.spawn;
       this.rig.setLocalEulerAngles(0, -this.headYaw(), 0);
       this.rig.getRotation().transformVector(this.camera.getLocalPosition(), this.normal);
@@ -763,29 +835,40 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     if (this.mode === 'dish') {
       if (this.isPassthrough() && this.placement) this.dish.setPose(this.placement, this.placementYaw);
       else this.dish.setPose([x, y, z], yaw);
-      this.venue.root.setLocalPosition(x, y - 0.78, z);
+      this.venue.roomRoot.setLocalPosition(x, y - 0.78, z);
     } else {
-      const root = this.mode === 'map' ? this.map.root : this.station.root;
-      this.map.root.setLocalScale(1, 1, 1);
-      this.map.setOpacity(1);
-      this.tabletopYaw = yaw;
-      this.tabletopTurn = 0;
-      this.tabletopAngle = 0;
-      const rootY = this.mode === 'map' ? y + 0.1 : y;
-      root.setPosition(x, rootY, z);
-      root.setEulerAngles(0, yaw, 0);
+      const map = this.map.root;
+      const station = this.station.root;
+      map.setLocalScale(1, 1, 1);
+      if (!this.neighborhoodFramed) {
+        const mapY = this.mode === 'map' ? y + 0.1 : y - xrDeckLift;
+        map.setPosition(x, mapY, z);
+        map.setEulerAngles(0, yaw, 0);
+      }
       if (this.mode === 'map') this.parkStation();
       else {
-        this.station.root.setLocalScale(1, 1, 1);
+        if (!this.neighborhoodFramed || station.getLocalScale().x <= standbyScale) {
+          const at = map.getPosition();
+          station.setPosition(at.x, clamp(at.y + xrDeckLift, 0.35, 1.80), at.z);
+          station.setRotation(map.getRotation());
+        }
+        station.setLocalScale(1, 1, 1);
         this.station.setPinsShown(true);
       }
-      if (this.activeXR === 'vr') {
-        const height = Math.max(0.1, rootY - (this.mode === 'station' ? 0.16 : 0.02));
-        this.plinth.setPosition(x, 0, z);
-        this.pedestal.setLocalPosition(0, height / 2, 0);
-        this.pedestal.setLocalScale(0.36, height, 0.36);
-      }
+      this.neighborhoodFramed = true;
     }
+  }
+
+  private updatePlinth(): void {
+    if (this.activeXR !== 'vr' || !this.plinth?.enabled || (this.mode !== 'map' && this.mode !== 'station')) return;
+    const map = this.map.root.getPosition();
+    const station = this.station.root.getPosition();
+    const travel = this.dive ? smooth((this.dive.u - 0.12) / 0.78) : Number(this.mode === 'station');
+    const stage = this.dive?.stage ?? station;
+    const height = Math.max(0.10, pc.math.lerp(map.y - 0.02, stage.y - 0.16, travel));
+    this.plinth.setPosition(pc.math.lerp(map.x, stage.x, travel), 0, pc.math.lerp(map.z, stage.z, travel));
+    this.pedestal.setLocalPosition(0, height / 2, 0);
+    this.pedestal.setLocalScale(0.36, height, 0.36);
   }
 
   private headYaw(): number {
@@ -798,6 +881,22 @@ export class PlayCanvasApp implements FareSightSceneEngine {
 
   private awaitingPlacement(): boolean {
     return this.mode === 'dish' && this.isPassthrough() && !this.placement;
+  }
+
+  private activeTurntable(): PickBounds | null {
+    if (this.dive || this.xrFramePending || this.awaitingPlacement() || this.mode === 'venue') return null;
+    return this.turntables[this.mode];
+  }
+
+  private turntableMoved(): void {
+    if (this.mode !== 'dish') return;
+    if (this.activeXR === 'vr') this.dish.setGrounded(true);
+    if (this.isPassthrough() && this.placement) {
+      const { x, y, z } = this.dish.root.getPosition();
+      const forward = this.dish.root.forward;
+      this.placement = [x, y, z];
+      this.placementYaw = Math.atan2(-forward.x, -forward.z) * pc.math.RAD_TO_DEG;
+    }
   }
 
   private hasRecentHit(): boolean { return performance.now() - this.lastHit < 350; }
@@ -814,8 +913,13 @@ export class PlayCanvasApp implements FareSightSceneEngine {
       case 'map': return this.map.targets;
       case 'station': return this.station.targets;
       case 'venue': return this.venue.targets;
-      case 'dish': return [];
+      case 'dish': return this.dish.targets;
     }
+  }
+
+  private activeMenu() {
+    const menu = this.mode === 'venue' ? this.venue?.menu : this.mode === 'dish' ? this.dish?.menu : undefined;
+    return menu?.entity.enabled ? menu : undefined;
   }
 
   private aimRay(clientX: number, clientY: number): boolean {
@@ -835,32 +939,39 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private update(dt: number): void {
     if (this.destroyed) return;
     // The transition only moves scene objects; the camera stays under the viewer's control.
-    if (this.dive) this.stepDive(Math.min(dt, 1 / 30));
+    if (this.dive) {
+      if (this.reducedMotion.matches) this.settleDive();
+      else this.stepDive(Math.min(dt, 1 / 30));
+    }
     if (this.activeXR === 'none') this.orbit.update(dt);
     else {
       if (this.waitingForXRFrame) return;
       const turned = this.presence?.updateControls(dt, this.activeXR === 'vr');
       const framing = this.xrFramePending;
       if (this.xrFramePending) this.frameXR();
-      if (this.mode === 'map' || this.mode === 'station') {
-        this.tabletopAngle = pc.math.lerp(this.tabletopAngle, this.tabletopTurn, damp(dt, 12));
-        const root = this.mode === 'map' ? this.map.root : this.station.root;
-        root.setLocalEulerAngles(0, this.tabletopYaw + this.tabletopAngle, 0);
-      }
+      this.updatePlinth();
       const placing = this.awaitingPlacement();
       const found = placing && this.hasRecentHit();
       this.reticle.enabled = found;
       if (found) this.reticle.setPosition(this.hitPosition.x, this.hitPosition.y + 0.006, this.hitPosition.z);
       const placementText = placing ? (found ? 'Select to place dishes' : 'Look at a tabletop or use Virtual Table') : '';
-      this.actions.entity.enabled = true;
-      this.actions.setState(this.activeXR === 'ar', this.virtualTable, placementText);
-      this.actions.update(this.camera, dt, this.presence?.leftPalmWrist() ?? null, !!turned || framing);
+      this.actions.setVisible(true);
+      this.actions.setState(this.activeXR === 'ar', this.virtualTable, placementText, this.mode);
+      this.actions.update(this.camera, dt, this.presence?.leftPalmWrist() ?? null, !!turned || framing,
+        (target) => this.presence?.isTargetEngaged(target) ?? false);
     }
     const labels = this.dive ? 1 - smooth(this.dive.u / 0.14) : this.mode === 'map' ? 1 : 0;
     this.map.update(dt, this.camera, this.lens, labels);
     if (this.mode === 'station' || this.dive) this.station.update(dt, this.camera);
-    if (this.mode === 'dish') this.dish.update(dt, this.camera);
-    if (this.activeXR !== 'none') this.presence?.updatePointers();
+    if (this.mode === 'dish') this.dish.update(dt);
+    this.splats.update(dt);
+    this.reveal.update(dt);
+    this.updateSceneExits(dt);
+    if (this.activeXR !== 'none') {
+      this.presence?.updatePointers();
+      const menu = this.activeMenu();
+      menu?.setHoveredDish(menu.targets.find((target) => this.presence?.isTargetEngaged(target))?.key);
+    }
     if (dt <= 0) return;
     this.fps = this.fps ? pc.math.lerp(this.fps, 1 / dt, damp(dt, 2.8)) : 1 / dt;
     this.statsTime += dt;
@@ -885,6 +996,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     this.resizeObserver?.disconnect();
     this.orbit?.destroy();
     this.presence?.destroy();
+    this.reveal?.destroy();
     this.actions?.destroy();
     this.gallery?.destroy();
     for (const surface of this.galleryMaterials) surface.destroy();

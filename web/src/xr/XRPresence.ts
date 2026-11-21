@@ -1,10 +1,13 @@
 import * as pc from 'playcanvas';
-import { brass, calloutAmber, child, clamp, material, shape, type HitResult, type HitTarget, type ScenePicker } from './sceneSupport';
+import type { PhysicalMenuBook } from './PhysicalMenuBook';
+import { brass, calloutAmber, child, clamp, coastTurntable, material, shape, smooth, TurnVelocity, wrapAngle,
+  type HitTarget, type PickBounds, type ScenePicker } from './sceneSupport';
 
 const pointerRange = 4.5;
-const pokeRadius = 0.025;
 const pokeDebounce = 400;
 const pinchRange = 0.035;
+const tickAngle = Math.PI / 12;
+const physicalReach = 0.30;
 
 interface HandModel {
   root: pc.Entity;
@@ -23,7 +26,8 @@ interface Pointer {
   contact: HitTarget | null;
   lastPoke: number;
   flashUntil: number;
-  selectStarted: boolean;
+  selectConsumed: boolean;
+  selectTarget: HitTarget | null;
   snapHeld: boolean;
   recenterHeld: boolean;
 }
@@ -33,7 +37,30 @@ interface PresenceActions {
   buttons: readonly HitTarget[];
   selectEmpty: () => void;
   recenter: () => void;
+  deck: PickBounds;
+  holdDeck: (held: boolean) => void;
+  menu: () => PhysicalMenuBook | undefined;
+  turntable: () => PickBounds | null;
+  turntableMoved: () => void;
   spin: (radians: number) => void;
+}
+
+interface GrabInput {
+  source: pc.XrInputSource;
+  kind: 'grip' | 'pinch';
+}
+
+interface Grab {
+  inputs: GrabInput[];
+  mode: 'deck' | 'book' | 'carry' | 'spin' | 'tap';
+  entity: pc.Entity | null;
+  began: number;
+  start: pc.Vec3;
+  previous: pc.Vec3;
+  offset: pc.Vec3;
+  yaw: number | null;
+  movement: number;
+  tick: number;
 }
 
 type HapticGamepad = Gamepad & {
@@ -74,14 +101,15 @@ export class XRPresence {
   private wristToIndex = new pc.Vec3();
   private wristToPinky = new pc.Vec3();
   private toHead = new pc.Vec3();
-  private held: pc.XrInputSource | null = null;
-  private hasGripSample = false;
-  private localFromWorld = new pc.Mat4();
-  private inverseRigRotation = new pc.Quat();
-  private gripPosition = new pc.Vec3();
-  private gripRotation = new pc.Quat();
-  private lastGripPosition = new pc.Vec3();
-  private lastGripRotation = new pc.Quat();
+  private grab: Grab | null = null;
+  private anchor = new pc.Vec3();
+  private secondHand = new pc.Vec3();
+  private anchoredPosition = new pc.Vec3();
+  private grabYaw: number | null = null;
+  private velocity = new TurnVelocity();
+  private coast = 0;
+  private coastRoot: pc.Entity | null = null;
+  private coastCarry = false;
 
   constructor(
     private xr: pc.XrManager, private root: pc.Entity, private rig: pc.Entity,
@@ -92,7 +120,7 @@ export class XRPresence {
       input.on('add', this.add, this), input.on('remove', this.remove, this),
       input.on('selectstart', this.selectStart, this), input.on('select', this.select, this),
       input.on('selectend', this.selectEnd, this),
-      input.on('squeezestart', this.squeezeStart, this), input.on('squeeze', this.squeeze, this),
+      input.on('squeezestart', this.squeezeStart, this),
       input.on('squeezeend', this.squeezeEnd, this),
       xr.on('start', () => input.inputSources.forEach((source) => this.add(source))),
       xr.on('end', this.clear, this),
@@ -104,7 +132,7 @@ export class XRPresence {
     const root = child(this.root, `XR ${source.handedness} input`);
     const pointer: Pointer = {
       root, hover: null, contact: null, lastPoke: -Infinity, flashUntil: -Infinity,
-      selectStarted: false, snapHeld: false, recenterHeld: false,
+      selectConsumed: false, selectTarget: null, snapHeld: false, recenterHeld: false,
     };
     if (source.hand) pointer.hand = this.makeHand(root, source.hand);
     if (source.targetRayMode === pc.XRTARGETRAY_POINTER) {
@@ -180,7 +208,7 @@ export class XRPresence {
   private remove(source: pc.XrInputSource): void {
     const pointer = this.pointers.get(source);
     if (!pointer) return;
-    this.squeezeEnd(source);
+    this.releaseGrab(source, false);
     pointer.root.destroy();
     pointer.hand?.tips.destroy();
     pointer.controller?.destroy();
@@ -188,6 +216,7 @@ export class XRPresence {
   }
 
   private clear(): void {
+    this.resetGrip();
     for (const source of this.pointers.keys()) this.remove(source);
   }
 
@@ -200,93 +229,315 @@ export class XRPresence {
     void gamepad?.hapticActuators?.[0]?.pulse(intensity, duration).catch(() => {});
   }
 
+  private aim(source: pc.XrInputSource): void {
+    this.ray.origin.copy(source.getOrigin());
+    this.ray.direction.copy(source.getDirection()).normalize();
+  }
+
   private selectStart(source: pc.XrInputSource): void {
     const pointer = this.pointers.get(source);
     if (!this.interactive || !pointer) return;
-    pointer.selectStarted = true;
+    pointer.selectConsumed = this.isHolding(source);
+    pointer.selectTarget = null;
+    if (pointer.selectConsumed) return;
+    if (source.hand?.tracking && this.handPosition(source, this.anchor)) {
+      this.aim(source);
+      const hit = this.picker.raycast(this.ray, this.actions.targets(), pointerRange);
+      const key = this.picker.nearPanel(this.anchor, this.actions.buttons, 0.016, true);
+      const menu = this.actions.menu();
+      const row = menu && this.picker.nearPanel(this.anchor, menu.targets, 0.016);
+      const aimedKey = this.picker.raycast(this.ray, this.actions.buttons, pointerRange, true);
+      const deck = this.picker.raycast(this.ray, [this.actions.deck], pointerRange);
+      const touchesDeck = this.picker.nearPanel(this.anchor, [this.actions.deck], 0.025);
+      const aimsAtDeck = deck && (!hit || deck.distance <= hit.distance + 0.003);
+      if (!key && !row && (touchesDeck || (aimsAtDeck && !aimedKey))) {
+        pointer.selectConsumed = true;
+        this.beginGrab(source, 'pinch', 'deck', this.actions.deck.entity);
+        return;
+      }
+      if (menu && !key && !row) {
+        const book = this.picker.raycast(this.ray, menu.gripBounds, pointerRange);
+        const aimedAtRow = hit && menu.targets.includes(hit.target);
+        if (this.picker.nearPanel(this.anchor, menu.gripBounds, 0.025) ||
+          (book && !aimedAtRow && (!hit || book.distance < hit.distance))) {
+          pointer.selectConsumed = true;
+          this.beginGrab(source, 'pinch', 'book', menu.entity);
+          return;
+        }
+      }
+      pointer.selectTarget = key ?? row ?? (aimedKey && aimsAtDeck ? aimedKey.target : hit?.target) ?? null;
+      if (!pointer.selectTarget) {
+        const turntable = this.actions.turntable();
+        const near = turntable && this.picker.nearPanel(this.anchor, [turntable], physicalReach);
+        pointer.selectConsumed = true;
+        this.beginGrab(source, 'pinch', near ? 'carry' : turntable ? 'spin' : 'tap', turntable?.entity ?? null);
+        return;
+      }
+    }
     pointer.flashUntil = performance.now() + 140;
     this.pulse(source, 0.65, 35);
   }
 
   private select(source: pc.XrInputSource): void {
     const pointer = this.pointers.get(source);
-    if (!this.interactive || (source.hand && !source.hand.tracking)) return;
-    if (!pointer?.selectStarted) this.selectStart(source);
+    if (!this.interactive || pointer?.selectConsumed || this.isHolding(source) ||
+      (source.hand && !source.hand.tracking)) return;
     if (pointer) pointer.flashUntil = performance.now() + 140;
-    const hit = this.hit(source, this.actions.targets());
-    if (hit) {
-      // A pinch near a button can follow a physical poke on the same gesture.
-      if (pointer?.contact !== hit.target && (!pointer || performance.now() - pointer.lastPoke >= pokeDebounce)) {
-        hit.target.action();
+    this.aim(source);
+    const hit = this.picker.raycast(this.ray, this.actions.targets(), pointerRange);
+    const deck = this.picker.raycast(this.ray, [this.actions.deck], pointerRange);
+    const picked = source.hand ? pointer?.selectTarget : hit?.target;
+    // Chassis occludes scene controls behind it, but the keys sit on its face.
+    const onDeck = picked && this.actions.buttons.includes(picked);
+    const directlyTouched = picked && source.hand && this.handPosition(source, this.anchor) &&
+      (onDeck || this.actions.menu()?.targets.includes(picked)) &&
+      this.picker.nearPanel(this.anchor, [picked], 0.018);
+    if (picked && picked.enabled !== false && picked.entity.enabled &&
+      (directlyTouched || (hit?.target === picked && (onDeck || !deck || deck.distance > hit.distance)))) {
+      if (pointer?.contact !== picked && (!pointer || performance.now() - pointer.lastPoke >= pokeDebounce)) {
+        picked.action();
       }
-    } else if (!pointer || performance.now() - pointer.lastPoke >= pokeDebounce) {
+    } else if (!picked && !deck && !source.hand) {
       this.actions.selectEmpty();
     }
-    this.selectEnd(source);
   }
 
   private selectEnd(source: pc.XrInputSource): void {
-    const pointer = this.pointers.get(source);
-    if (pointer) pointer.selectStarted = false;
-  }
-
-  private hit(source: pc.XrInputSource, targets: readonly HitTarget[]): HitResult | null {
-    this.ray.origin.copy(source.getOrigin());
-    this.ray.direction.copy(source.getDirection()).normalize();
-    return this.picker.raycast(this.ray, targets, pointerRange);
+    if (this.grab?.inputs.some((input) => input.source === source && input.kind === 'pinch')) this.releaseGrab(source, true);
   }
 
   private squeezeStart(source: pc.XrInputSource): void {
-    if (!this.interactive || this.held || source.targetRayMode !== pc.XRTARGETRAY_POINTER) return;
-    this.held = source;
-    this.hasGripSample = false;
-    this.updateGrip();
-  }
-
-  private squeeze(source: pc.XrInputSource): void {
-    if (this.interactive && this.held === source) this.updateGrip();
+    if (!this.interactive || source.hand || source.targetRayMode !== pc.XRTARGETRAY_POINTER ||
+      !this.handPosition(source, this.anchor)) return;
+    this.aim(source);
+    const deck = this.picker.raycast(this.ray, [this.actions.deck], pointerRange);
+    const menu = this.actions.menu();
+    const book = menu && this.picker.raycast(this.ray, menu.gripBounds, pointerRange);
+    const turntable = this.actions.turntable();
+    const model = turntable && this.picker.raycast(this.ray, [turntable], pointerRange);
+    const touchesDeck = this.picker.nearPanel(this.anchor, [this.actions.deck], 0.04);
+    const touchesBook = menu && this.picker.nearPanel(this.anchor, menu.gripBounds, 0.035) &&
+      !this.picker.nearPanel(this.anchor, menu.targets, 0.015);
+    if (touchesDeck || (!touchesBook && deck && (!model || deck.distance <= model.distance) &&
+      (!book || deck.distance <= book.distance))) {
+      this.beginGrab(source, 'grip', 'deck', this.actions.deck.entity);
+    } else if (menu && (touchesBook || (book && (!model || book.distance < model.distance)))) {
+      if (touchesBook || !this.picker.raycast(this.ray, menu.targets, pointerRange)) {
+        this.beginGrab(source, 'grip', 'book', menu.entity);
+      }
+    } else if (turntable) {
+      this.beginGrab(source, 'grip', 'carry', turntable.entity);
+    }
   }
 
   private squeezeEnd(source: pc.XrInputSource): void {
-    if (this.held === source) {
-      this.held = null;
-      this.hasGripSample = false;
+    if (this.grab?.inputs.some((input) => input.source === source && input.kind === 'grip')) this.releaseGrab(source, true);
+  }
+
+  resetGrip(): void {
+    if (this.grab?.mode === 'deck') this.actions.holdDeck(false);
+    this.grab = null;
+    this.coast = 0;
+    this.coastRoot = null;
+  }
+
+  private isHolding(source: pc.XrInputSource): boolean {
+    return this.grab?.inputs.some((input) => input.source === source) ?? false;
+  }
+
+  private handPosition(source: pc.XrInputSource, out: pc.Vec3): boolean {
+    const hand = source.hand;
+    if (!hand) {
+      const position = source.getLinearVelocity() && source.getPosition();
+      if (!position) return false;
+      out.copy(position);
+      return true;
+    }
+    if (!hand.tracking) return false;
+    const thumb = hand.getJointById('thumb-tip');
+    const index = hand.getJointById('index-finger-tip');
+    if (thumb && index) out.lerp(thumb.getPosition(), index.getPosition(), 0.5);
+    else if (hand.wrist) out.copy(hand.wrist.getPosition());
+    else return false;
+    return true;
+  }
+
+  private sampleGrab(grab: Grab): boolean {
+    const [first, second] = grab.inputs;
+    if (!this.handPosition(first.source, this.anchor)) return false;
+    this.grabYaw = null;
+    if (second) {
+      if (!this.handPosition(second.source, this.secondHand)) return false;
+      const x = this.secondHand.x - this.anchor.x;
+      const z = this.secondHand.z - this.anchor.z;
+      if (Math.hypot(x, z) >= 0.08) this.grabYaw = Math.atan2(x, z);
+      this.anchor.lerp(this.anchor, this.secondHand, 0.5);
+    } else if (grab.mode === 'carry') {
+      const source = first.source;
+      const wrist = source.hand?.wrist;
+      const knuckle = source.hand?.getJointById('middle-finger-phalanx-proximal');
+      this.heading.set(0, 0, 0);
+      if (wrist && knuckle) {
+        this.heading.sub2(knuckle.getPosition(), wrist.getPosition()).normalize();
+      } else {
+        const rotation = wrist ? wrist.getRotation() : source.getRotation();
+        rotation?.transformVector(pc.Vec3.FORWARD, this.heading);
+      }
+      if (Math.hypot(this.heading.x, this.heading.z) >= 0.20) this.grabYaw = Math.atan2(-this.heading.x, -this.heading.z);
+    }
+    return true;
+  }
+
+  private rebaseGrab(grab: Grab, preserveMovement = false): boolean {
+    if (!this.sampleGrab(grab)) return false;
+    if (preserveMovement) grab.start.add(this.displacement.sub2(this.anchor, grab.previous));
+    grab.previous.copy(this.anchor);
+    grab.yaw = this.grabYaw;
+    if (grab.entity && (grab.mode === 'carry' || grab.mode === 'deck' || grab.mode === 'book')) {
+      grab.offset.sub2(grab.entity.getPosition(), this.anchor);
+    }
+    return true;
+  }
+
+  private beginGrab(source: pc.XrInputSource, kind: GrabInput['kind'], mode: Grab['mode'], entity: pc.Entity | null): void {
+    if (this.isHolding(source)) return;
+    const now = performance.now();
+    if (this.grab) {
+      const current = this.grab;
+      if (current.mode !== 'carry' || mode !== 'carry' || current.entity !== entity || current.inputs.length !== 1) return;
+      this.updateGrab(now);
+      if (this.grab !== current) return;
+      current.inputs.push({ source, kind });
+      if (!this.rebaseGrab(current)) {
+        current.inputs.pop();
+        return;
+      }
+      const pointer = this.pointers.get(source);
+      if (pointer) pointer.selectConsumed = true;
+      this.velocity.reset(now);
+      return;
+    }
+    const grab: Grab = {
+      inputs: [{ source, kind }], mode, entity, began: now,
+      start: new pc.Vec3(), previous: new pc.Vec3(), offset: new pc.Vec3(),
+      yaw: null, movement: 0, tick: 0,
+    };
+    if (!this.rebaseGrab(grab)) return;
+    grab.start.copy(grab.previous);
+    this.grab = grab;
+    const pointer = this.pointers.get(source);
+    if (pointer) pointer.selectConsumed = true;
+    this.coast = 0;
+    this.velocity.reset(now);
+    if (mode === 'deck') {
+      this.actions.holdDeck(true);
+    }
+    if (mode === 'deck' || mode === 'book') this.pulse(source, 0.22, 18);
+  }
+
+  private spinDelta(position: pc.Vec3, previous: pc.Vec3, center: pc.Vec3): number {
+    const x = position.x - center.x;
+    const z = position.z - center.z;
+    const prevX = previous.x - center.x;
+    const prevZ = previous.z - center.z;
+    const radius = Math.hypot(x, z);
+    const prevRadius = Math.hypot(prevX, prevZ);
+    const polar = wrapAngle(Math.atan2(x, z) - Math.atan2(prevX, prevZ));
+    this.right.copy(this.camera.right);
+    this.right.y = 0;
+    this.right.normalize();
+    const projected = this.displacement.sub2(position, previous).dot(this.right) / Math.max(0.32, position.distance(center));
+    const nearPivot = smooth((Math.min(radius, prevRadius) - 0.04) / 0.04);
+    const elevation = Math.max(Math.abs(position.y - center.y), Math.abs(previous.y - center.y));
+    const remote = smooth((Math.max(radius, prevRadius, elevation * 2.5) - 0.95) / 0.4);
+    return pc.math.lerp(projected, polar, nearPivot * (1 - remote));
+  }
+
+  private updateGrab(now: number): void {
+    const grab = this.grab;
+    if (!grab) return;
+    if ((grab.mode === 'carry' || grab.mode === 'spin') && this.actions.turntable()?.entity !== grab.entity) {
+      this.resetGrip();
+      return;
+    }
+    if (grab.mode === 'book' && this.actions.menu()?.entity !== grab.entity) {
+      this.resetGrip();
+      return;
+    }
+    if (!this.sampleGrab(grab)) {
+      const lost = grab.inputs.find(({ source }) => !this.handPosition(source, this.secondHand));
+      if (lost) this.releaseGrab(lost.source, false);
+      return;
+    }
+    const { mode, entity } = grab;
+    let delta = 0;
+    if (entity && (mode === 'carry' || mode === 'deck' || mode === 'book')) {
+      if (mode === 'carry' && this.grabYaw !== null && grab.yaw !== null) {
+        delta = wrapAngle(this.grabYaw - grab.yaw);
+        const degrees = delta * pc.math.RAD_TO_DEG;
+        this.rotation.setFromAxisAngle(pc.Vec3.UP, degrees).transformVector(grab.offset, grab.offset);
+        if (delta) entity.rotate(0, degrees, 0);
+      }
+      this.anchoredPosition.add2(this.anchor, grab.offset);
+      if (mode === 'carry') {
+        const height = clamp(this.anchoredPosition.y, 0.35, 1.80);
+        if (height !== this.anchoredPosition.y) grab.offset.y = height - this.anchor.y;
+        this.anchoredPosition.y = height;
+      }
+      if (delta || !entity.getPosition().equals(this.anchoredPosition)) {
+        entity.setPosition(this.anchoredPosition);
+        if (mode === 'carry') this.actions.turntableMoved();
+        if (mode === 'book') this.actions.menu()?.markMoved();
+      }
+    } else if (entity && mode === 'spin') {
+      delta = this.spinDelta(this.anchor, grab.previous, entity.getPosition());
+      if (delta) this.actions.spin(delta);
+    }
+    if (mode === 'spin' || mode === 'carry') {
+      this.velocity.add(delta, now);
+      grab.tick += delta;
+      if (Math.abs(grab.tick) >= tickAngle) {
+        grab.tick %= tickAngle;
+        for (const input of grab.inputs) if (input.kind === 'grip') this.pulse(input.source, 0.14, 10);
+      }
+    }
+    grab.movement = Math.max(grab.movement, this.anchor.distance(grab.start));
+    grab.previous.copy(this.anchor);
+    grab.yaw = this.grabYaw;
+  }
+
+  private releaseGrab(source: pc.XrInputSource, deliberate: boolean): void {
+    if (!this.isHolding(source)) return;
+    const now = performance.now();
+    const allowRelease = deliberate && this.interactive;
+    if (allowRelease) this.updateGrab(now);
+    const grab = this.grab;
+    if (!grab || !this.isHolding(source)) return;
+    grab.inputs = grab.inputs.filter((input) => input.source !== source);
+    if (grab.inputs.length && this.rebaseGrab(grab)) {
+      if (!allowRelease) this.velocity.reset(now);
+      return;
+    }
+    this.grab = null;
+    if (grab.mode === 'deck' || grab.mode === 'book') {
+      if (grab.mode === 'deck') this.actions.holdDeck(false);
+      if (allowRelease) this.pulse(source, 0.22, 18);
+    } else if (allowRelease) {
+      if (grab.mode === 'tap' && now - grab.began < 250 && grab.movement < 0.025) {
+        this.actions.selectEmpty();
+      } else if (grab.entity) {
+        this.coast = this.velocity.release(now);
+        this.coastRoot = grab.entity;
+        this.coastCarry = grab.mode === 'carry';
+      }
     }
   }
 
-  resetGrip(): void { this.hasGripSample = false; }
-
-  private updateGrip(): void {
-    const source = this.held;
-    if (!source) return;
-    const wrist = source.hand?.tracking ? source.hand.wrist : null;
-    const position = source.getLocalPosition();
-    const rotation = source.getLocalRotation();
-    if (wrist) {
-      this.localFromWorld.invert(this.rig.getWorldTransform()).transformPoint(wrist.getPosition(), this.gripPosition);
-      this.inverseRigRotation.invert(this.rig.getRotation());
-      this.gripRotation.mul2(this.inverseRigRotation, wrist.getRotation());
-    } else if (source.grip && position && rotation && source.getLinearVelocity()) {
-      this.gripPosition.copy(position);
-      this.gripRotation.copy(rotation);
-    } else {
-      this.hasGripSample = false;
-      return;
+  isTargetEngaged(target: HitTarget): boolean {
+    for (const pointer of this.pointers.values()) {
+      if (pointer.hover === target || pointer.contact === target) return true;
     }
-    if (this.hasGripSample) {
-      this.rotation.invert(this.lastGripRotation);
-      this.rotation.mul2(this.gripRotation, this.rotation);
-      const yaw = 2 * Math.atan2(this.rotation.y, this.rotation.w);
-      const twist = Math.atan2(Math.sin(yaw), Math.cos(yaw));
-      this.displacement.sub2(this.gripPosition, this.lastGripPosition);
-      this.camera.getLocalRotation().transformVector(pc.Vec3.FORWARD, this.heading);
-      this.right.set(-this.heading.z, 0, this.heading.x).normalize();
-      const drag = this.displacement.dot(this.right) * 4;
-      if (this.displacement.lengthSq() < 0.04) this.actions.spin(clamp(twist + drag, -0.3, 0.3));
-    }
-    this.lastGripPosition.copy(this.gripPosition);
-    this.lastGripRotation.copy(this.gripRotation);
-    this.hasGripSample = true;
+    return false;
   }
 
   updateControls(dt: number, vr: boolean): boolean {
@@ -294,8 +545,19 @@ export class XRPresence {
       this.resetGrip();
       return false;
     }
-    this.updateGrip();
+    const now = performance.now();
+    if (this.grab) this.updateGrab(now);
+    else if (this.coast && this.coastRoot) {
+      const entity = this.coastRoot;
+      this.coast = this.actions.turntable()?.entity === entity ? coastTurntable(this.coast, dt, 3.6, (radians) => {
+        if (this.coastCarry) {
+          entity.rotate(0, radians * pc.math.RAD_TO_DEG, 0);
+          this.actions.turntableMoved();
+        } else this.actions.spin(radians);
+      }) : 0;
+    }
     let turned = false;
+    let movedRig = false;
     for (const [source, pointer] of this.pointers) {
       if (source.targetRayMode !== pc.XRTARGETRAY_POINTER || source.hand || !source.gamepad) continue;
       const { axes, buttons } = source.gamepad;
@@ -316,6 +578,7 @@ export class XRPresence {
         this.displacement.y = 0;
         this.rig.translate(this.displacement);
         turned = true;
+        movedRig = true;
       } else if (source.handedness === pc.XRHAND_LEFT) {
         const strength = Math.hypot(x, y);
         if (strength <= 0.18) continue;
@@ -327,8 +590,10 @@ export class XRPresence {
         const speed = 1.2 * Math.min(dt, 0.05) * (Math.min(strength, 1) - 0.18) / (0.82 * strength);
         this.displacement.copy(this.right).mulScalar(x * speed).add(this.heading.mulScalar(-y * speed));
         this.rig.translate(this.displacement);
+        movedRig = true;
       }
     }
+    if (movedRig && this.grab) this.rebaseGrab(this.grab, true);
     return turned;
   }
 
@@ -337,6 +602,7 @@ export class XRPresence {
     for (const source of this.pointers.keys()) {
       const hand = source.hand;
       if (source.handedness !== pc.XRHAND_LEFT || !hand?.tracking || !hand.wrist) continue;
+      if (this.grab?.mode === 'carry' && this.isHolding(source)) continue;
       const index = hand.getJointById('index-finger-phalanx-proximal');
       const pinky = hand.getJointById('pinky-finger-phalanx-proximal');
       if (!index || !pinky) continue;
@@ -345,13 +611,15 @@ export class XRPresence {
       this.wristToPinky.sub2(pinky.getPosition(), wrist);
       this.palmNormal.cross(this.wristToIndex, this.wristToPinky).normalize();
       this.toHead.sub2(this.camera.getPosition(), wrist).normalize();
-      if (this.palmNormal.dot(this.toHead) > 0.55) return wrist;
+      if (this.palmNormal.dot(this.toHead) > 0.78 && this.camera.forward.dot(this.toHead) < -0.30) return wrist;
     }
     return null;
   }
 
   updatePointers(): void {
     const targets = this.actions.targets();
+    const menu = this.actions.menu();
+    const pokeTargets = menu ? [...this.actions.buttons, ...menu.targets] : this.actions.buttons;
     const now = performance.now();
     const visible = this.interactive;
     this.trackedHands.clear();
@@ -378,8 +646,9 @@ export class XRPresence {
       if (pointer.controller) pointer.controller.enabled = showController;
 
       const tip = hand?.getJointById('index-finger-tip');
-      const contact = tip ? this.picker.nearPanel(tip.getPosition(), this.actions.buttons, pokeRadius) : null;
-      if (contact && !pointer.contact && now - pointer.lastPoke >= pokeDebounce) {
+      const contact = tip ? this.picker.nearPanel(tip.getPosition(), pokeTargets, clamp(tip.radius + 0.003, 0.004, 0.012)) : null;
+      const holding = this.isHolding(source);
+      if (contact && !pointer.contact && !holding && now - pointer.lastPoke >= pokeDebounce) {
         pointer.lastPoke = now;
         pointer.flashUntil = now + 140;
         contact.action();
@@ -387,21 +656,24 @@ export class XRPresence {
       pointer.contact = contact;
       if (!visible || (source.hand && !hand) || (source.grip && !hasGrip)) {
         pointer.hover = null;
-        pointer.selectStarted = false;
         if (pointer.beam) pointer.beam.enabled = false;
         if (pointer.dot) pointer.dot.enabled = false;
         continue;
       }
       if (!pointer.beam || !pointer.dot) continue;
-      const hit = this.hit(source, targets);
-      if (hit && hit.target !== pointer.hover) this.pulse(source, 0.25, 18);
-      pointer.hover = hit?.target ?? null;
+      this.aim(source);
+      const hit = holding ? null : this.picker.raycast(this.ray, targets, pointerRange);
+      const deck = this.picker.raycast(this.ray, [this.actions.deck], pointerRange);
+      const ui = hit && (!deck || this.actions.buttons.includes(hit.target) || hit.distance < deck.distance) ? hit : null;
+      if (ui && ui.target !== pointer.hover) this.pulse(source, 0.25, 18);
+      pointer.hover = ui?.target ?? null;
+      const point = ui?.point ?? deck?.point;
       const flashing = now < pointer.flashUntil;
-      pointer.beam.render!.meshInstances[0].material = flashing ? this.flash : hit ? this.hovered : this.idle;
+      pointer.beam.render!.meshInstances[0].material = flashing ? this.flash : point ? this.hovered : this.idle;
       this.end.copy(this.ray.direction).mulScalar(pointerRange).add(this.ray.origin);
-      this.segment(pointer.beam, this.ray.origin, hit?.point ?? this.end, flashing ? 0.003 : 0.0018);
-      pointer.dot.enabled = !!hit;
-      if (hit) pointer.dot.setPosition(hit.point);
+      this.segment(pointer.beam, this.ray.origin, point ?? this.end, flashing ? 0.003 : 0.0018);
+      pointer.dot.enabled = !!point;
+      if (point) pointer.dot.setPosition(point);
     }
   }
 

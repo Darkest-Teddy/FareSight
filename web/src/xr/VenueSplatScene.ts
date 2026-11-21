@@ -1,8 +1,10 @@
 import * as pc from 'playcanvas';
 import type { XRAssetData, XRManifestData, XRPlaceData, XRRoomData } from './bridgeTypes';
-import { CanvasPanel3D } from './CanvasPanel3D';
+import { chamferedHousing, PhysicalPlaque } from './CanvasPanel3D';
+import type { JarvisReveal } from './JarvisReveal';
+import { PhysicalMenuBook } from './PhysicalMenuBook';
 import { isSplat, type SplatLoader } from './SplatLoader';
-import { amber, child, cyan, material, shape, type HitTarget, type XYZ } from './sceneSupport';
+import { assetBase, child, cyan, material, shape, type HitTarget, type ModelLibrary, type XYZ } from './sceneSupport';
 
 type Seating = XRRoomData['seating'];
 const defaultSpawn: XYZ = [0, 1.55, 2];
@@ -10,43 +12,89 @@ const defaultSpawn: XYZ = [0, 1.55, 2];
 export class VenueSplatScene {
   readonly root: pc.Entity;
   readonly roomRoot: pc.Entity;
+  readonly menu: PhysicalMenuBook;
   private cardsRoot: pc.Entity;
   private galleryRoot: pc.Entity;
   private peopleRoot: pc.Entity;
-  private header: CanvasPanel3D;
-  private fitPanel: CanvasPanel3D;
-  private gallery: CanvasPanel3D[] = [];
-  private dishes: CanvasPanel3D[] = [];
-  private dishTargets: HitTarget[] = [];
+  private header: PhysicalPlaque;
+  private fitPanel: PhysicalPlaque;
+  private headerStand: pc.Entity;
+  private fitStand: pc.Entity;
+  private plaqueModel: Promise<pc.ContainerResource | null>;
+  private gallery: PhysicalPlaque[] = [];
+  private lectern: pc.Entity;
+  private lecternTop: pc.Entity;
+  private lecternColumn: pc.Entity;
+  private lecternMaterials = [material('#523729'), material('#9c784b')];
   private figureMaterials = [material(cyan, 0.34), material('#ff9467', 0.36)];
+  private standMaterial = material('#4b433b');
   private place?: XRPlaceData;
   private manifest: XRManifestData | null = null;
   private asset: XRAssetData | null = null;
   private currentRoomReady = false;
+  private cardsVisible = false;
+  private galleryVisible = false;
+  private fitVisible = false;
   private revision = 0;
   private fit = { enabled: false, groupSize: 1, seating: 'seated' as Seating };
   private fitKey = '';
   private figures: pc.Entity[] = [];
 
   constructor(
-    parent: pc.Entity, private device: pc.GraphicsDevice, private splats: SplatLoader,
-    private selectDish: (id: string) => void,
+    parent: pc.Entity, private device: pc.GraphicsDevice, models: ModelLibrary, private splats: SplatLoader, private reveal: JarvisReveal,
+    selectDish: (id: string) => void,
   ) {
     this.root = child(parent, 'Venue');
     this.roomRoot = child(this.root, 'Venue room capture');
     this.cardsRoot = child(this.root, 'Venue information');
     this.galleryRoot = child(this.cardsRoot, 'Photo gallery arc');
     this.peopleRoot = child(this.cardsRoot, 'Group size preview');
-    this.header = new CanvasPanel3D(device, this.cardsRoot, 'Preview provenance', 0.84, 0.245);
-    this.fitPanel = new CanvasPanel3D(device, this.peopleRoot, 'Floor-space estimate', 0.85, 0.205);
+    this.plaqueModel = models.load(`${assetBase}room-plaque-stand.glb`);
+    this.header = this.makePlaque(this.cardsRoot, 'Preview provenance', 0.84, 0.245);
+    this.fitPanel = this.makePlaque(this.peopleRoot, 'Floor-space estimate', 0.85, 0.205);
+    this.headerStand = this.mountPlaque(this.header);
+    this.fitStand = this.mountPlaque(this.fitPanel);
+    this.menu = new PhysicalMenuBook(device, this.cardsRoot, models, reveal, selectDish);
+    this.lectern = child(this.cardsRoot, 'Host lectern');
+    const [walnut, brass] = this.lecternMaterials;
+    this.lecternColumn = shape(this.lectern, 'Walnut upright', 'cylinder', walnut, [0, 0.5, 0], [0.076, 1, 0.076]);
+    chamferedHousing(device, this.lectern, 'Weighted walnut foot', walnut, [0, 0.024, 0], [0.36, 0.29, 0.048], 0.011)
+      .setLocalEulerAngles(-90, 0, 0);
+    shape(this.lectern, 'Brass foot collar', 'cylinder', brass, [0, 0.055, 0], [0.108, 0.018, 0.108]);
+    this.lecternTop = child(this.lectern, 'Walnut reading shelf');
+    chamferedHousing(device, this.lecternTop, 'Brass shelf rim', brass, [0, -0.009, 0], [0.438, 0.277, 0.018], 0.005)
+      .setLocalEulerAngles(-90, 0, 0);
+    chamferedHousing(device, this.lecternTop, 'Walnut shelf', walnut, [0, -0.021, 0], [0.434, 0.273, 0.024], 0.006)
+      .setLocalEulerAngles(-90, 0, 0);
+    this.lectern.enabled = false;
     this.peopleRoot.enabled = false;
+    this.header.entity.enabled = false;
+    this.galleryRoot.enabled = false;
   }
 
   get spawn(): XYZ { return this.manifest?.spawn_point ?? this.asset?.spawn_point ?? defaultSpawn; }
 
-  get targets(): HitTarget[] { return this.dishTargets; }
+  get targets(): HitTarget[] { return this.menu.targets; }
 
-  async open(place: XRPlaceData, manifest: XRManifestData | null): Promise<void> {
+  private makePlaque(parent: pc.Entity, name: string, width: number, height: number, position?: XYZ): PhysicalPlaque {
+    return new PhysicalPlaque(this.device, parent, name, width, height, 'room', this.plaqueModel, this.reveal, position);
+  }
+
+  private mountPlaque(panel: PhysicalPlaque): pc.Entity {
+    // The modeled rear cleat attaches to a floor-mounted exhibit stand.
+    const stand = child(panel.entity, 'Exhibit stand', [panel.width > 0.7 ? panel.width * 0.15 : 0, panel.height * 0.25, -0.024]);
+    shape(stand, 'Upright', 'box', this.standMaterial, [0, -0.5, 0], [0.018, 1, 0.036]);
+    shape(stand, 'Stand foot', 'box', this.standMaterial, [0, -0.995, -0.02], [0.16, 0.010, 0.13]);
+    this.groundStand(stand);
+    return stand;
+  }
+
+  private groundStand(stand: pc.Entity): void {
+    const height = stand.getPosition().y - this.root.getPosition().y;
+    stand.setLocalScale(1, Math.max(0.05, height), 1);
+  }
+
+  async open(place: XRPlaceData, manifest: XRManifestData | null, neighborhood = ''): Promise<void> {
     const revision = ++this.revision;
     const asset = manifest?.room_asset ?? place.rooms.find((room) => isSplat(room.asset))?.asset ?? null;
     const contentChanged = this.place !== place || this.manifest !== manifest;
@@ -56,25 +104,51 @@ export class VenueSplatScene {
     this.manifest = manifest;
     this.asset = asset;
     if (!sameRoom) this.currentRoomReady = false;
+    this.menu.setMenu(place, manifest?.menu_items.map(({ dish }) => dish) ?? place.dishes, neighborhood);
     this.positionCards();
     this.drawHeader();
-    if (contentChanged) {
-      this.buildGallery();
-      this.buildDishCards();
-    }
+    if (contentChanged) this.buildGallery();
+    this.updateGallery();
     this.updateFit();
 
     const ready = await this.splats.show('room', asset, this.roomRoot);
     if (revision !== this.revision) return;
     this.currentRoomReady = ready;
     this.drawHeader();
-    this.galleryRoot.enabled = !ready;
+    this.updateGallery();
     this.updateFit();
   }
 
   setPresentation(showCards: boolean, showRoom: boolean): void {
-    this.cardsRoot.enabled = showCards;
-    this.roomRoot.enabled = showRoom;
+    this.splats.setVisible('room', showRoom);
+    if (this.cardsVisible === showCards) return;
+    this.cardsVisible = showCards;
+    for (const entity of [this.header.entity, this.lectern, this.menu.entity]) {
+      if (showCards) this.reveal.show(entity, entity === this.menu.entity ? 0.74 : 0.66);
+      else this.reveal.hide(entity, 0.54);
+    }
+    this.updateGallery();
+    this.updateFit();
+  }
+
+  private updateGallery(): void {
+    const visible = this.cardsVisible && !this.currentRoomReady && this.gallery.length > 0;
+    if (this.galleryVisible === visible) return;
+    this.galleryVisible = visible;
+    if (visible) this.reveal.show(this.galleryRoot, 0.75);
+    else this.reveal.hide(this.galleryRoot, 0.56);
+  }
+
+  private setFitVisible(visible: boolean): void {
+    if (this.fitVisible === visible) return;
+    this.fitVisible = visible;
+    if (visible) this.reveal.show(this.peopleRoot, 0.78);
+    else this.reveal.hide(this.peopleRoot, 0.48, 900, () => {
+      if (this.fit.enabled) return;
+      for (const figure of this.figures) figure.destroy();
+      this.figures = [];
+      this.fitKey = '';
+    });
   }
 
   clear(): void {
@@ -85,12 +159,15 @@ export class VenueSplatScene {
     this.manifest = null;
     this.asset = null;
     this.fitKey = '';
-    for (const panel of [...this.gallery, ...this.dishes]) panel.destroy();
+    this.setPresentation(false, false);
+    for (const entity of [this.header.entity, this.lectern, this.menu.entity, this.galleryRoot, this.peopleRoot]) {
+      this.reveal.finish(entity, false);
+    }
+    for (const panel of this.gallery) panel.destroy();
     for (const figure of this.figures) figure.destroy();
     this.gallery = [];
-    this.dishes = [];
     this.figures = [];
-    this.dishTargets = [];
+    this.menu.clear();
   }
 
   private positionCards(): void {
@@ -98,6 +175,19 @@ export class VenueSplatScene {
     this.header.entity.setLocalPosition(x, y + 0.31, z - 1.40);
     this.fitPanel.entity.setLocalPosition(x, y - 0.28, z - 1.10);
     this.galleryRoot.setLocalPosition(x, y - 0.09, z);
+    this.groundStand(this.headerStand);
+    this.groundStand(this.fitStand);
+    for (const panel of this.gallery) {
+      const stand = panel.entity.findByName('Exhibit stand');
+      if (stand instanceof pc.Entity) this.groundStand(stand);
+    }
+    const height = Math.max(0.4, y - 0.56);
+    this.lectern.setLocalPosition(x + 0.28, 0, z - 0.92);
+    this.lectern.setLocalEulerAngles(0, -16, 0);
+    this.lecternColumn.setLocalPosition(0, height / 2, 0);
+    this.lecternColumn.setLocalScale(0.076, height, 0.076);
+    this.lecternTop.setLocalPosition(0, height, 0);
+    this.menu.placeAt([x + 0.28, height, z - 0.92], -16);
   }
 
   private drawHeader(): void {
@@ -108,8 +198,8 @@ export class VenueSplatScene {
     const date = this.currentRoomReady ? this.asset?.captured_on.slice(0, 10) : undefined;
     this.header.setText([
       { text: place.name, size: 76, weight: 750 },
-      { text: preview, color: cyan, size: 43 },
-      ...(date ? [{ text: `Captured on ${date}`, color: '#bfd2e4', size: 36 }] : []),
+      { text: preview, size: 49 },
+      ...(date ? [{ text: `Captured on ${date}`, color: '#725b43', size: 40 }] : []),
     ]);
   }
 
@@ -120,17 +210,17 @@ export class VenueSplatScene {
     const photos = place.photos.slice(0, 5);
     const radius = 1.65;
     const count = Math.max(photos.length, 1);
-    this.galleryRoot.enabled = !this.currentRoomReady;
     this.gallery = Array.from({ length: count }, (_, index) => {
       const angle = (index - (count - 1) / 2) * (count > 3 ? 0.38 : 0.43);
-      const panel = new CanvasPanel3D(this.device, this.galleryRoot, place.name, 0.59, 0.36,
+      const panel = this.makePlaque(this.galleryRoot, place.name, 0.59, 0.36,
         [Math.sin(angle) * radius, 0, -Math.cos(angle) * radius]);
       panel.entity.setLocalEulerAngles(0, -angle * pc.math.RAD_TO_DEG, 0);
+      this.mountPlaque(panel);
       if (!photos[index]) {
         panel.setText([
-          { text: place.category.replaceAll('_', ' ').toUpperCase(), color: cyan, size: 46 },
-          { text: place.name, size: 79, weight: 750, wrap: true },
-          { text: place.vibe, size: 45, color: '#c7d9e8', wrap: true },
+          { text: place.name, size: 85, weight: 700, wrap: true },
+          { text: place.category.replaceAll('_', ' ').toUpperCase(), color: '#725b43', size: 46 },
+          { text: place.vibe, size: 52, wrap: true },
         ]);
       } else {
         const lines = [{ text: place.name, size: 66, weight: 700 }];
@@ -138,7 +228,7 @@ export class VenueSplatScene {
         const image = new Image();
         image.crossOrigin = 'anonymous';
         image.onload = () => {
-          if (this.gallery.includes(panel)) panel.setText(lines, cyan, image);
+          if (this.gallery.includes(panel)) panel.setText(lines, image);
         };
         image.onerror = () => {
           if (this.gallery.includes(panel)) panel.setText([...lines, { text: 'Photo unavailable', size: 52 }]);
@@ -147,24 +237,7 @@ export class VenueSplatScene {
       }
       return panel;
     });
-  }
-
-  private buildDishCards(): void {
-    for (const panel of this.dishes) panel.destroy();
-    const dishes = this.manifest?.menu_items.map(({ dish }) => dish) ?? this.place?.dishes ?? [];
-    const [x, y, z] = this.spawn;
-    this.dishes = dishes.map((dish, i) => {
-      const row = Math.floor(i / 3);
-      const columns = Math.min(3, dishes.length - row * 3);
-      const panel = new CanvasPanel3D(this.device, this.cardsRoot, dish.name, 0.31, 0.106,
-        [x + (i % 3 - (columns - 1) / 2) * 0.33, y - 0.48 - row * 0.12, z - 1.28]);
-      panel.setText([
-        { text: dish.name, size: 77, weight: 700 },
-        { text: `$${dish.price.toFixed(2)}`, color: cyan, size: 65 },
-      ]);
-      return panel;
-    });
-    this.dishTargets = this.dishes.map((panel, index) => panel.hit(() => this.selectDish(dishes[index].id)));
+    if (this.galleryVisible) this.reveal.refresh(this.galleryRoot, 0.75);
   }
 
   setWillWeFit(enabled: boolean, groupSize: number, seating: Seating): void {
@@ -174,7 +247,11 @@ export class VenueSplatScene {
 
   private updateFit(): void {
     const { enabled, seating, groupSize } = this.fit;
-    this.peopleRoot.enabled = enabled && !!this.place;
+    if (!enabled || !this.place) {
+      this.setFitVisible(false);
+      return;
+    }
+    this.setFitVisible(this.cardsVisible);
     const rooms = this.manifest?.rooms ?? this.place?.rooms ?? [];
     const room = rooms.find((candidate) => candidate.seating === seating) ?? rooms[0];
     const key = JSON.stringify([enabled, seating, groupSize, this.place?.id, this.currentRoomReady, room]);
@@ -182,12 +259,12 @@ export class VenueSplatScene {
     this.fitKey = key;
     for (const figure of this.figures) figure.destroy();
     this.figures = [];
-    if (!enabled || !this.place) return;
 
     if (!this.currentRoomReady || this.asset?.scale_status !== 'measured' || !room ||
       !Number.isFinite(room.floor_width_m) || !Number.isFinite(room.floor_depth_m) ||
       room.floor_width_m <= 0 || room.floor_depth_m <= 0) {
-      this.fitPanel.setText([{ text: 'Size not verified', color: amber, size: 80 }], amber);
+      this.fitPanel.setText([{ text: 'Size not verified', color: '#854318', size: 80 }]);
+      if (this.fitVisible) this.reveal.refresh(this.peopleRoot, 0.78);
       return;
     }
 
@@ -196,7 +273,6 @@ export class VenueSplatScene {
     const rows = Math.floor(room.floor_depth_m / spacing);
     const capacity = columns * rows;
     const venueCapacity = room.stated_capacity;
-    const [spawnX, , spawnZ] = this.spawn;
     const originX = -(columns - 1) * spacing / 2;
     const originZ = -(rows - 1) * spacing / 2;
     const inRoom = Math.min(groupSize, capacity, 120);
@@ -217,19 +293,22 @@ export class VenueSplatScene {
       shape(person, 'Head', 'sphere', appearance, [0, seated ? 0.94 : 1.38, 0], [0.22, 0.25, 0.22]);
     }
 
-    this.fitPanel.entity.setLocalPosition(spawnX, this.spawn[1] - 0.28, spawnZ - 1.1);
     this.fitPanel.setText([
       { text: `Fits about ${capacity} by floor space · Venue says ${venueCapacity}`, size: 63, weight: 750 },
       { text: `${groupSize} guests · ${seating}${shown < groupSize ? ` · ${shown} shown` : ''}`,
-        color: groupSize > Math.min(capacity, venueCapacity) ? amber : cyan, size: 52 },
+        color: groupSize > Math.min(capacity, venueCapacity) ? '#854318' : '#39513c', size: 52 },
     ]);
+    if (this.fitVisible) this.reveal.refresh(this.peopleRoot, 0.78);
   }
 
   destroy(): void {
     this.clear();
     this.header.destroy();
     this.fitPanel.destroy();
+    this.menu.destroy();
     this.root.destroy();
+    this.standMaterial.destroy();
+    for (const surface of this.lecternMaterials) surface.destroy();
     for (const surface of this.figureMaterials) surface.destroy();
   }
 }
