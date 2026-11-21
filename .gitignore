@@ -6,3 +6,10 @@ server/data/*.db*
 server/storage/uploads
 server/storage/outputs
 .DS_Store
+
+# Splat experiment binaries (photos, PLY/SPZ/SOG, renders)
+experiments/**/sources/
+experiments/**/outputs/
+experiments/*.tar.gz
+__pycache__/
+*.pyc

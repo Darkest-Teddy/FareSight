@@ -1,0 +1,1281 @@
+[
+  {
+    "restaurant": "Café Central",
+    "room_id": "central",
+    "n_photos": 2,
+    "resolution": 518,
+    "prediction_id": "fqnkhjkpndrmw0d1zw7bczfr1r",
+    "status": "failed",
+    "predict_time_s": 0.401601217,
+    "cost_usd": 0.000391561,
+    "directory": "outputs/central-2p-518",
+    "output_paths": {},
+    "stats": null,
+    "scores": null,
+    "publishable": null,
+    "error": "Unsupported input 'tmp6xq8p4y8download'. Provide a video, a single image, or a .zip of images.",
+    "attempt": 1,
+    "input_encoding": "Replicate Files API",
+    "quest_frame_time_ms": null
+  },
+  {
+    "restaurant": "Café Central",
+    "room_id": "central",
+    "n_photos": 2,
+    "resolution": 518,
+    "prediction_id": "xd05pn0m49rmt0d1zw8bvwfswc",
+    "status": "succeeded",
+    "attempt": 2,
+    "input_encoding": "data:application/zip",
+    "predict_time_s": 19.037037227,
+    "cost_usd": 0.018561111,
+    "directory": "outputs/central-2p-518",
+    "output_paths": {
+      "raw_ply": "outputs/central-2p-518/gaussians.ply",
+      "camera_params": "outputs/central-2p-518/camera_params.json",
+      "archive": "outputs/central-2p-518/replicate-output.zip",
+      "sog_100k": "outputs/central-2p-518/room-100000.sog",
+      "sog_250k": "outputs/central-2p-518/room-250000.sog",
+      "render_poses": "outputs/central-2p-518/render-poses.json",
+      "renders": [
+        "outputs/central-2p-518/photo-1.webp",
+        "outputs/central-2p-518/entry-standing.webp",
+        "outputs/central-2p-518/entry-seated.webp",
+        "outputs/central-2p-518/inside-standing.webp",
+        "outputs/central-2p-518/inside-seated.webp"
+      ],
+      "contact_sheet": "outputs/central-2p-518/contact-sheet.png"
+    },
+    "stats": {
+      "raw_gaussians": 311946,
+      "raw_ply_bytes": 21212744,
+      "bounds_raw_model_units": {
+        "min": [
+          -1.1602134704589844,
+          -0.5699244141578674,
+          -0.5320954322814941
+        ],
+        "max": [
+          0.6832254528999329,
+          0.4002304971218109,
+          2.173581600189209
+        ]
+      },
+      "opacity_logit": {
+        "min": 0.007568359375,
+        "p05": 0.314453125,
+        "p50": 0.703125,
+        "p95": 0.95703125,
+        "max": 1.0
+      },
+      "opacity_linear": {
+        "min": 0.5018920808122161,
+        "p05": 0.5779718446113501,
+        "p50": 0.6688802603710086,
+        "p95": 0.7225270183691288,
+        "max": 0.7310585786300049
+      },
+      "scale_sigma_xyz_model_units": {
+        "min": [
+          4.5061104488424614e-05,
+          0.00023078909541183234,
+          3.314018303732228e-05
+        ],
+        "p05": [
+          0.0004749297070682428,
+          0.0007781982224357302,
+          0.0003356933710514015
+        ],
+        "p50": [
+          0.0010986328288780547,
+          0.0013656618910841388,
+          0.0008583069410070117
+        ],
+        "p95": [
+          0.0025634761087070025,
+          0.0027160647121857034,
+          0.0017547607699915058
+        ],
+        "max": [
+          0.004943847916648347,
+          0.004943847916648347,
+          0.004364014500178362
+        ]
+      },
+      "sog_100k": {
+        "gaussians": 100000,
+        "bytes": 1234789
+      },
+      "sog_250k": {
+        "gaussians": 250000,
+        "bytes": 2849948
+      }
+    },
+    "scores": {
+      "recognizable_room": 4,
+      "coherent_furniture": 3,
+      "holes_and_floaters": 2,
+      "usable_movement_range": 2
+    },
+    "publishable": false,
+    "error": null,
+    "quest_frame_time_ms": null,
+    "center_pair_coherent": false,
+    "score_evidence": "The vaults and column rows match at photo 1. Both near views cut off the floor and sides. Moving forward tears up the left café chairs and opens gaps around the right column."
+  },
+  {
+    "restaurant": "Café Central",
+    "room_id": "central",
+    "n_photos": 2,
+    "resolution": 952,
+    "prediction_id": "yqwk2fkmbnrmy0d1zw8anqb3nr",
+    "status": "succeeded",
+    "attempt": 1,
+    "input_encoding": "data:application/zip",
+    "predict_time_s": 17.485770267,
+    "cost_usd": 0.017048626,
+    "directory": "outputs/central-2p-952",
+    "output_paths": {
+      "raw_ply": "outputs/central-2p-952/gaussians.ply",
+      "camera_params": "outputs/central-2p-952/camera_params.json",
+      "archive": "outputs/central-2p-952/replicate-output.zip",
+      "sog_100k": "outputs/central-2p-952/room-100000.sog",
+      "sog_250k": "outputs/central-2p-952/room-250000.sog",
+      "render_poses": "outputs/central-2p-952/render-poses.json",
+      "renders": [
+        "outputs/central-2p-952/photo-1.webp",
+        "outputs/central-2p-952/entry-standing.webp",
+        "outputs/central-2p-952/entry-seated.webp",
+        "outputs/central-2p-952/inside-standing.webp",
+        "outputs/central-2p-952/inside-seated.webp"
+      ],
+      "contact_sheet": "outputs/central-2p-952/contact-sheet.png"
+    },
+    "stats": {
+      "raw_gaussians": 813695,
+      "raw_ply_bytes": 55331676,
+      "bounds_raw_model_units": {
+        "min": [
+          -1.2552679777145386,
+          -0.6190637946128845,
+          -0.8098699450492859
+        ],
+        "max": [
+          0.7876925468444824,
+          0.4063514769077301,
+          1.996756911277771
+        ]
+      },
+      "opacity_logit": {
+        "min": 0.00860595703125,
+        "p05": 0.2294921875,
+        "p50": 0.65625,
+        "p95": 0.9765625,
+        "max": 1.0
+      },
+      "opacity_linear": {
+        "min": 0.5021514759791887,
+        "p05": 0.5571225620963136,
+        "p50": 0.658417500561683,
+        "p95": 0.7264256089751905,
+        "max": 0.7310585786300049
+      },
+      "scale_sigma_xyz_model_units": {
+        "min": [
+          4.005433284019888e-05,
+          0.0001907347776270646,
+          2.1457662525504664e-05
+        ],
+        "p05": [
+          0.0004043579689654153,
+          0.0007553101119502175,
+          0.00029563901740679225
+        ],
+        "p50": [
+          0.0009536743715603122,
+          0.0012054441252118563,
+          0.0007553101119502175
+        ],
+        "p95": [
+          0.0016479492728638783,
+          0.0019836428886069834,
+          0.0012893674189702106
+        ],
+        "max": [
+          0.0029907229732062906,
+          0.0029907229732062906,
+          0.0029907229732062906
+        ]
+      },
+      "sog_100k": {
+        "gaussians": 100000,
+        "bytes": 1242638
+      },
+      "sog_250k": {
+        "gaussians": 250000,
+        "bytes": 3015664
+      }
+    },
+    "scores": {
+      "recognizable_room": 4,
+      "coherent_furniture": 3,
+      "holes_and_floaters": 2,
+      "usable_movement_range": 2
+    },
+    "publishable": false,
+    "error": null,
+    "quest_frame_time_ms": null,
+    "center_pair_coherent": false,
+    "score_evidence": "The near views preserve more floor and chair detail. At both forward poses a tall void opens beside the right column, and the left seating stretches into smeared strips."
+  },
+  {
+    "restaurant": "Café Central",
+    "room_id": "central",
+    "n_photos": 3,
+    "resolution": 518,
+    "prediction_id": "cqzet76z6hrmt0d1zw88gne5f8",
+    "status": "succeeded",
+    "attempt": 1,
+    "input_encoding": "data:application/zip",
+    "predict_time_s": 14.49770614,
+    "cost_usd": 0.014135263,
+    "directory": "outputs/central-3p-518",
+    "output_paths": {
+      "raw_ply": "outputs/central-3p-518/gaussians.ply",
+      "camera_params": "outputs/central-3p-518/camera_params.json",
+      "archive": "outputs/central-3p-518/replicate-output.zip",
+      "sog_100k": "outputs/central-3p-518/room-100000.sog",
+      "sog_250k": "outputs/central-3p-518/room-250000.sog",
+      "render_poses": "outputs/central-3p-518/render-poses.json",
+      "renders": [
+        "outputs/central-3p-518/photo-1.webp",
+        "outputs/central-3p-518/entry-standing.webp",
+        "outputs/central-3p-518/entry-seated.webp",
+        "outputs/central-3p-518/inside-standing.webp",
+        "outputs/central-3p-518/inside-seated.webp"
+      ],
+      "contact_sheet": "outputs/central-3p-518/contact-sheet.png"
+    },
+    "stats": {
+      "raw_gaussians": 477579,
+      "raw_ply_bytes": 32475788,
+      "bounds_raw_model_units": {
+        "min": [
+          -1.6151623725891113,
+          -0.6943044662475586,
+          -1.159116268157959
+        ],
+        "max": [
+          0.7252886295318604,
+          0.4055117070674896,
+          2.2482354640960693
+        ]
+      },
+      "opacity_logit": {
+        "min": 0.006103515625,
+        "p05": 0.251953125,
+        "p50": 0.66796875,
+        "p95": 0.93359375,
+        "max": 1.0
+      },
+      "opacity_linear": {
+        "min": 0.501525874169316,
+        "p05": 0.5626571729912544,
+        "p50": 0.6610481792447818,
+        "p95": 0.7178038103402775,
+        "max": 0.7310585786300049
+      },
+      "scale_sigma_xyz_model_units": {
+        "min": [
+          2.944469647337089e-05,
+          0.00021648398115703906,
+          2.7656564877495366e-05
+        ],
+        "p05": [
+          0.0004577636816414135,
+          0.0007781982224357302,
+          0.0003452301812257742
+        ],
+        "p50": [
+          0.0010986328288780547,
+          0.001411438171897178,
+          0.0008583069410070117
+        ],
+        "p95": [
+          0.0025634761087070025,
+          0.0028076171636017837,
+          0.0018692019037817446
+        ],
+        "max": [
+          0.005401611781750433,
+          0.005401611781750433,
+          0.004791259621479403
+        ]
+      },
+      "sog_100k": {
+        "gaussians": 100000,
+        "bytes": 1245370
+      },
+      "sog_250k": {
+        "gaussians": 250000,
+        "bytes": 2957871
+      }
+    },
+    "scores": {
+      "recognizable_room": 4,
+      "coherent_furniture": 3,
+      "holes_and_floaters": 2,
+      "usable_movement_range": 2
+    },
+    "publishable": false,
+    "error": null,
+    "quest_frame_time_ms": null,
+    "center_pair_coherent": false,
+    "score_evidence": "The third image adds fragments of lamps and seating outside the first view. A ghosted teal diner encroaches on the near seated view, and the floor and foreground chairs still break as the viewer moves forward."
+  },
+  {
+    "restaurant": "Café Central",
+    "room_id": "central",
+    "n_photos": 3,
+    "resolution": 952,
+    "prediction_id": "qah0vfsr61rmr0d1zw8tmsc3y0",
+    "status": "succeeded",
+    "attempt": 1,
+    "input_encoding": "data:application/zip",
+    "predict_time_s": 27.834411312,
+    "cost_usd": 0.027138551,
+    "directory": "outputs/central-3p-952",
+    "output_paths": {
+      "raw_ply": "outputs/central-3p-952/gaussians.ply",
+      "camera_params": "outputs/central-3p-952/camera_params.json",
+      "archive": "outputs/central-3p-952/replicate-output.zip",
+      "sog_100k": "outputs/central-3p-952/room-100000.sog",
+      "sog_250k": "outputs/central-3p-952/room-250000.sog",
+      "render_poses": "outputs/central-3p-952/render-poses.json",
+      "renders": [
+        "outputs/central-3p-952/photo-1.webp",
+        "outputs/central-3p-952/entry-standing.webp",
+        "outputs/central-3p-952/entry-seated.webp",
+        "outputs/central-3p-952/inside-standing.webp",
+        "outputs/central-3p-952/inside-seated.webp"
+      ],
+      "contact_sheet": "outputs/central-3p-952/contact-sheet.png"
+    },
+    "stats": {
+      "raw_gaussians": 1273391,
+      "raw_ply_bytes": 86591005,
+      "bounds_raw_model_units": {
+        "min": [
+          -1.2615790367126465,
+          -0.7746093273162842,
+          -1.4677674770355225
+        ],
+        "max": [
+          0.8886295557022095,
+          0.41905561089515686,
+          2.03216552734375
+        ]
+      },
+      "opacity_logit": {
+        "min": 0.006103515625,
+        "p05": 0.185546875,
+        "p50": 0.625,
+        "p95": 0.96484375,
+        "max": 1.0
+      },
+      "opacity_linear": {
+        "min": 0.501525874169316,
+        "p05": 0.5462540932143485,
+        "p50": 0.6513548646660542,
+        "p95": 0.7240905557040317,
+        "max": 0.7310585786300049
+      },
+      "scale_sigma_xyz_model_units": {
+        "min": [
+          4.005433284019888e-05,
+          0.00017929070179776213,
+          1.4722341188483454e-05
+        ],
+        "p05": [
+          0.0004005431502156338,
+          0.0007553101119502175,
+          0.00031471239860210144
+        ],
+        "p50": [
+          0.0009422302961209834,
+          0.0012130739309564602,
+          0.0007553101119502175
+        ],
+        "p95": [
+          0.0016555789585229379,
+          0.0020599366451768196,
+          0.0013275145175552577
+        ],
+        "max": [
+          0.003280639107376824,
+          0.003280639107376824,
+          0.003189086875914691
+        ]
+      },
+      "sog_100k": {
+        "gaussians": 100000,
+        "bytes": 1250825
+      },
+      "sog_250k": {
+        "gaussians": 250000,
+        "bytes": 3030503
+      }
+    },
+    "scores": {
+      "recognizable_room": 4,
+      "coherent_furniture": 3,
+      "holes_and_floaters": 1,
+      "usable_movement_range": 2
+    },
+    "publishable": false,
+    "error": null,
+    "quest_frame_time_ms": null,
+    "center_pair_coherent": false,
+    "score_evidence": "The arches remain recognizable, but blurred glassware and a partial face intrude into the near views. The seated view loses much of its left side, and the forward pair still has column and chair gaps."
+  },
+  {
+    "restaurant": "Bouillon Chartier Grands Boulevards",
+    "room_id": "chartier",
+    "n_photos": 2,
+    "resolution": 518,
+    "prediction_id": "3hxk7067z1rmt0d1zw8st74gtw",
+    "status": "succeeded",
+    "attempt": 1,
+    "input_encoding": "data:application/zip",
+    "predict_time_s": 10.699725495,
+    "cost_usd": 0.010432232,
+    "directory": "outputs/chartier-2p-518",
+    "output_paths": {
+      "raw_ply": "outputs/chartier-2p-518/gaussians.ply",
+      "camera_params": "outputs/chartier-2p-518/camera_params.json",
+      "archive": "outputs/chartier-2p-518/replicate-output.zip",
+      "sog_100k": "outputs/chartier-2p-518/room-100000.sog",
+      "sog_250k": "outputs/chartier-2p-518/room-250000.sog",
+      "render_poses": "outputs/chartier-2p-518/render-poses.json",
+      "renders": [
+        "outputs/chartier-2p-518/photo-1.webp",
+        "outputs/chartier-2p-518/entry-standing.webp",
+        "outputs/chartier-2p-518/entry-seated.webp",
+        "outputs/chartier-2p-518/inside-standing.webp",
+        "outputs/chartier-2p-518/inside-seated.webp"
+      ],
+      "contact_sheet": "outputs/chartier-2p-518/contact-sheet.png"
+    },
+    "stats": {
+      "raw_gaussians": 318404,
+      "raw_ply_bytes": 21651888,
+      "bounds_raw_model_units": {
+        "min": [
+          -0.8164000511169434,
+          -0.5182406902313232,
+          0.29094070196151733
+        ],
+        "max": [
+          0.7614060640335083,
+          0.5543181896209717,
+          3.196882486343384
+        ]
+      },
+      "opacity_logit": {
+        "min": 0.0057373046875,
+        "p05": 0.19140625,
+        "p50": 0.5234375,
+        "p95": 0.9609375,
+        "max": 1.0
+      },
+      "opacity_linear": {
+        "min": 0.5014343222374518,
+        "p05": 0.5477060035256329,
+        "p50": 0.6279512168265432,
+        "p95": 0.7233094689745646,
+        "max": 0.7310585786300049
+      },
+      "scale_sigma_xyz_model_units": {
+        "min": [
+          5.459787921475069e-05,
+          0.00021648398115703906,
+          2.431870581558285e-05
+        ],
+        "p05": [
+          0.0004577636816414135,
+          0.0007553101119502175,
+          0.00033187862812458633
+        ],
+        "p50": [
+          0.0012893674189702106,
+          0.001411438171897178,
+          0.0008583069410070117
+        ],
+        "p95": [
+          0.003707885996904313,
+          0.003723143817708529,
+          0.0023956298061768547
+        ],
+        "max": [
+          0.005950928783852193,
+          0.005950928783852193,
+          0.005401611781750433
+        ]
+      },
+      "sog_100k": {
+        "gaussians": 100000,
+        "bytes": 1219355
+      },
+      "sog_250k": {
+        "gaussians": 250000,
+        "bytes": 2785662
+      }
+    },
+    "scores": {
+      "recognizable_room": 4,
+      "coherent_furniture": 3,
+      "holes_and_floaters": 2,
+      "usable_movement_range": 3
+    },
+    "publishable": false,
+    "error": null,
+    "quest_frame_time_ms": null,
+    "center_pair_coherent": false,
+    "score_evidence": "The left mezzanine, globe lamps, and red tablecloths stay legible at both near poses. The forward views expose dark ceiling holes and stretch the central serving stand and cloth into a foreground obstruction."
+  },
+  {
+    "restaurant": "Bouillon Chartier Grands Boulevards",
+    "room_id": "chartier",
+    "n_photos": 2,
+    "resolution": 952,
+    "prediction_id": "my35hd95edrmr0d1zw986md7pc",
+    "status": "succeeded",
+    "attempt": 1,
+    "input_encoding": "data:application/zip",
+    "predict_time_s": 21.102661969,
+    "cost_usd": 0.020575095,
+    "directory": "outputs/chartier-2p-952",
+    "output_paths": {
+      "raw_ply": "outputs/chartier-2p-952/gaussians.ply",
+      "camera_params": "outputs/chartier-2p-952/camera_params.json",
+      "archive": "outputs/chartier-2p-952/replicate-output.zip",
+      "sog_100k": "outputs/chartier-2p-952/room-100000.sog",
+      "sog_250k": "outputs/chartier-2p-952/room-250000.sog",
+      "render_poses": "outputs/chartier-2p-952/render-poses.json",
+      "renders": [
+        "outputs/chartier-2p-952/photo-1.webp",
+        "outputs/chartier-2p-952/entry-standing.webp",
+        "outputs/chartier-2p-952/entry-seated.webp",
+        "outputs/chartier-2p-952/inside-standing.webp",
+        "outputs/chartier-2p-952/inside-seated.webp"
+      ],
+      "contact_sheet": "outputs/chartier-2p-952/contact-sheet.png"
+    },
+    "stats": {
+      "raw_gaussians": 876842,
+      "raw_ply_bytes": 59625672,
+      "bounds_raw_model_units": {
+        "min": [
+          -0.807864248752594,
+          -0.48341673612594604,
+          0.29394635558128357
+        ],
+        "max": [
+          0.7340497970581055,
+          0.5429727435112,
+          3.1598453521728516
+        ]
+      },
+      "opacity_logit": {
+        "min": 0.006103515625,
+        "p05": 0.119140625,
+        "p50": 0.458984375,
+        "p95": 0.98046875,
+        "max": 1.0
+      },
+      "opacity_linear": {
+        "min": 0.501525874169316,
+        "p05": 0.5297499741002002,
+        "p50": 0.6127732140221069,
+        "p95": 0.7272012166848617,
+        "max": 0.7310585786300049
+      },
+      "scale_sigma_xyz_model_units": {
+        "min": [
+          8.487698097498826e-05,
+          0.00014877321427249313,
+          7.86781343516987e-06
+        ],
+        "p05": [
+          0.0004882812397699233,
+          0.0007324218727867939,
+          0.00031471239860210144
+        ],
+        "p50": [
+          0.0010986328288780547,
+          0.001190185720980622,
+          0.0007553101119502175
+        ],
+        "p95": [
+          0.0023345947136117462,
+          0.0024719239536160125,
+          0.0017013548484224518
+        ],
+        "max": [
+          0.003967285784770275,
+          0.003967285784770275,
+          0.003723143817708529
+        ]
+      },
+      "sog_100k": {
+        "gaussians": 100000,
+        "bytes": 1226902
+      },
+      "sog_250k": {
+        "gaussians": 250000,
+        "bytes": 2980331
+      }
+    },
+    "scores": {
+      "recognizable_room": 4,
+      "coherent_furniture": 3,
+      "holes_and_floaters": 2,
+      "usable_movement_range": 3
+    },
+    "publishable": false,
+    "error": null,
+    "quest_frame_time_ms": null,
+    "center_pair_coherent": false,
+    "score_evidence": "The mezzanine rail, pink tabletops and wall windows read clearly in the near pair. The ceiling still tears around the globes and a large blurred serving stand and cloth block the forward seated view."
+  },
+  {
+    "restaurant": "Bouillon Chartier Grands Boulevards",
+    "room_id": "chartier",
+    "n_photos": 3,
+    "resolution": 518,
+    "prediction_id": "m5a6wecsyhrmy0d1zw9bhgtbd4",
+    "status": "succeeded",
+    "attempt": 1,
+    "input_encoding": "data:application/zip",
+    "predict_time_s": 13.251717047,
+    "cost_usd": 0.012920424,
+    "directory": "outputs/chartier-3p-518",
+    "output_paths": {
+      "raw_ply": "outputs/chartier-3p-518/gaussians.ply",
+      "camera_params": "outputs/chartier-3p-518/camera_params.json",
+      "archive": "outputs/chartier-3p-518/replicate-output.zip",
+      "sog_100k": "outputs/chartier-3p-518/room-100000.sog",
+      "sog_250k": "outputs/chartier-3p-518/room-250000.sog",
+      "render_poses": "outputs/chartier-3p-518/render-poses.json",
+      "renders": [
+        "outputs/chartier-3p-518/photo-1.webp",
+        "outputs/chartier-3p-518/entry-standing.webp",
+        "outputs/chartier-3p-518/entry-seated.webp",
+        "outputs/chartier-3p-518/inside-standing.webp",
+        "outputs/chartier-3p-518/inside-seated.webp"
+      ],
+      "contact_sheet": "outputs/chartier-3p-518/contact-sheet.png"
+    },
+    "stats": {
+      "raw_gaussians": 382740,
+      "raw_ply_bytes": 26026736,
+      "bounds_raw_model_units": {
+        "min": [
+          -0.5139526128768921,
+          -0.3173767328262329,
+          0.1517808735370636
+        ],
+        "max": [
+          0.4732384979724884,
+          0.407568097114563,
+          2.132235527038574
+        ]
+      },
+      "opacity_logit": {
+        "min": 0.00421142578125,
+        "p05": 0.158203125,
+        "p50": 0.546875,
+        "p95": 0.96484375,
+        "max": 1.0
+      },
+      "opacity_linear": {
+        "min": 0.5010528548891839,
+        "p05": 0.5394684966874882,
+        "p50": 0.6334102636778401,
+        "p95": 0.7240905557040317,
+        "max": 0.7310585786300049
+      },
+      "scale_sigma_xyz_model_units": {
+        "min": [
+          3.314018303732228e-05,
+          0.00014019014054750587,
+          9.536747653194616e-06
+        ],
+        "p05": [
+          0.0003452301812257742,
+          0.0006408690247354827,
+          0.00023078909541183234
+        ],
+        "p50": [
+          0.0009727478035904534,
+          0.0011215211307883772,
+          0.0006446837082572057
+        ],
+        "p95": [
+          0.002243042265848974,
+          0.0023345947136117462,
+          0.0013656618910841388
+        ],
+        "max": [
+          0.004486084540242389,
+          0.004486084540242389,
+          0.004486084540242389
+        ]
+      },
+      "sog_100k": {
+        "gaussians": 100000,
+        "bytes": 1234381
+      },
+      "sog_250k": {
+        "gaussians": 250000,
+        "bytes": 2929757
+      }
+    },
+    "scores": {
+      "recognizable_room": 4,
+      "coherent_furniture": 3,
+      "holes_and_floaters": 2,
+      "usable_movement_range": 3
+    },
+    "publishable": false,
+    "error": null,
+    "quest_frame_time_ms": null,
+    "center_pair_coherent": false,
+    "score_evidence": "The added view recovers part of the skylight and the distant lamps. It also strengthens a distorted serving stand in the foreground, and large ceiling holes remain at the deeper poses."
+  },
+  {
+    "restaurant": "Bouillon Chartier Grands Boulevards",
+    "room_id": "chartier",
+    "n_photos": 3,
+    "resolution": 952,
+    "prediction_id": "gw7wfaz2f9rmt0d1zw9b810kj0",
+    "status": "succeeded",
+    "attempt": 1,
+    "input_encoding": "data:application/zip",
+    "predict_time_s": 27.180386112,
+    "cost_usd": 0.026500876,
+    "directory": "outputs/chartier-3p-952",
+    "output_paths": {
+      "raw_ply": "outputs/chartier-3p-952/gaussians.ply",
+      "camera_params": "outputs/chartier-3p-952/camera_params.json",
+      "archive": "outputs/chartier-3p-952/replicate-output.zip",
+      "sog_100k": "outputs/chartier-3p-952/room-100000.sog",
+      "sog_250k": "outputs/chartier-3p-952/room-250000.sog",
+      "render_poses": "outputs/chartier-3p-952/render-poses.json",
+      "renders": [
+        "outputs/chartier-3p-952/photo-1.webp",
+        "outputs/chartier-3p-952/entry-standing.webp",
+        "outputs/chartier-3p-952/entry-seated.webp",
+        "outputs/chartier-3p-952/inside-standing.webp",
+        "outputs/chartier-3p-952/inside-seated.webp"
+      ],
+      "contact_sheet": "outputs/chartier-3p-952/contact-sheet.png"
+    },
+    "stats": {
+      "raw_gaussians": 782783,
+      "raw_ply_bytes": 53229660,
+      "bounds_raw_model_units": {
+        "min": [
+          -0.5188543200492859,
+          -0.3007039427757263,
+          0.15700297057628632
+        ],
+        "max": [
+          0.4567345678806305,
+          0.4091760218143463,
+          2.113468885421753
+        ]
+      },
+      "opacity_logit": {
+        "min": 0.0024871826171875,
+        "p05": 0.087890625,
+        "p50": 0.447265625,
+        "p95": 0.9453125,
+        "max": 1.0
+      },
+      "opacity_linear": {
+        "min": 0.5006217953337574,
+        "p05": 0.5219585227061239,
+        "p50": 0.6099889154581032,
+        "p95": 0.7201715075418013,
+        "max": 0.7310585786300049
+      },
+      "scale_sigma_xyz_model_units": {
+        "min": [
+          1.8954279954586584e-05,
+          0.00015830997470420895,
+          1.150370000218107e-05
+        ],
+        "p05": [
+          0.0003185272162740687,
+          0.0006256103065938145,
+          0.0002050399426489307
+        ],
+        "p50": [
+          0.0009536743715603122,
+          0.0010681150521597723,
+          0.0006103515657411356
+        ],
+        "p95": [
+          0.0020599366451768196,
+          0.0021209717386269336,
+          0.0012893674189702106
+        ],
+        "max": [
+          0.0034942626434815716,
+          0.0034942626434815716,
+          0.003280639107376824
+        ]
+      },
+      "sog_100k": {
+        "gaussians": 100000,
+        "bytes": 1241193
+      },
+      "sog_250k": {
+        "gaussians": 250000,
+        "bytes": 3036793
+      }
+    },
+    "scores": {
+      "recognizable_room": 4,
+      "coherent_furniture": 3,
+      "holes_and_floaters": 2,
+      "usable_movement_range": 3
+    },
+    "publishable": false,
+    "error": null,
+    "quest_frame_time_ms": null,
+    "center_pair_coherent": false,
+    "score_evidence": "The skylight and layered globe rows have better continuity in the near pair. In the forward seated view, the serving stand and cloth smear across much of the left foreground, while broken ceiling patches remain visible."
+  },
+  {
+    "restaurant": "McSorley's Old Ale House",
+    "room_id": "mcsorley",
+    "n_photos": 2,
+    "resolution": 518,
+    "prediction_id": "p55bj73709rmt0d1zw9v4830jm",
+    "status": "succeeded",
+    "attempt": 1,
+    "input_encoding": "data:application/zip",
+    "predict_time_s": 9.258055275,
+    "cost_usd": 0.009026604,
+    "directory": "outputs/mcsorley-2p-518",
+    "output_paths": {
+      "raw_ply": "outputs/mcsorley-2p-518/gaussians.ply",
+      "camera_params": "outputs/mcsorley-2p-518/camera_params.json",
+      "archive": "outputs/mcsorley-2p-518/replicate-output.zip",
+      "sog_100k": "outputs/mcsorley-2p-518/room-100000.sog",
+      "sog_250k": "outputs/mcsorley-2p-518/room-250000.sog",
+      "render_poses": "outputs/mcsorley-2p-518/render-poses.json",
+      "renders": [
+        "outputs/mcsorley-2p-518/photo-1.webp",
+        "outputs/mcsorley-2p-518/entry-standing.webp",
+        "outputs/mcsorley-2p-518/entry-seated.webp",
+        "outputs/mcsorley-2p-518/inside-standing.webp",
+        "outputs/mcsorley-2p-518/inside-seated.webp"
+      ],
+      "contact_sheet": "outputs/mcsorley-2p-518/contact-sheet.png"
+    },
+    "stats": {
+      "raw_gaussians": 219581,
+      "raw_ply_bytes": 14931924,
+      "bounds_raw_model_units": {
+        "min": [
+          -0.7882335186004639,
+          -0.5391294956207275,
+          0.035464439541101456
+        ],
+        "max": [
+          0.8766440749168396,
+          0.141224205493927,
+          2.0124971866607666
+        ]
+      },
+      "opacity_logit": {
+        "min": 0.00885009765625,
+        "p05": 0.28125,
+        "p50": 0.69140625,
+        "p95": 0.984375,
+        "max": 1.0
+      },
+      "opacity_linear": {
+        "min": 0.5022125099729866,
+        "p05": 0.5698526514141571,
+        "p50": 0.6662796810207858,
+        "p95": 0.7279754489059775,
+        "max": 0.7310585786300049
+      },
+      "scale_sigma_xyz_model_units": {
+        "min": [
+          4.5299549148870455e-05,
+          0.00023078909541183234,
+          2.753734223157623e-05
+        ],
+        "p05": [
+          0.0003948211747813491,
+          0.0006866455347732854,
+          0.00029563901740679225
+        ],
+        "p50": [
+          0.0009117128365700667,
+          0.0010299683206266763,
+          0.0006675719238597864
+        ],
+        "p95": [
+          0.0017547607699915058,
+          0.0018157955038440598,
+          0.0012054441252118563
+        ],
+        "max": [
+          0.002639770711862175,
+          0.002639770711862175,
+          0.0025634761087070025
+        ]
+      },
+      "sog_100k": {
+        "gaussians": 100000,
+        "bytes": 1219389
+      },
+      "sog_250k": {
+        "gaussians": 219581,
+        "bytes": 2354678
+      }
+    },
+    "scores": {
+      "recognizable_room": 3,
+      "coherent_furniture": 2,
+      "holes_and_floaters": 1,
+      "usable_movement_range": 1
+    },
+    "publishable": false,
+    "error": null,
+    "quest_frame_time_ms": null,
+    "center_pair_coherent": false,
+    "score_evidence": "The back-bar and chairs reconstruct at photo 1. The short seated shift exposes a black floor, detached chair pieces and separate image planes. Neither forward view holds the seating together."
+  },
+  {
+    "restaurant": "McSorley's Old Ale House",
+    "room_id": "mcsorley",
+    "n_photos": 2,
+    "resolution": 952,
+    "prediction_id": "sfdkyswvwhrmr0d1zw9rfn3mxc",
+    "status": "succeeded",
+    "attempt": 1,
+    "input_encoding": "data:application/zip",
+    "predict_time_s": 14.029951182,
+    "cost_usd": 0.013679202,
+    "directory": "outputs/mcsorley-2p-952",
+    "output_paths": {
+      "raw_ply": "outputs/mcsorley-2p-952/gaussians.ply",
+      "camera_params": "outputs/mcsorley-2p-952/camera_params.json",
+      "archive": "outputs/mcsorley-2p-952/replicate-output.zip",
+      "sog_100k": "outputs/mcsorley-2p-952/room-100000.sog",
+      "sog_250k": "outputs/mcsorley-2p-952/room-250000.sog",
+      "render_poses": "outputs/mcsorley-2p-952/render-poses.json",
+      "renders": [
+        "outputs/mcsorley-2p-952/photo-1.webp",
+        "outputs/mcsorley-2p-952/entry-standing.webp",
+        "outputs/mcsorley-2p-952/entry-seated.webp",
+        "outputs/mcsorley-2p-952/inside-standing.webp",
+        "outputs/mcsorley-2p-952/inside-seated.webp"
+      ],
+      "contact_sheet": "outputs/mcsorley-2p-952/contact-sheet.png"
+    },
+    "stats": {
+      "raw_gaussians": 397989,
+      "raw_ply_bytes": 27063668,
+      "bounds_raw_model_units": {
+        "min": [
+          -0.7724431753158569,
+          -0.5184443593025208,
+          0.06495773047208786
+        ],
+        "max": [
+          0.8470409512519836,
+          0.13968949019908905,
+          2.0255322456359863
+        ]
+      },
+      "opacity_logit": {
+        "min": 0.017822265625,
+        "p05": 0.26171875,
+        "p50": 0.69921875,
+        "p95": 0.984375,
+        "max": 1.0
+      },
+      "opacity_linear": {
+        "min": 0.5044554484736958,
+        "p05": 0.5650587515863784,
+        "p50": 0.6680145362320873,
+        "p95": 0.7279754489059775,
+        "max": 0.7310585786300049
+      },
+      "scale_sigma_xyz_model_units": {
+        "min": [
+          7.4863466427756e-05,
+          0.00020980826197299104,
+          2.753734223157623e-05
+        ],
+        "p05": [
+          0.0004882812397699233,
+          0.0007095336372158547,
+          0.0003356933710514015
+        ],
+        "p50": [
+          0.0009117128365700667,
+          0.0009994507385667588,
+          0.0006866455347732854
+        ],
+        "p95": [
+          0.0014572144999436326,
+          0.001487732190295817,
+          0.0010681150521597723
+        ],
+        "max": [
+          0.0019683834442763538,
+          0.0019683834442763538,
+          0.0017623899229613398
+        ]
+      },
+      "sog_100k": {
+        "gaussians": 100000,
+        "bytes": 1230060
+      },
+      "sog_250k": {
+        "gaussians": 250000,
+        "bytes": 2973448
+      }
+    },
+    "scores": {
+      "recognizable_room": 3,
+      "coherent_furniture": 2,
+      "holes_and_floaters": 1,
+      "usable_movement_range": 2
+    },
+    "publishable": false,
+    "error": null,
+    "quest_frame_time_ms": null,
+    "center_pair_coherent": false,
+    "score_evidence": "More chair legs and sawdust texture survive the near seated view than at 518 px. The forward views still leave the chairs and bar as disconnected patches over a mostly empty floor."
+  },
+  {
+    "restaurant": "McSorley's Old Ale House",
+    "room_id": "mcsorley",
+    "n_photos": 3,
+    "resolution": 518,
+    "prediction_id": "4z4j7pz745rmr0d1zw9ra94jg8",
+    "status": "succeeded",
+    "attempt": 1,
+    "input_encoding": "data:application/zip",
+    "predict_time_s": 14.997848347,
+    "cost_usd": 0.014622902,
+    "directory": "outputs/mcsorley-3p-518",
+    "output_paths": {
+      "raw_ply": "outputs/mcsorley-3p-518/gaussians.ply",
+      "camera_params": "outputs/mcsorley-3p-518/camera_params.json",
+      "archive": "outputs/mcsorley-3p-518/replicate-output.zip",
+      "sog_100k": "outputs/mcsorley-3p-518/room-100000.sog",
+      "sog_250k": "outputs/mcsorley-3p-518/room-250000.sog",
+      "render_poses": "outputs/mcsorley-3p-518/render-poses.json",
+      "renders": [
+        "outputs/mcsorley-3p-518/photo-1.webp",
+        "outputs/mcsorley-3p-518/entry-standing.webp",
+        "outputs/mcsorley-3p-518/entry-seated.webp",
+        "outputs/mcsorley-3p-518/inside-standing.webp",
+        "outputs/mcsorley-3p-518/inside-seated.webp"
+      ],
+      "contact_sheet": "outputs/mcsorley-3p-518/contact-sheet.png"
+    },
+    "stats": {
+      "raw_gaussians": 358141,
+      "raw_ply_bytes": 24354004,
+      "bounds_raw_model_units": {
+        "min": [
+          -0.8129558563232422,
+          -0.5448538661003113,
+          -0.6706035137176514
+        ],
+        "max": [
+          1.514210820198059,
+          0.20594462752342224,
+          2.0729498863220215
+        ]
+      },
+      "opacity_logit": {
+        "min": 0.01031494140625,
+        "p05": 0.294921875,
+        "p50": 0.69140625,
+        "p95": 0.98046875,
+        "max": 1.0
+      },
+      "opacity_linear": {
+        "min": 0.5025787124874453,
+        "p05": 0.5732006601591959,
+        "p50": 0.6662796810207858,
+        "p95": 0.7272012166848617,
+        "max": 0.7310585786300049
+      },
+      "scale_sigma_xyz_model_units": {
+        "min": [
+          4.2676913340012374e-05,
+          0.00023078909541183234,
+          2.7418136717784843e-05
+        ],
+        "p05": [
+          0.00041770942383996686,
+          0.0007095336372158547,
+          0.00029563901740679225
+        ],
+        "p50": [
+          0.0009689332419297692,
+          0.0010681150521597723,
+          0.0006866455347732854
+        ],
+        "p95": [
+          0.0017547607699915058,
+          0.0017547607699915058,
+          0.0012054441252118563
+        ],
+        "max": [
+          0.0025634761087070025,
+          0.0025634761087070025,
+          0.0025634761087070025
+        ]
+      },
+      "sog_100k": {
+        "gaussians": 100000,
+        "bytes": 1228319
+      },
+      "sog_250k": {
+        "gaussians": 250000,
+        "bytes": 2929767
+      }
+    },
+    "scores": {
+      "recognizable_room": 3,
+      "coherent_furniture": 2,
+      "holes_and_floaters": 1,
+      "usable_movement_range": 1
+    },
+    "publishable": false,
+    "error": null,
+    "quest_frame_time_ms": null,
+    "center_pair_coherent": false,
+    "score_evidence": "The photo-1 viewpoint retains the wood bar and framed wall, but the added window-side photo does little to fill the sampled floor and seating. The short shift still reveals detached chairs, and the forward pair splits into islands of geometry."
+  },
+  {
+    "restaurant": "McSorley's Old Ale House",
+    "room_id": "mcsorley",
+    "n_photos": 3,
+    "resolution": 952,
+    "prediction_id": "dx6wmwht8nrmr0d1zwab3vkebc",
+    "status": "succeeded",
+    "attempt": 1,
+    "input_encoding": "data:application/zip",
+    "predict_time_s": 15.689743871,
+    "cost_usd": 0.0152975,
+    "directory": "outputs/mcsorley-3p-952",
+    "output_paths": {
+      "raw_ply": "outputs/mcsorley-3p-952/gaussians.ply",
+      "camera_params": "outputs/mcsorley-3p-952/camera_params.json",
+      "archive": "outputs/mcsorley-3p-952/replicate-output.zip",
+      "sog_100k": "outputs/mcsorley-3p-952/room-100000.sog",
+      "sog_250k": "outputs/mcsorley-3p-952/room-250000.sog",
+      "render_poses": "outputs/mcsorley-3p-952/render-poses.json",
+      "renders": [
+        "outputs/mcsorley-3p-952/photo-1.webp",
+        "outputs/mcsorley-3p-952/entry-standing.webp",
+        "outputs/mcsorley-3p-952/entry-seated.webp",
+        "outputs/mcsorley-3p-952/inside-standing.webp",
+        "outputs/mcsorley-3p-952/inside-seated.webp"
+      ],
+      "contact_sheet": "outputs/mcsorley-3p-952/contact-sheet.png"
+    },
+    "stats": {
+      "raw_gaussians": 641607,
+      "raw_ply_bytes": 43629692,
+      "bounds_raw_model_units": {
+        "min": [
+          -0.8223799467086792,
+          -0.5437943935394287,
+          -0.6976794004440308
+        ],
+        "max": [
+          1.5281651020050049,
+          0.19282060861587524,
+          2.158991813659668
+        ]
+      },
+      "opacity_logit": {
+        "min": 0.01361083984375,
+        "p05": 0.265625,
+        "p50": 0.72265625,
+        "p95": 0.984375,
+        "max": 1.0
+      },
+      "opacity_linear": {
+        "min": 0.5034026574311689,
+        "p05": 0.5660185351961015,
+        "p50": 0.6731916730260219,
+        "p95": 0.7279754489059775,
+        "max": 0.7310585786300049
+      },
+      "scale_sigma_xyz_model_units": {
+        "min": [
+          8.82148430073731e-05,
+          0.0002031325647117223,
+          2.1457662525504664e-05
+        ],
+        "p05": [
+          0.0004882812397699233,
+          0.0007209776773076467,
+          0.0003261567582445535
+        ],
+        "p50": [
+          0.0009536743715603122,
+          0.0010299683206266763,
+          0.0007095336372158547
+        ],
+        "p95": [
+          0.0015411374851066668,
+          0.0015182496075095446,
+          0.0011291505078645854
+        ],
+        "max": [
+          0.002029419410914706,
+          0.002029419410914706,
+          0.001998901480940734
+        ]
+      },
+      "sog_100k": {
+        "gaussians": 100000,
+        "bytes": 1232549
+      },
+      "sog_250k": {
+        "gaussians": 250000,
+        "bytes": 3018750
+      }
+    },
+    "scores": {
+      "recognizable_room": 3,
+      "coherent_furniture": 2,
+      "holes_and_floaters": 1,
+      "usable_movement_range": 2
+    },
+    "publishable": false,
+    "error": null,
+    "quest_frame_time_ms": null,
+    "center_pair_coherent": false,
+    "score_evidence": "The near seated pose has more floor texture, but the empty borders and disconnected chair legs remain. The forward seated view adds a large bright floater at lower right and leaves the bar visibly fragmented."
+  }
+]

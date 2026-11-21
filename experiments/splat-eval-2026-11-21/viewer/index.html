@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splat Experiment Viewer</title>
+<style>
+  :root {
+    --bg: #111214; --panel: #18191c; --raised: #202226; --line: #2c2f34;
+    --text: #e8e6e1; --muted: #9a978f; --faint: #6c6a65;
+    --accent: #d9a54a; --yes: #6fbf73; --no: #d0705f;
+    font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
+  body { display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: 100%; }
+  #stage { position: relative; overflow: hidden; background: #0b0c0d; }
+  #canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; outline: none; }
+  #canvas:active { cursor: grabbing; }
+  #overlay { position: absolute; inset: 0; pointer-events: none; display: none; justify-content: center; }
+  #overlay img { height: 100%; width: auto; }
+  #labels { position: absolute; inset: 0; pointer-events: none; }
+  .label { position: absolute; transform: translate(-50%, -100%); padding: 3px 8px; border-radius: 4px;
+    background: rgba(17,18,20,.82); border: 1px solid var(--line); font-size: 12px; white-space: nowrap; }
+  .label b { font-weight: 600; }
+  #hud { position: absolute; left: 12px; bottom: 12px; padding: 8px 10px; border-radius: 6px;
+    background: rgba(17,18,20,.82); border: 1px solid var(--line); font-size: 12px; color: var(--muted);
+    max-width: calc(100% - 24px); }
+  #hud strong { color: var(--text); font-variant-numeric: tabular-nums; }
+  #status { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); padding: 6px 12px;
+    border-radius: 6px; background: rgba(17,18,20,.9); border: 1px solid var(--line); font-size: 12px; display: none; }
+
+  aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 16px; }
+  h1 { font-size: 15px; margin: 0 0 12px; font-weight: 600; letter-spacing: .01em; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint);
+    margin: 20px 0 8px; font-weight: 600; }
+  .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; background: var(--bg);
+    border-radius: 8px; border: 1px solid var(--line); }
+  button { font: inherit; color: inherit; background: var(--raised); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+  button:hover { border-color: #444850; }
+  button:focus-visible, select:focus-visible, #canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button[aria-pressed="true"] { background: #2e2a22; border-color: var(--accent); color: #f3dcae; }
+  .tabs button { border: 0; background: transparent; }
+  .tabs button[aria-pressed="true"] { background: var(--raised); color: var(--text); }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .grid2 { display: grid; grid-template-columns: auto 1fr 1fr; gap: 6px; align-items: center; }
+  .grid2 .head { font-size: 11px; color: var(--faint); text-align: center; }
+  .grid2 .rowhead { font-size: 12px; color: var(--muted); padding-right: 4px; }
+  select { font: inherit; color: inherit; background: var(--raised); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 8px; width: 100%; }
+  .thumbs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .thumbs figure { margin: 0; }
+  .thumbs img { width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 4px; display: block;
+    border: 1px solid var(--line); }
+  .thumbs figcaption { font-size: 10px; color: var(--faint); margin-top: 2px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .dishes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .dishes button { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+  .dishes img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+  .dishes span { font-size: 11px; padding: 3px 4px; text-transform: capitalize; }
+  .card { background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+  .card header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+  .card header b { font-weight: 600; }
+  .verdict { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 99px; border: 1px solid; }
+  .verdict.yes { color: var(--yes); border-color: var(--yes); }
+  .verdict.no { color: var(--no); border-color: var(--no); }
+  .verdict.na { color: var(--faint); border-color: var(--line); }
+  dl { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; margin: 0; font-size: 12px; }
+  dt { color: var(--muted); } dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+  .evidence { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+  .help { font-size: 12px; color: var(--muted); margin: 0; }
+  .help kbd { font: 11px ui-monospace, monospace; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 3px; padding: 0 4px; color: var(--text); }
+  label.check { display: flex; gap: 8px; align-items: center; font-size: 13px; margin-top: 8px; }
+  a { color: #e8c37f; }
+
+  @media (max-width: 820px) {
+    body { grid-template-columns: 100%; grid-template-rows: 58vh auto; height: auto; }
+    html, body { height: auto; }
+    aside { border-left: 0; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+  <main id="stage">
+    <canvas id="canvas" tabindex="0" aria-label="3D splat viewport"></canvas>
+    <div id="overlay"><img alt="Source photo 1 overlay"></div>
+    <div id="labels"></div>
+    <div id="hud"></div>
+    <div id="status" role="status"></div>
+  </main>
+  <aside>
+    <h1>Splat experiment · 2026-11-21</h1>
+    <div class="tabs" role="group" aria-label="Mode">
+      <button data-mode="rooms">Rooms</button>
+      <button data-mode="dishes">Dishes</button>
+    </div>
+    <div id="panel"></div>
+  </aside>
+  <script type="module" src="/app.mjs"></script>
+</body>
+</html>
