@@ -1,0 +1,24 @@
+boston-map-sculpture.glb 1520272 bytes 52616 triangles 14 primitives [-0.750000, 0.000000, -0.525000] .. [0.750000, 0.440000, 0.525000]
+mbta-train-capsule.glb 17020 bytes 220 triangles 3 primitives [-0.005050, -0.004000, -0.016000] .. [0.005050, 0.004000, 0.016000]
+table-pedestal.glb 143192 bytes 2322 triangles 3 primitives [-0.450000, -0.042000, -0.450000] .. [0.450000, 0.000000, 0.450000]
+segment-place-bucen.glb 1000932 bytes 23192 triangles 9 primitives [-0.450000, -0.180000, -0.450000] .. [0.450000, 0.536141, 0.450000]
+segment-place-brico.glb 1029396 bytes 23556 triangles 9 primitives [-0.450000, -0.180000, -0.450000] .. [0.450000, 0.451141, 0.450000]
+segment-place-kencl.glb 984184 bytes 24091 triangles 9 primitives [-0.450000, -0.180000, -0.450000] .. [0.450000, 0.506500, 0.450000]
+segment-place-harsq.glb 1055752 bytes 25222 triangles 9 primitives [-0.450000, -0.180000, -0.450000] .. [0.450000, 0.525000, 0.450000]
+segment-place-chncl.glb 1153728 bytes 26824 triangles 9 primitives [-0.450000, -0.180000, -0.450000] .. [0.450000, 0.574141, 0.450000]
+place-bucen tube [-0.150165, 0.261000, 0.066630] top [-0.150165, 0.413000, 0.066630] 10 pins; clearance 0.018 m; minimum XZ separation 0.134004
+place-brico tube [-0.380077, 0.268000, 0.034574] top [-0.380077, 0.413000, 0.034574] 10 pins; clearance 0.018 m; minimum XZ separation 0.134004
+place-kencl tube [-0.002139, 0.208000, 0.085898] top [-0.002139, 0.413000, 0.085898] 10 pins; clearance 0.018 m; minimum XZ separation 0.134004
+place-harsq tube [-0.303191, 0.167000, -0.329273] top [-0.303191, 0.413000, -0.329273] 10 pins; clearance 0.018 m; minimum XZ separation 0.134004
+place-chncl tube [0.408136, 0.137000, 0.024710] top [0.408136, 0.413000, 0.024710] 10 pins; clearance 0.018 m; minimum XZ separation 0.134004
+561 centerline rings; max centroid error 4.257e-9 m
+room-ramen-house.ply 1344452 bytes 24000 Gaussians [-2.500000, 0.000000, -2.000000] .. [2.500000, 2.750000, 1.986506] floor span 4.973861 × 3.970383 m
+room-karaoke-suite.ply 1232452 bytes 22000 Gaussians [-2.100000, 0.000000, -1.700000] .. [2.100000, 2.620000, 1.684477] floor span 4.165647 × 3.368293 m
+room-study-cafe.ply 1120452 bytes 20000 Gaussians [-2.750000, 0.000000, -2.250000] .. [2.750000, 3.000000, 2.232013] floor span 5.465510 × 4.461809 m
+dish-tonkotsu-ramen.ply 784452 bytes 14000 Gaussians [-0.119349, 0.000000, -0.119724] .. [0.119900, 0.125828, 0.119727] plate span 0.238736 × 0.239452 m
+dish-katsu-curry.ply 728452 bytes 13000 Gaussians [-0.129354, 0.000000, -0.107155] .. [0.129542, 0.050696, 0.107607] plate span 0.258896 × 0.214762 m
+dish-matcha-tiramisu.ply 560452 bytes 10000 Gaussians [-0.089807, 0.000000, -0.089795] .. [0.089763, 0.061500, 0.089818] plate span 0.179570 × 0.179613 m
+station-anchors.json 1987 bytes
+segment-anchors.json 3751 bytes
+mbta-3d-paths.json 64158 bytes
+PASS: all 17 exports
