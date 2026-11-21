@@ -88,6 +88,9 @@ export class Store {
     `);
     this.transaction(() => {
       for (const place of places) this.sqlite.prepare('INSERT OR IGNORE INTO places VALUES (?, ?)').run(place.id, JSON.stringify(place));
+      // Seeded venues keep their surveyed position even when the database predates a correction.
+      const locate = this.sqlite.prepare(`UPDATE places SET data = json_set(data, '$.lat', ?, '$.lon', ?, '$.walk_from_stop_m', ?) WHERE id = ?`);
+      for (const place of places) locate.run(place.lat, place.lon, place.walk_from_stop_m, place.id);
       for (const asset of demoAssets) this.sqlite.prepare('INSERT OR IGNORE INTO assets VALUES (?, ?)').run(asset.id, JSON.stringify(asset));
     });
   }

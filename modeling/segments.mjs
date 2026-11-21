@@ -362,6 +362,7 @@ export const VENUE_INSET = 0.012;
 const VENUE_LIMIT = 0.4; // venues this close to the deck centre are always on the island
 const PLOT_LIMIT = 0.432; // furthest a kept building may reach from the deck centre
 const PLOT_PAD = 0.004;
+const STATION_DISC = 0.021; // clearance radius kept under the station medallion
 const RIM_OFFSET = 0.007; // rim markers stand on the turf just outside the city's edge
 const compress = (h) => (h <= 90 ? h : 90 + (h - 90) * 0.55);
 
@@ -462,7 +463,9 @@ function classify(b, scale) {
   const box = orientedBox(b.ring);
   const tagged = b.heightM ?? (b.levels ? b.levels * LEVEL_M + 1 : null);
   let heightM =
-    tagged ?? (LOW_UTILITY.test(b.kind) ? 3 : b.kind === 'parking' ? 9 : DEFAULT_HEIGHT[family]);
+    tagged ??
+    // An unsurveyed station building is a street-level headhouse over an underground station.
+    (LOW_UTILITY.test(b.kind) ? 3 : b.kind === 'train_station' ? 5 : b.kind === 'parking' ? 9 : DEFAULT_HEIGHT[family]);
   heightM = Math.max(heightM, 2.4);
 
   const pitchedTag = /^(gabled|hipped|pyramidal|gambrel|half-hipped|saltbox|mansard)$/.test(b.roofShape ?? '');
@@ -861,7 +864,32 @@ export function segments(dir, only) {
       -(lat - centerLat) * 110540 * scale,
     ];
     const stationAt = toDeck(...stops[stationName]);
-    const all = places.filter((p) => p.stop_id === id).map((v) => ({ id: v.id, p: toDeck(v.lat, v.lon) }));
+    const rings = area.buildings.map((b) => b.ring.map((p) => p.map((n) => n * scale)));
+    // OSM maps a shop as a point at its door, which can sit on the pavement just outside the
+    // footprint. Such a pin is moved a couple of metres inside the building it belongs to, so it
+    // stands on that roof. Open-air venues stay exactly where they are surveyed.
+    const indoors = (v, p) => {
+      if (v.category === 'outdoor' || v.category === 'stadium' || rings.some((ring) => contains(ring, p))) return p;
+      let best;
+      for (const ring of rings)
+        for (let i = 0; i < ring.length; i++) {
+          const a = ring[i],
+            b = ring[(i + 1) % ring.length],
+            dx = b[0] - a[0],
+            dz = b[1] - a[1];
+          const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dz) / (dx * dx + dz * dz || 1)));
+          const q = [a[0] + t * dx, a[1] + t * dz],
+            d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+          if (!best || d < best.d) best = { d, q, ring };
+        }
+      if (!best || best.d > 15 * scale || best.d < 1e-9) return p;
+      for (const inset of [2.5, 1.2, 0.5]) {
+        const moved = best.q.map((n, k) => n + ((n - p[k]) / best.d) * inset * scale);
+        if (contains(best.ring, moved)) return moved;
+      }
+      return p;
+    };
+    const all = places.filter((p) => p.stop_id === id).map((v) => ({ id: v.id, p: indoors(v, toDeck(v.lat, v.lon)) }));
     // Grow the shoreline around any building it would cut, so footprints are never sliced.
     // The shoreline also reaches out to every venue inside the surveyed crop.
     const reach = all
@@ -870,14 +898,13 @@ export function segments(dir, only) {
       .filter((p) => Math.max(Math.abs(p[0]), Math.abs(p[1])) <= VENUE_LIMIT)
       .flatMap((p) => circle(p[0], 0, p[1], VENUE_INSET + 0.012, 8).map(([x, , z]) => [x, z]));
     const base = convexHull([...shoreline(rng(4200 + index)), ...reach]);
-    const rings = area.buildings.map((b) => b.ring.map((p) => p.map((n) => n * scale)));
     const crossing = (ring) => {
       const inside = ring.filter((p) => depthInside(p) >= 0).length;
       return inside > 0 && inside < ring.length;
     };
     const whole = new Set();
     setOutline(base);
-    for (let pass = 0; pass < 8; pass++) {
+    for (let pass = 0; pass < 16; pass++) {
       let grew = false;
       for (const [i, ring] of rings.entries()) {
         if (whole.has(i) || !crossing(ring)) continue;
@@ -898,16 +925,38 @@ export function segments(dir, only) {
       });
       setOutline(convexHull([...base, ...padded]));
     }
-    // A building centred beyond the edge is left out whole. One centred on the island but too
-    // large for the surveyed crop (a stadium, a campus block) has to end at the edge.
-    let trimmed = 0;
-    const kept = area.buildings.filter((_, i) => {
-      if (!crossing(rings[i])) return true;
-      const c = [0, 1].map((k) => rings[i].reduce((n, p) => n + p[k], 0) / rings[i].length);
-      if (depthInside(c) < 0) return false;
-      trimmed++;
-      return true;
-    });
+    // No footprint is ever sliced by the shoreline. A building the shoreline could not grow
+    // around (centred beyond the edge, or reaching past the surveyed crop) is left out whole,
+    // together with any outline or building part that belongs to it.
+    const centreOf = (ring) => [0, 1].map((k) => ring.reduce((n, p) => n + p[k], 0) / ring.length);
+    const crosses = (a, b, c, d) => turn(a, b, c) * turn(a, b, d) < 0 && turn(c, d, a) * turn(c, d, b) < 0;
+    const cut = (ring) => {
+      const inside = ring.filter((p) => depthInside(p) >= 0).length;
+      if (inside === ring.length) return false;
+      return (
+        inside > 0 ||
+        outline.some((p) => contains(ring, p)) ||
+        ring.some((a, i) =>
+          outlineEdges.some((e) => crosses(a, ring[(i + 1) % ring.length], e.a, e.b)),
+        )
+      );
+    };
+    const dropped = new Set(rings.keys().filter((i) => cut(rings[i])));
+    const onIsland = [...rings.keys()].filter((i) => !dropped.has(i) && rings[i].every((p) => depthInside(p) >= 0));
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const i of onIsland) {
+        if (dropped.has(i)) continue;
+        const c = centreOf(rings[i]);
+        if ([...dropped].some((k) => contains(rings[k], c) || contains(rings[i], centreOf(rings[k])))) {
+          dropped.add(i);
+          grew = true;
+        }
+      }
+    }
+    const trimmed = dropped.size;
+    const kept = area.buildings.filter((_, i) => !dropped.has(i));
+    const droppedNames = [...new Set([...dropped].map((i) => area.buildings[i].name).filter(Boolean))];
     island(s, 9100 + index, outline, outlineRadius);
     s.facades = {};
     for (const [kind, { label }] of Object.entries(FACADES)) {
@@ -975,6 +1024,7 @@ export function segments(dir, only) {
     }
 
     let buildings = kept
+      .filter((b) => b.ring.some((p) => depthInside(p.map((n) => n * scale)) >= 0))
       .map((b) => polygon(b, scale, 0.00036))
       .filter((b) => b && b.area >= 12 * scale * scale);
     // Where OSM models a building as parts, the parts replace its overall outline.
@@ -998,7 +1048,9 @@ export function segments(dir, only) {
     const sites = fallbackSites(rendered);
     const pins = sites.concat(venuePoints);
     for (const b of rendered) renderBuilding(s, b, pins, scale);
-    const treeCount = plant(s, area, cover, buildings, roads, venuePoints.concat(sites), random, scale, 130);
+    // A wider crop covers more parks and streets, so it carries proportionally more trees.
+    const treeLimit = spanMeters > 480 ? 300 : 130;
+    const treeCount = plant(s, area, cover, buildings, roads, venuePoints.concat(sites), random, scale, treeLimit);
 
     const meshes = m.surfaces.map((surface) => ({
       ...surface,
@@ -1019,8 +1071,31 @@ export function segments(dir, only) {
         compass: COMPASS[(Math.round(Math.atan2(south, east) / (Math.PI / 4)) + 8) % 8],
       };
     }
+    // The station medallion stands on a post that clears every roof and tree under its disc.
+    const groundAt = (p) => topAt(meshes, p)[1] - 0.018;
+    // Among spots within about 40 m of the entrance it takes the one needing the shortest post,
+    // so a tower beside the station never lifts the medallion out of sight.
+    const discTop = (c) => {
+      const under = [c];
+      for (const r of [STATION_DISC * 0.5, STATION_DISC])
+        for (let k = 0; k < 10; k++) under.push([c[0] + r * Math.cos((k * TAU) / 10), c[1] + r * Math.sin((k * TAU) / 10)]);
+      return under.some((p) => depthInside(p) < 0) ? Infinity : Math.max(...under.map(groundAt));
+    };
+    let stand = { at: stationAt, top: discTop(stationAt), cost: discTop(stationAt) };
+    for (const r of [0.011, 0.022, 0.033, 0.044])
+      for (let k = 0; k < 16; k++) {
+        const at = [stationAt[0] + r * Math.cos((k * TAU) / 16), stationAt[1] + r * Math.sin((k * TAU) / 16)];
+        const top = discTop(at),
+          cost = top + 0.35 * r;
+        if (cost < stand.cost - 1e-9) stand = { at, top, cost };
+      }
+    const stationAnchor = {
+      base: [stand.at[0], groundAt(stand.at), stand.at[1]],
+      top: stand.top + 0.02,
+    };
     anchors[id] = {
       deckY: 0,
+      stationAnchor,
       projection: { centerLat, centerLon, spanMeters, deckSize },
       placeAnchors: Object.fromEntries(venues.map(({ id, p }) => [id, topAt(meshes, p)])),
       offDeck,
@@ -1033,7 +1108,7 @@ export function segments(dir, only) {
       rendered.length + ' buildings (' + surveyed + ' with surveyed heights)',
       treeCount + ' trees',
       venues.length + '/' + all.length + ' venues on deck',
-      trimmed + ' oversize buildings end at the edge',
+      trimmed + ' edge buildings left out whole' + (droppedNames.length ? ' (' + droppedNames.join(', ') + ')' : ''),
       tris + ' triangles',
       meshes.filter((s) => s.indices.length).length + ' primitives',
     );

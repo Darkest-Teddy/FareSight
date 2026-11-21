@@ -3,10 +3,10 @@ import { fileURLToPath } from 'node:url';
 import { places } from '../server/src/db/seed.ts';
 import { focal } from './transit.mjs';
 
-// Each station is modelled as a square crop small enough for buildings to read at a realistic
-// scale on the 0.856 m deck. The crop is placed to keep as many curated venues in range as
-// possible; venues that still fall outside are listed as off-deck markers by segments.mjs.
-const SPANS = [400, 420, 440, 460, 480];
+// Each station is modelled as an 800 m square crop on the 0.856 m deck, twice the width of the
+// first models. The crop is placed to keep as many curated venues in range as possible; venues
+// that still fall outside are listed as off-deck markers by segments.mjs.
+const SPANS = [800];
 const VENUE_MARGIN = 0.9; // venues and the station stay inside this fraction of the half-span
 const stops = JSON.parse(readFileSync(new URL('./stops.json', import.meta.url)));
 
@@ -192,7 +192,7 @@ async function fetchArea(area) {
   const b = bboxFor(area);
   const bb = `${b.south.toFixed(6)},${b.west.toFixed(6)},${b.north.toFixed(6)},${b.east.toFixed(6)}`;
   const ql = `
-[out:json][timeout:80];
+[out:json][timeout:80][maxsize:268435456];
 (
   way["building"](${bb});
   way["building:part"](${bb});
