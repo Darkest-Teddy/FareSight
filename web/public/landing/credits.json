@@ -1,17 +1,17 @@
 {
   "source": "Poly Haven (polyhaven.com)",
-  "license": "CC0 1.0 Universal — no attribution required, credited anyway.",
+  "license": "CC0 1.0 Universal. No attribution required; credited anyway.",
   "assets": [
     {
-      "slug": "lythwood_room",
-      "name": "Lythwood Room",
+      "slug": "hotel_room",
+      "name": "Hotel Room",
       "authors": [
         "Greg Zaal"
       ],
       "license": "CC0",
       "kind": "hdri",
       "role": "home",
-      "file": "hdri/lythwood_room_2k.hdr"
+      "file": "env/home-light.jpg"
     },
     {
       "slug": "warm_restaurant",
@@ -23,7 +23,7 @@
       "license": "CC0",
       "kind": "hdri",
       "role": "restaurant",
-      "file": "hdri/warm_restaurant_2k.hdr"
+      "file": "env/restaurant-light.jpg"
     },
     {
       "slug": "Sofa_01",
@@ -124,6 +124,56 @@
       "kind": "model",
       "role": "restaurant",
       "file": "models/wine_bottles_01/wine_bottles_01_1k.gltf"
+    },
+    {
+      "slug": "laminate_floor",
+      "name": "Laminate Floor",
+      "authors": [
+        "Dario Barresi",
+        "Dimitrios Savva"
+      ],
+      "license": "CC0",
+      "kind": "texture",
+      "role": "home",
+      "use": "floor",
+      "dir": "textures/laminate_floor"
+    },
+    {
+      "slug": "painted_plaster_wall",
+      "name": "Painted Plaster Wall",
+      "authors": [
+        "Amal Kumar"
+      ],
+      "license": "CC0",
+      "kind": "texture",
+      "role": "home",
+      "use": "wall",
+      "dir": "textures/painted_plaster_wall"
+    },
+    {
+      "slug": "floor_tiles_06",
+      "name": "Floor Tiles 06",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "license": "CC0",
+      "kind": "texture",
+      "role": "restaurant",
+      "use": "floor",
+      "dir": "textures/floor_tiles_06"
+    },
+    {
+      "slug": "brick_wall_003",
+      "name": "Brick Wall 003",
+      "authors": [
+        "Rob Tuytel",
+        "Dimitrios Savva"
+      ],
+      "license": "CC0",
+      "kind": "texture",
+      "role": "restaurant",
+      "use": "wall",
+      "dir": "textures/brick_wall_003"
     }
   ]
 }
