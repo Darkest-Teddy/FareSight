@@ -4,6 +4,7 @@ import { SpzParser } from 'playcanvas/scripts/esm/parsers/spz-parser.mjs';
 import zstdGlueUrl from '../../../server/vendor/playcanvas-zstd/zstd.wasm.js?url&no-inline';
 import zstdWasmUrl from '../../../server/vendor/playcanvas-zstd/zstd.wasm.wasm?url';
 import type { XRAssetData } from './bridgeTypes';
+import { jarvisPalette } from './JarvisReveal';
 import type { DebugLog } from './sceneSupport';
 
 type Slot = 'room' | 'dish' | 'compare';
@@ -15,16 +16,75 @@ interface Source {
 }
 
 interface Placement {
+  slot: Slot;
   data: XRAssetData;
   source: Source;
   parent: pc.Entity;
   entity?: pc.Entity;
   count: number;
   ready: Promise<boolean>;
+  elapsed?: number;
 }
 
 const softGaussianBudget = 160_000;
 const hardGaussianLimit = 450_000;
+const materializeSeconds = 2.2;
+const starkModifier = { glsl: `
+${jarvisPalette}
+uniform float uStarkTime;
+uniform float uStarkProgress;
+uniform vec3 uStarkOrigin;
+uniform float uStarkRadius;
+uniform float uStarkHeight;
+uniform float uStarkPointSize;
+uniform float uStarkDrop;
+
+float starkLead;
+float starkSeen;
+float starkSolid;
+float starkEdge;
+float starkSpark;
+
+void starkWave() {
+    vec3 offset = getCenter() - uStarkOrigin;
+    starkSpark = fract(sin(dot(offset, vec3(113.9, 227.1, 347.7))) * 43758.5453);
+    float height = clamp(offset.y / uStarkHeight, 0.0, 1.0);
+    float distance = clamp(0.80 * length(offset) / uStarkRadius + 0.20 * height +
+                           0.065 * (starkSpark - 0.5), 0.0, 1.0);
+    float leadFront = -0.08 + 1.60 * uStarkProgress;
+    float solidFront = leadFront - 0.38;
+    starkSeen = smoothstep(distance - 0.08, distance + 0.08, leadFront);
+    starkLead = 1.0 - smoothstep(0.006, 0.043, abs(leadFront - distance));
+    starkSolid = smoothstep(distance - 0.10, distance + 0.10, solidFront);
+    starkEdge = 1.0 - smoothstep(0.005, 0.028, abs(solidFront - distance));
+}
+
+void modifySplatCenter(inout vec3 center) {
+    if (uStarkProgress >= 1.0) return;
+    starkWave();
+    float lock = smoothstep(0.08, 0.91, starkSeen);
+    center += normalize(matrix_model[1].xyz) * ((1.0 - lock) * uStarkDrop * (0.65 + 0.7 * starkSpark));
+}
+
+void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
+    if (uStarkProgress >= 1.0) return;
+    float pointSize = uStarkPointSize * mix(0.72, 1.17, starkSpark);
+    scale = mix(vec3(pointSize * starkSeen), scale, starkSolid);
+}
+
+void modifySplatColor(vec3 center, inout vec4 color) {
+    if (uStarkProgress >= 1.0) return;
+    #ifdef GSPLAT_WORKBUFFER_GEOMETRY
+        starkWave();
+    #endif
+    float pulse = 0.86 + 0.14 * sin(9.0 * uStarkTime + 6.283 * starkSpark);
+    vec3 pointColor = mix(jarvisBlue * pulse, jarvisIce, 0.93 * starkLead);
+    color.rgb = mix(pointColor, color.rgb, starkSolid);
+    color.rgb = mix(color.rgb, jarvisIce, 0.58 * starkEdge);
+    float opacity = clamp(0.28 + 0.68 * sqrt(max(0.0, color.a)), 0.0, 1.0);
+    color.a = mix(opacity * starkSeen, color.a, starkSolid);
+}
+` };
 
 export function isSplat(asset: XRAssetData | null | undefined): asset is XRAssetData {
   return !!asset?.url && (asset.format === 'ply' || asset.format === 'sog' || asset.format === 'spz');
@@ -33,16 +93,18 @@ export function isSplat(asset: XRAssetData | null | undefined): asset is XRAsset
 export class SplatLoader {
   private sources = new Map<string, Source>();
   private slots = new Map<Slot, Placement>();
+  private outgoing = new Map<Placement, { progress: number; duration: number; retain: boolean }>();
+  private hidden = new Set<Slot>();
   private disposed = false;
 
-  constructor(private app: pc.Application, private log: DebugLog) {
+  constructor(private app: pc.Application, private log: DebugLog, private reducedMotion: MediaQueryList) {
     pc.WasmModule.setConfig('ZstdDecoderModule', { glueUrl: zstdGlueUrl, wasmUrl: zstdWasmUrl });
     app.loader.getHandler('gsplat')?.addParser(new SpzParser(app));
   }
 
   show(slot: Slot, data: XRAssetData | null | undefined, parent: pc.Entity): Promise<boolean> {
     const previous = this.slots.get(slot);
-    if (!isSplat(data) || this.disposed) { this.clear(slot); return Promise.resolve(false); }
+    if (!isSplat(data) || this.disposed) { this.clear(slot, 0.62); return Promise.resolve(false); }
     if (previous && previous.data.url === data.url && previous.data.scale_factor === data.scale_factor &&
       previous.data.scale_status === data.scale_status && previous.parent === parent) {
       previous.data = data;
@@ -50,8 +112,8 @@ export class SplatLoader {
     }
 
     const source = this.acquire(data.url);
-    this.clear(slot);
-    const placement: Placement = { data, parent, source, count: 0, ready: Promise.resolve(false) };
+    this.clear(slot, 0.62);
+    const placement: Placement = { slot, data, parent, source, count: 0, ready: Promise.resolve(false) };
     this.slots.set(slot, placement);
     placement.ready = this.attach(slot, placement);
     return placement.ready;
@@ -66,8 +128,14 @@ export class SplatLoader {
     }
 
     const { data, parent } = placement;
-    const resource = asset.resource as pc.GSplatResource;
+    const resource = asset.resource as pc.GSplatResourceBase;
     const count = resource.numSplats || data.gaussian_count || 0;
+    for (const [retired, fade] of this.outgoing) {
+      if (count + this.loadedSplats <= hardGaussianLimit) break;
+      if (fade.retain) continue;
+      this.outgoing.delete(retired);
+      this.disposePlacement(retired);
+    }
     const totalAfter = count + this.loadedSplats;
     if (totalAfter > hardGaussianLimit) {
       this.log(`Gaussian safety limit exceeded while opening ${data.id} (${totalAfter.toLocaleString()} splats)`, 'warn');
@@ -86,7 +154,80 @@ export class SplatLoader {
     parent.addChild(entity);
     placement.entity = entity;
     placement.count = count;
+    entity.enabled = !this.hidden.has(slot);
+    if (entity.enabled) this.reveal(slot);
     return true;
+  }
+
+  reveal(slot: Slot): void {
+    const placement = this.slots.get(slot);
+    if (placement && !this.hidden.has(slot) && this.beginEffect(placement, 0)) placement.elapsed = 0;
+  }
+
+  setVisible(slot: Slot, visible: boolean): void {
+    const wasVisible = !this.hidden.has(slot);
+    if (wasVisible === visible) return;
+    if (visible) this.hidden.delete(slot);
+    else this.hidden.add(slot);
+    const placement = this.slots.get(slot);
+    const entity = placement?.entity;
+    if (!placement || !entity) return;
+    if (visible) {
+      const progress = this.outgoing.get(placement)?.progress ?? 0;
+      this.outgoing.delete(placement);
+      entity.enabled = true;
+      if (this.beginEffect(placement, progress)) placement.elapsed = progress * materializeSeconds;
+    } else if (!this.startExit(placement, 0.58, true)) {
+      this.hidePlacement(placement);
+    }
+  }
+
+  private beginEffect(placement: Placement, progress: number): boolean {
+    const entity = placement.entity;
+    const splat = entity?.gsplat;
+    if (!entity || !splat || !this.app.graphicsDevice.isWebGL2 || this.reducedMotion.matches) return false;
+    const room = placement.slot === 'room';
+    const scale = entity.getLocalScale().x;
+    const bounds = splat.resource?.aabb;
+    const half = bounds?.halfExtents;
+    const radius = half ? Math.hypot(half.x, 2 * half.y, half.z) : 0;
+    splat.setParameter('uStarkOrigin', bounds && half ? [bounds.center.x, bounds.center.y - half.y, bounds.center.z] : [0, 0, 0]);
+    splat.setParameter('uStarkRadius', radius > 0 ? radius : (room ? 3.8 : 0.18) / scale);
+    splat.setParameter('uStarkHeight', half && half.y > 0 ? 2 * half.y : (room ? 2.6 : 0.18) / scale);
+    splat.setParameter('uStarkPointSize', room ? 0.014 : 0.0028);
+    splat.setParameter('uStarkDrop', room ? 0.16 : 0.031);
+    this.writeProgress(splat, progress);
+    splat.setWorkBufferModifier(starkModifier);
+    splat.workBufferUpdate = pc.WORKBUFFER_UPDATE_ALWAYS;
+    return true;
+  }
+
+  private writeProgress(splat: pc.GSplatComponent, progress: number): void {
+    splat.setParameter('uStarkTime', progress * materializeSeconds);
+    splat.setParameter('uStarkProgress', pc.math.lerp(progress, progress * progress * (3 - 2 * progress), 0.30));
+  }
+
+  update(dt: number): void {
+    for (const placement of this.slots.values()) {
+      const splat = placement.entity?.gsplat;
+      if (!splat || placement.elapsed === undefined || !placement.entity?.enabled || this.outgoing.has(placement)) continue;
+      const time = this.reducedMotion.matches ? materializeSeconds : Math.min(materializeSeconds, placement.elapsed + dt);
+      this.writeProgress(splat, time / materializeSeconds);
+      if (time === materializeSeconds) {
+        splat.setWorkBufferModifier(null);
+        splat.workBufferUpdate = pc.WORKBUFFER_UPDATE_AUTO;
+        placement.elapsed = undefined;
+      } else placement.elapsed = time;
+    }
+    for (const [placement, fade] of this.outgoing) {
+      const splat = placement.entity?.gsplat;
+      fade.progress -= dt / fade.duration;
+      if (!splat || !placement.entity?.enabled || this.reducedMotion.matches || fade.progress <= 0) {
+        this.outgoing.delete(placement);
+        if (fade.retain) this.hidePlacement(placement);
+        else this.disposePlacement(placement);
+      } else this.writeProgress(splat, fade.progress);
+    }
   }
 
   private acquire(url: string): Source {
@@ -116,10 +257,39 @@ export class SplatLoader {
     return source;
   }
 
-  clear(slot: Slot): void {
+  clear(slot: Slot, duration = 0): void {
     const placement = this.slots.get(slot);
     if (!placement) return;
     this.slots.delete(slot);
+    if (duration > 0 && this.startExit(placement, duration, false)) return;
+    this.outgoing.delete(placement);
+    this.disposePlacement(placement);
+  }
+
+  private startExit(placement: Placement, duration: number, retain: boolean): boolean {
+    const activeFade = this.outgoing.get(placement);
+    if (activeFade) {
+      activeFade.retain = retain;
+      return true;
+    }
+    const progress = (placement.elapsed ?? materializeSeconds) / materializeSeconds;
+    if (progress > 0 && placement.entity?.enabled && this.beginEffect(placement, progress)) {
+      this.outgoing.set(placement, { progress, duration, retain });
+      return true;
+    }
+    return false;
+  }
+
+  private hidePlacement(placement: Placement): void {
+    const entity = placement.entity;
+    if (!entity) return;
+    entity.enabled = false;
+    entity.gsplat?.setWorkBufferModifier(null);
+    if (entity.gsplat) entity.gsplat.workBufferUpdate = pc.WORKBUFFER_UPDATE_AUTO;
+    placement.elapsed = undefined;
+  }
+
+  private disposePlacement(placement: Placement): void {
     placement.entity?.destroy();
     placement.source.refs--;
     if (placement.source.refs === 0 && placement.source.asset) this.release(placement.data.url, placement.source);
@@ -137,6 +307,7 @@ export class SplatLoader {
   get loadedSplats(): number {
     let count = 0;
     for (const placement of this.slots.values()) count += placement.count;
+    for (const [placement, { retain }] of this.outgoing) if (!retain) count += placement.count;
     return count;
   }
 
@@ -148,6 +319,8 @@ export class SplatLoader {
   destroy(): void {
     this.disposed = true;
     for (const slot of this.slots.keys()) this.clear(slot);
+    for (const placement of this.outgoing.keys()) this.disposePlacement(placement);
+    this.outgoing.clear();
     this.sources.clear();
   }
 }

@@ -1,6 +1,7 @@
 import * as pc from 'playcanvas';
 import type { XRPlaceData, XRStopData, XRVehicleData } from './bridgeTypes';
-import { CanvasPanel3D } from './CanvasPanel3D';
+import { PhysicalPlaque } from './CanvasPanel3D';
+import type { JarvisReveal } from './JarvisReveal';
 import { MapLabels } from './MapLabels';
 import { assetBase, brass, child, clamp, damp, fetchAssetJson, material, project, shape, target,
   type DebugLog, type HitTarget, type ModelLibrary, type XYZ } from './sceneSupport';
@@ -30,7 +31,7 @@ interface Beacon {
   glow: number;
   callout: pc.Entity;
   stem: pc.Entity;
-  panel: CanvasPanel3D;
+  panel: PhysicalPlaque;
   actions: HitTarget[];
 }
 
@@ -55,6 +56,7 @@ const pollInterval = 10;
 const trainLift = 0.0102;
 const maxSnapError = 0.03 ** 2;
 const burstTime = 0.7;
+const mapRevealTime = 1.45;
 
 function makeTrack(points: XYZ[]): Track {
   const positions = points.map((point) => new pc.Vec3(...point));
@@ -99,6 +101,7 @@ function sampleTrack(track: Track, distance: number, position: pc.Vec3): void {
 
 export class MapSculptureScene {
   readonly root: pc.Entity;
+  private sculpture: pc.Entity;
   private fallback: pc.Entity;
   private beaconRoot: pc.Entity;
   private trainRoot: pc.Entity;
@@ -107,7 +110,6 @@ export class MapSculptureScene {
   private beaconStem: pc.StandardMaterial;
   private ringMesh: pc.Mesh;
   private labels: MapLabels;
-  private faded: pc.StandardMaterial[] = [];
   private lineSurfaces = new Map<string, LineSurface>();
   private tracks = new Map<string, Track[]>();
   private anchors: Record<string, StationAnchor> = {};
@@ -116,23 +118,28 @@ export class MapSculptureScene {
   private vehicles: XRVehicleData[] = [];
   private trains = new Map<string, Train>();
   private trainModel?: pc.ContainerResource;
+  private medallionModel: Promise<pc.ContainerResource | null>;
   private alive = true;
   private abort = new AbortController();
   private trainPosition = new pc.Vec3();
   private trainLookAt = new pc.Vec3();
   private selected?: string;
   private hovered?: string;
-  private opacity = 1;
+  private visible = false;
+  private detailsVisible = false;
   private immersive = false;
   private clock = 0;
 
   constructor(
-    parent: pc.Entity, private device: pc.GraphicsDevice, models: ModelLibrary,
+    parent: pc.Entity, private device: pc.GraphicsDevice, models: ModelLibrary, private reveal: JarvisReveal,
     log: DebugLog, private selectStop: (id: string) => void,
     canvas: HTMLCanvasElement, hoverStop: (id: string | undefined) => void,
   ) {
     this.root = child(parent, 'Boston subway sculpture');
-    this.fallback = child(this.root, 'Map sculpture fallback');
+    this.sculpture = child(this.root, 'Subway sculpture model');
+    this.sculpture.enabled = false;
+    this.medallionModel = models.load(`${assetBase}station-medallion.glb`);
+    this.fallback = child(this.sculpture, 'Map sculpture fallback');
     this.beaconRoot = child(this.root, 'Station beacons');
     this.trainRoot = child(this.root, 'Live trains');
     this.beaconStem = material(brass);
@@ -171,11 +178,6 @@ export class MapSculptureScene {
         for (const mesh of render.meshInstances) {
           const surface = mesh.material;
           if (!(surface instanceof pc.StandardMaterial)) continue;
-          // Dithered opacity keeps the model in the opaque pass, so the dive can dissolve it
-          // without re-sorting or compiling a new shader mid-flight.
-          surface.opacityDither = pc.DITHER_BAYER8;
-          surface.update();
-          this.faded.push(surface);
           const line = /^Lacquer (#[0-9a-f]{6})$/i.exec(mesh.node.name);
           if (line) {
             this.lineSurfaces.set(line[1].toLowerCase(),
@@ -183,9 +185,9 @@ export class MapSculptureScene {
           }
         }
       }
-      this.root.addChild(model);
+      this.sculpture.addChild(model);
       this.fallback.enabled = false;
-      this.applyOpacity();
+      this.reveal.refresh(this.sculpture, mapRevealTime, 3000);
     });
     void models.load(`${assetBase}mbta-train-capsule.glb`).then((resource) => {
       if (!resource || !this.alive) return;
@@ -208,8 +210,9 @@ export class MapSculptureScene {
       const burst = this.addRing(root, 'Selection burst', burstSurface);
       burst.enabled = false;
       const callout = child(root, 'Immersive callout');
-      callout.enabled = this.immersive;
-      const panel = new CanvasPanel3D(this.device, callout, stop.name, 0.23, 0.078, [0, 0.1, 0]);
+      callout.enabled = false;
+      const panel = new PhysicalPlaque(this.device, callout, stop.name, 0.23, 0.078, 'station', this.medallionModel, this.reveal);
+      if (this.immersive && this.detailsVisible) this.reveal.show(callout, 0.62, 420);
       const stem = shape(callout, 'Callout stem', 'cylinder', this.beaconStem, [0, 0, 0], [0.004, 1, 0.004]);
       const select = () => this.selectStop(stop.stop_id);
       const hit = target(root, [0.07, 0.05, 0.07], select, stop.stop_id);
@@ -260,25 +263,42 @@ export class MapSculptureScene {
     return this.beacons.find((beacon) => beacon.stop.stop_id === id)?.root.getLocalPosition();
   }
 
-  /** 1 is solid; lower values dissolve the whole sculpture during the station dive. */
-  setOpacity(value: number): void {
-    if (value === this.opacity) return;
-    this.opacity = value;
-    this.applyOpacity();
+  setVisible(visible: boolean): void {
+    if (this.visible === visible) return;
+    this.visible = visible;
+    if (visible) this.reveal.show(this.sculpture, mapRevealTime, 3000);
+    else this.reveal.hide(this.sculpture, 0.73, 3000);
+    this.setDetails(visible);
   }
 
-  private applyOpacity(): void {
-    for (const surface of this.faded) {
-      surface.opacity = this.opacity;
-      surface.update();
+  seekReveal(progress: number): void {
+    this.reveal.seek(this.sculpture, progress);
+    this.visible = progress > 0;
+    this.setDetails(progress > 0.70);
+  }
+
+  private setDetails(visible: boolean): void {
+    if (this.detailsVisible === visible) return;
+    this.detailsVisible = visible;
+    this.updateCallouts();
+    for (const { root } of this.trains.values()) {
+      if (visible) this.reveal.show(root, 0.38, 220);
+      else this.reveal.hide(root, 0.34, 220);
     }
-    this.trainRoot.enabled = this.opacity > 0.6;
+  }
+
+  private updateCallouts(): void {
+    for (const { callout } of this.beacons) {
+      if (this.immersive && this.detailsVisible) this.reveal.show(callout, 0.62, 420);
+      else this.reveal.hide(callout, 0.43, 420);
+    }
   }
 
   /** Headsets get 3D callouts; flat screens get the HTML labels. */
   setImmersive(active: boolean): void {
+    if (this.immersive === active) return;
     this.immersive = active;
-    for (const beacon of this.beacons) beacon.callout.enabled = active;
+    this.updateCallouts();
   }
 
   segmentFile(id: string): string | undefined {
@@ -302,10 +322,10 @@ export class MapSculptureScene {
         const point = other.root.getLocalPosition();
         return position.x - point.x < panel.width * 0.9 && Math.abs(position.z - point.z) < 0.15;
       });
-      const raised = nearby?.panel.entity.getLocalPosition().y === 0.1;
-      const panelY = raised ? 0.19 : 0.1;
-      const stemTop = panelY - panel.height / 2;
-      panel.entity.setLocalPosition(0, panelY, 0);
+      const lowStem = 0.1 - panel.faceHeight;
+      const raised = nearby?.panel.entity.getLocalPosition().y === lowStem;
+      const stemTop = lowStem + (raised ? 0.09 : 0);
+      panel.entity.setLocalPosition(0, stemTop, 0);
       stem.setLocalPosition(0, stemTop / 2, 0);
       stem.setLocalScale(0.004, stemTop, 0.004);
     });
@@ -319,7 +339,7 @@ export class MapSculptureScene {
     for (const { stop, panel } of this.beacons) {
       const count = counts.get(stop.stop_id) ?? 0;
       panel.setCallout(stop.name, `${count} matching ${count === 1 ? 'spot' : 'spots'}`,
-        { selected: this.selected === stop.stop_id });
+        { lineColor: stop.primary_color, selected: this.selected === stop.stop_id });
     }
     this.labels.setCounts(counts);
   }
@@ -366,9 +386,9 @@ export class MapSculptureScene {
     }
     for (const [id, train] of this.trains) {
       if (seen.has(id)) continue;
-      train.root.destroy();
-      train.surface.destroy();
       this.trains.delete(id);
+      train.root.once('destroy', () => train.surface.destroy());
+      this.reveal.hide(train.root, 0.31, 220, () => train.root.destroy());
     }
   }
 
@@ -380,6 +400,8 @@ export class MapSculptureScene {
     }
     model.setLocalScale(1.25, 1.25, 1.25);
     train.root.addChild(model);
+    if (this.detailsVisible) this.reveal.show(train.root, 0.38, 220);
+    else this.reveal.finish(train.root, false);
   }
 
   private updateTrain(train: Train, dt: number): void {
@@ -423,7 +445,7 @@ export class MapSculptureScene {
     }
 
     for (const beacon of this.beacons) {
-      if (this.immersive) beacon.panel.face(camera);
+      if (this.immersive) beacon.panel.faceYaw(camera, dt);
       const id = beacon.stop.stop_id;
       const goal = id === this.hovered ? 1 : id === this.selected ? 0.75 : 0;
       beacon.glow = pc.math.lerp(beacon.glow, goal, blend);
@@ -431,7 +453,7 @@ export class MapSculptureScene {
       const breath = 0.5 + 0.5 * Math.sin(this.clock * 2.1 + beacon.root.getLocalPosition().x * 9);
       const size = pc.math.lerp(0.046 + 0.01 * breath, 0.058, beacon.glow);
       beacon.ring.setLocalScale(size, 0.02, size);
-      beacon.ringSurface.opacity = this.opacity * pc.math.lerp(0.28 + 0.2 * breath, 1, beacon.glow);
+      beacon.ringSurface.opacity = this.detailsVisible ? pc.math.lerp(0.28 + 0.2 * breath, 1, beacon.glow) : 0;
       beacon.ringSurface.update();
 
       const bursting = beacon.burstClock < burstTime;
@@ -441,7 +463,7 @@ export class MapSculptureScene {
         const t = clamp(beacon.burstClock / burstTime, 0, 1);
         const reach = 0.05 + 0.16 * (1 - (1 - t) ** 3);
         beacon.burst.setLocalScale(reach, 0.02, reach);
-        beacon.burstSurface.opacity = this.opacity * (1 - t) ** 2;
+        beacon.burstSurface.opacity = this.detailsVisible ? (1 - t) ** 2 : 0;
         beacon.burstSurface.update();
       }
     }
