@@ -778,25 +778,119 @@ function ribbon(s, source, scale, widthM, y, color) {
 const isFoot = (road) => /^(footway|path|cycleway|pedestrian)$/.test(road.kind);
 function roadWidth(road) {
   const table = ROAD_WIDTH[road.kind] ?? 6;
-  return Math.min(
-    22,
-    road.widthM ?? (road.lanes && !isFoot(road) ? Math.max(table * 0.8, road.lanes * 3.4 + 2.4) : table),
-  );
+  const lanes = road.lanes && !isFoot(road) ? Math.max(table * 0.8, road.lanes * 3.4 + 2.4) : table;
+  // Many Boston widths are surveyed in feet but tagged without a unit. A width far beyond what
+  // the lane count allows is read as feet, and ignored if it is still implausible.
+  let tagged = road.widthM;
+  if (tagged && tagged > lanes * 1.5) tagged *= 0.3048;
+  if (tagged && (tagged > lanes * 1.5 || tagged < lanes * 0.45)) tagged = null;
+  return Math.min(22, tagged ?? lanes);
 }
+// Every way is drawn flat on the plate, so the network stays connected end to end. Crossings at
+// different levels are told apart by stacking: a bridge lies a millimetre above what it crosses
+// on a pale deck, and a road tunnel shows as a darker band beneath the streets over it.
+const roadColor = (road) =>
+  road.tunnel === 'yes'
+    ? '#3d4048'
+    : isFoot(road)
+      ? '#e2dbc9'
+      : road.major
+        ? '#484c56'
+        : road.kind === 'service'
+          ? '#777a82'
+          : '#5b5f69';
+const roadY = (road) =>
+  (isFoot(road) ? 0.00184 : road.major ? 0.0024 : 0.0021) + (road.lift ?? 0) - (road.tunnel === 'yes' ? 0.00035 : 0);
+const hasSidewalk = (road) =>
+  road.tunnel !== 'yes' && (road.bridge || !(isFoot(road) || road.kind === 'service' || road.kind === 'motorway'));
+const sidewalkWidth = (road) => roadWidth(road) + (isFoot(road) ? 1.2 : road.kind === 'motorway' ? 2.4 : 5);
 function sidewalk(s, road, scale) {
-  if (isFoot(road) || road.kind === 'service' || road.kind === 'motorway') return;
-  ribbon(s, road.points, scale, roadWidth(road) + 5, 0.0017, '#dcd7cb');
+  if (hasSidewalk(road)) ribbon(s, road.points, scale, sidewalkWidth(road), 0.0017 + (road.lift ?? 0), '#dcd7cb');
 }
 function street(s, road, scale) {
   const foot = isFoot(road);
   const widthM = roadWidth(road);
-  const y = foot ? 0.00184 : road.major ? 0.0024 : 0.0021;
-  const color = foot ? '#e2dbc9' : road.major ? '#484c56' : road.kind === 'service' ? '#777a82' : '#5b5f69';
-  const out = ribbon(s, road.points, scale, widthM, y, color);
+  const out = ribbon(s, road.points, scale, widthM, roadY(road), roadColor(road));
   // Two-way arterials carry a painted centre line.
-  if (road.major && !road.oneway && widthM >= 9)
-    ribbon(s, road.points, scale, 0.45, 0.0025, '#e6c65c');
+  if (road.major && !road.oneway && widthM >= 9 && road.tunnel !== 'yes')
+    ribbon(s, road.points, scale, 0.45, 0.0025 + (road.lift ?? 0), '#e6c65c');
   return { ...out, foot, kind: road.kind };
+}
+// A round joint at each end of a carriageway closes the notch where two ways meet at an angle.
+function roadJoints(s, roads, scale) {
+  const done = new Set();
+  const disc = (p, radius, y, color) => {
+    const key = [p[0], p[1], radius.toFixed(6), y.toFixed(6), color].join(',');
+    if (done.has(key) || depthInside(p) < radius) return;
+    done.add(key);
+    face(s.city, circle(p[0], y, p[1], radius, 10).reverse(), color);
+  };
+  for (const road of roads) {
+    if (isFoot(road) || road.points.length < 2) continue;
+    for (const end of [road.points[0], road.points.at(-1)]) {
+      const p = end.map((n) => n * scale);
+      if (hasSidewalk(road) && !road.bridge) disc(p, (sidewalkWidth(road) * scale) / 2, 0.0017 + (road.lift ?? 0), '#dcd7cb');
+      disc(p, (roadWidth(road) * scale) / 2, roadY(road), roadColor(road));
+    }
+  }
+}
+// ---- Grade separation ------------------------------------------------------------------------
+// Roads and rails become one list of ways. A bridge is lifted a millimetre per level so it lies
+// over what it crosses; subway tunnels are left out; buildings are never altered.
+function gradeWays(area) {
+  const ways = [
+    ...area.roads.map((r) => ({ ...r, width: roadWidth(r), foot: isFoot(r) })),
+    ...(area.rails ?? []).map((r) => ({ ...r, rail: true, width: 3, foot: false })),
+  ];
+  for (const w of ways) {
+    w.hidden = w.rail && w.tunnel === 'yes';
+    w.lift = w.bridge && !w.hidden ? 0.001 * Math.max(1, w.layer || 1) : 0;
+  }
+  return ways;
+}
+// A road that runs on beneath a building shows as a dark archway where it meets the wall.
+function archways(s, ways, buildings, scale) {
+  let count = 0;
+  for (const w of ways) {
+    if (w.rail || w.bridge) continue;
+    const pts = w.points.map((p) => p.map((n) => n * scale));
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1],
+        c = pts[i],
+        length = Math.hypot(...sub(c, a));
+      if (length < 1e-9) continue;
+      const dir = sub(c, a).map((n) => n / length),
+        bounds = boundsOf([a, c]);
+      for (const b of buildings) {
+        if (!overlaps(bounds, b.bounds)) continue;
+        for (const [u, v, base] of b.visibleWalls) {
+          if (base > GROUND_Y + 1e-6) continue;
+          const d0 = turn(u, v, a),
+            d1 = turn(u, v, c);
+          if (d0 * d1 >= 0 || turn(a, c, u) * turn(a, c, v) >= 0) continue;
+          const x = mix(a, c, d0 / (d0 - d1));
+          // Only where the road really carries on under the building, not where it clips a corner.
+          const reach = (m) => contains(b.ring, x.map((n, k) => n + dir[k] * m * scale));
+          if (!((reach(2) && reach(7)) || (reach(-2) && reach(-7)))) continue;
+          const wallLength = Math.hypot(...sub(v, u)),
+            along = sub(v, u).map((n) => n / wallLength),
+            out = [along[1], -along[0]];
+          const t = Math.hypot(...sub(x, u)),
+            half = Math.min((w.width * scale) / 2, t - 0.4 * scale, wallLength - t - 0.4 * scale);
+          const rise = Math.min((w.foot ? 2.8 : 4.3) * scale * VERTICAL, (b.height - GROUND_Y) * 0.8);
+          if (half < 0.7 * scale || inBounds(x) === false) continue;
+          for (const sign of [-1, 1]) {
+            const corner = (k) => x.map((n, j) => n + along[j] * k * half + out[j] * sign * 0.00012);
+            const quad = [to3(corner(-1), 0.0015), to3(corner(-1), GROUND_Y + rise), to3(corner(1), GROUND_Y + rise), to3(corner(1), 0.0015)];
+            face(s.city, sign > 0 ? quad : quad.toReversed(), '#1b1e23');
+            face(s.city, sign > 0 ? quad.toReversed() : quad, '#1b1e23');
+          }
+          count++;
+        }
+      }
+    }
+  }
+  return count;
 }
 
 // Use the same float32 positions and indexed triangles that Model.save writes to the GLB.
@@ -1004,12 +1098,15 @@ export function segments(dir, only) {
               : ['#8fae7f', '#9ab887', '#86a678'][p.id % 3],
       );
     // Pale sidewalks under every carriageway outline the city blocks.
-    for (const r of area.roads) sidewalk(s, r, scale);
-    const roads = area.roads.map((r) => street(s, r, scale));
+    const ways = gradeWays(area);
+    const atGrade = ways.filter((w) => !w.hidden);
+    for (const w of atGrade) if (!w.rail) sidewalk(s, w, scale);
+    const roads = atGrade.filter((w) => !w.rail).map((w) => street(s, w, scale));
     // Surface rail: a ballast bed with the line colour running down the centre.
-    for (const rail of area.rails ?? []) {
-      ribbon(s, rail.points, scale, 3, 0.00245, '#9c9588');
-      ribbon(s, rail.points, scale, 0.8, 0.0025, rail.kind === 'rail' ? '#5f636b' : lineColor);
+    roadJoints(s, atGrade.filter((w) => !w.rail), scale);
+    for (const rail of atGrade.filter((w) => w.rail)) {
+      ribbon(s, rail.points, scale, 3, 0.00245 + rail.lift, '#9c9588');
+      ribbon(s, rail.points, scale, 0.8, 0.0025 + rail.lift, rail.kind === 'rail' ? '#5f636b' : lineColor);
     }
     for (const platform of area.platforms ?? []) {
       const y = GROUND_Y + 0.5 * scale * VERTICAL;
@@ -1048,6 +1145,7 @@ export function segments(dir, only) {
     const sites = fallbackSites(rendered);
     const pins = sites.concat(venuePoints);
     for (const b of rendered) renderBuilding(s, b, pins, scale);
+    const archCount = archways(s, ways, rendered, scale);
     // A wider crop covers more parks and streets, so it carries proportionally more trees.
     const treeLimit = spanMeters > 480 ? 300 : 130;
     const treeCount = plant(s, area, cover, buildings, roads, venuePoints.concat(sites), random, scale, treeLimit);
@@ -1109,6 +1207,7 @@ export function segments(dir, only) {
       treeCount + ' trees',
       venues.length + '/' + all.length + ' venues on deck',
       trimmed + ' edge buildings left out whole' + (droppedNames.length ? ' (' + droppedNames.join(', ') + ')' : ''),
+      ways.filter((w) => w.lift).length + ' bridge spans, ' + archCount + ' archways',
       tris + ' triangles',
       meshes.filter((s) => s.indices.length).length + ' primitives',
     );
