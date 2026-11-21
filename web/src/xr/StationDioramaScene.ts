@@ -1,7 +1,7 @@
 import * as pc from 'playcanvas';
 import type { XRFilterSummary, XRPlaceData, XRStopData } from './bridgeTypes';
 import { CanvasPanel3D, CanvasSurface } from './CanvasPanel3D';
-import { assetBase, brass, child, clamp, damp, fetchAssetJson, ivory, material, shape, target,
+import { assetBase, brass, child, clamp, damp, easeOutBack, fetchAssetJson, ivory, material, shape, target,
   type DebugLog, type HitTarget, type ModelLibrary, type XYZ } from './sceneSupport';
 
 interface SegmentProjection {
@@ -48,6 +48,8 @@ const labelTierSpacing = 0.16;
 // Segment anchors include this clearance above the sampled roof or ground.
 const anchorClearance = 0.018;
 const stemWidth = 0.006;
+const pinStagger = 0.07;
+const pinGrow = 0.42;
 const stemColor = new pc.Color().fromString(brass);
 const headColor = new pc.Color().fromString('#e8a849');
 const mutedColor = new pc.Color().fromString('#93979c');
@@ -91,8 +93,8 @@ export class StationDioramaScene {
   private telemetry = new Map<string, Telemetry>();
   private pins: Pin[] = [];
   private revision = 0;
-  private rise = -0.14;
-  private modelRise = 0;
+  private pinsShown = true;
+  private pinClock = 10;
   private alive = true;
   private abort = new AbortController();
 
@@ -159,8 +161,6 @@ export class StationDioramaScene {
     this.dial = undefined;
     this.deckContent.setLocalPosition(0, 0, 0);
     this.fallback.enabled = true;
-    this.rise = -0.20;
-    this.base.setLocalPosition(0, this.rise, 0);
     this.reconcilePins();
     this.drawLcd();
 
@@ -173,8 +173,6 @@ export class StationDioramaScene {
     }
     if (!resource || revision !== this.revision) return;
     this.model = resource.instantiateRenderEntity();
-    this.modelRise = -0.065;
-    this.deckContent.setLocalPosition(0, this.modelRise, 0);
     this.deckContent.addChild(this.model);
     this.bindModel(this.model);
     this.fallback.enabled = false;
@@ -213,7 +211,23 @@ export class StationDioramaScene {
     if (this.stop?.stop_id === stopId) this.drawLcd();
   }
 
-  get targets(): HitTarget[] { return this.pins.flatMap((pin) => pin.targets); }
+  get targets(): HitTarget[] { return this.pinsShown ? this.pins.flatMap((pin) => pin.targets) : []; }
+
+  /** Pins drop in one by one when shown and retract quickly when hidden. */
+  setPinsShown(shown: boolean, immediate = false): void {
+    if (shown && !this.pinsShown) this.pinClock = Math.min(this.pinClock, 0);
+    this.pinsShown = shown;
+    if (immediate) this.pinClock = shown ? 10 : 0;
+    this.applyPinReveal();
+  }
+
+  private applyPinReveal(): void {
+    this.pins.forEach((pin, rank) => {
+      const grown = easeOutBack((this.pinClock - rank * pinStagger) / pinGrow, 1.9);
+      const scale = Math.max(grown, 0.0001);
+      pin.root.setLocalScale(scale, scale, scale);
+    });
+  }
 
   private drawLcd(): void {
     const stop = this.stop;
@@ -280,6 +294,7 @@ export class StationDioramaScene {
     for (const pin of previous.values()) this.destroyPin(pin);
     this.positionMarkers();
     this.updatePinLabels();
+    this.applyPinReveal();
   }
 
   private positionMarkers(): void {
@@ -330,11 +345,10 @@ export class StationDioramaScene {
   }
 
   update(dt: number, camera: pc.Entity): void {
-    this.rise = pc.math.lerp(this.rise, 0, damp(dt, 6));
-    this.base.setLocalPosition(0, this.rise, 0);
-    if (this.model && this.modelRise !== 0) {
-      this.modelRise = Math.min(0, this.modelRise * (1 - damp(dt, 8)) + 0.0002);
-      this.deckContent.setLocalPosition(0, this.modelRise, 0);
+    const settled = this.pins.length * pinStagger + pinGrow;
+    if (this.pinsShown ? this.pinClock < settled : this.pinClock > 0) {
+      this.pinClock = this.pinsShown ? this.pinClock + dt : Math.max(0, Math.min(this.pinClock, settled) - dt * 4);
+      this.applyPinReveal();
     }
     const targetAngle = startAngle - clamp((this.filters.maxBudget - 8) / 52, 0, 1) * 250;
     this.dialAngle = pc.math.lerp(this.dialAngle, targetAngle, damp(dt, 9));

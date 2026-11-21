@@ -21,6 +21,16 @@ export function damp(dt: number, speed = 10): number {
   return 1 - Math.exp(-dt * speed);
 }
 
+export function smooth(value: number): number {
+  const t = Math.max(0, Math.min(value, 1));
+  return t * t * (3 - 2 * t);
+}
+
+export function easeOutBack(value: number, overshoot = 1.4): number {
+  const t = Math.max(0, Math.min(value, 1)) - 1;
+  return 1 + t * t * ((overshoot + 1) * t + overshoot);
+}
+
 export function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, max));
 }
@@ -109,10 +119,11 @@ export interface HitTarget {
   entity: pc.Entity;
   halfExtents: pc.Vec3;
   action: () => void;
+  key?: string;
 }
 
-export function target(entity: pc.Entity, size: XYZ, action: () => void): HitTarget {
-  return { entity, halfExtents: new pc.Vec3(...size).mulScalar(0.5), action };
+export function target(entity: pc.Entity, size: XYZ, action: () => void, key?: string): HitTarget {
+  return { entity, halfExtents: new pc.Vec3(...size).mulScalar(0.5), action, key };
 }
 
 export class ScenePicker {
@@ -122,6 +133,12 @@ export class ScenePicker {
   private point = new pc.Vec3();
 
   pick(ray: pc.Ray, targets: readonly HitTarget[]): boolean {
+    const best = this.find(ray, targets);
+    best?.action();
+    return best !== undefined;
+  }
+
+  find(ray: pc.Ray, targets: readonly HitTarget[]): HitTarget | undefined {
     let best: HitTarget | undefined;
     let closest = Infinity;
     for (const target of targets) {
@@ -137,7 +154,6 @@ export class ScenePicker {
       closest = distance;
       best = target;
     }
-    best?.action();
-    return best !== undefined;
+    return best;
   }
 }

@@ -32,6 +32,7 @@ export class OrbitCamera {
     private canvas: HTMLCanvasElement, private camera: pc.Entity,
     initial: Pose, pick: (x: number, y: number) => void,
     turnDish: (radians: number) => boolean,
+    hover: (x: number, y: number) => void = () => {},
   ) {
     this.goal = { ...initial, pivot: initial.pivot.clone() };
     this.pose = { ...initial, pivot: initial.pivot.clone() };
@@ -54,6 +55,7 @@ export class OrbitCamera {
     }, { signal });
     canvas.addEventListener('pointermove', (event) => {
       const previous = this.pointers.get(event.pointerId);
+      if (this.enabled && !this.pointers.size && event.pointerType === 'mouse') hover(event.clientX, event.clientY);
       if (!this.enabled || !previous) return;
       const dx = event.clientX - previous.x;
       const dy = event.clientY - previous.y;
@@ -113,6 +115,11 @@ export class OrbitCamera {
     pose.yaw = pc.math.lerp(pose.yaw, goal.yaw, progress);
     pose.pitch = pc.math.lerp(pose.pitch, goal.pitch, progress);
     pose.distance = pc.math.lerp(pose.distance, goal.distance, progress);
+    this.apply();
+  }
+
+  private apply(): void {
+    const pose = this.pose;
     const horizontal = Math.cos(pose.pitch) * pose.distance;
     this.position.set(Math.sin(pose.yaw) * horizontal, Math.sin(pose.pitch) * pose.distance, Math.cos(pose.yaw) * horizontal);
     this.camera.setPosition(this.position.add(pose.pivot));

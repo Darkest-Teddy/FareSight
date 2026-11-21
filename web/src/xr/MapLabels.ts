@@ -1,0 +1,161 @@
+import * as pc from 'playcanvas';
+import type { XRStopData } from './bridgeTypes';
+
+interface Label {
+  stop: XRStopData;
+  node: HTMLButtonElement;
+  stem: HTMLSpanElement;
+  count: HTMLSpanElement;
+  width: number;
+  height: number;
+  slot: number;
+  shown: boolean;
+}
+
+interface Box { left: number; top: number; right: number; bottom: number }
+
+// Vertical offsets (px) from the station to the label centre, in order of preference.
+const slots = [-44, 44, -84, 84, -124, 124, -164, 164];
+const gap = 6;
+
+/**
+ * Crisp HTML station labels for the desktop map. Each label is a real button projected from
+ * its station's 3D position, moved to the nearest free slot so labels never overlap.
+ */
+export class MapLabels {
+  readonly root = document.createElement('div');
+  private labels: Label[] = [];
+  private screen = new pc.Vec3();
+  private hovered?: string;
+  private selected?: string;
+  private opacity = -1;
+  // Fonts and breakpoints change label sizes after first paint; re-measure whenever they do.
+  private sizes = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      const label = this.labels.find((item) => item.node === entry.target);
+      if (label) label.width = 0;
+    }
+  });
+
+  constructor(
+    canvas: HTMLCanvasElement,
+    private select: (id: string) => void,
+    private hover: (id: string | undefined) => void,
+  ) {
+    this.root.className = 'map-labels';
+    canvas.after(this.root);
+  }
+
+  setStops(stops: XRStopData[]): void {
+    this.root.replaceChildren();
+    this.sizes.disconnect();
+    this.labels = stops.map((stop) => {
+      const node = document.createElement('button');
+      node.type = 'button';
+      node.className = 'map-label';
+      node.style.setProperty('--line', stop.primary_color);
+      const dot = document.createElement('span');
+      dot.className = 'map-label-dot';
+      const name = document.createElement('strong');
+      name.textContent = stop.name;
+      const count = document.createElement('span');
+      count.className = 'map-label-count';
+      const stem = document.createElement('span');
+      stem.className = 'map-label-stem';
+      node.append(dot, name, count, stem);
+      node.addEventListener('click', () => this.select(stop.stop_id));
+      node.addEventListener('pointerenter', () => this.hover(stop.stop_id));
+      node.addEventListener('pointerleave', () => this.hover(undefined));
+      node.addEventListener('focus', () => this.hover(stop.stop_id));
+      node.addEventListener('blur', () => this.hover(undefined));
+      this.root.append(node);
+      this.sizes.observe(node);
+      return { stop, node, stem, count, width: 0, height: 0, slot: 0, shown: false };
+    });
+    this.mark();
+  }
+
+  setCounts(counts: Map<string, number>): void {
+    for (const label of this.labels) {
+      const count = counts.get(label.stop.stop_id) ?? 0;
+      const text = `${count} ${count === 1 ? 'spot' : 'spots'}`;
+      if (label.count.textContent === text) continue;
+      label.count.textContent = text;
+      label.node.setAttribute('aria-label', `${label.stop.name}, ${count} matching ${count === 1 ? 'place' : 'places'}. Open station.`);
+      label.node.dataset.empty = String(count === 0);
+      label.width = 0;
+    }
+  }
+
+  setHover(id: string | undefined): void {
+    if (this.hovered === id) return;
+    this.hovered = id;
+    this.mark();
+  }
+
+  setSelected(id: string | undefined): void {
+    if (this.selected === id) return;
+    this.selected = id;
+    this.mark();
+  }
+
+  private mark(): void {
+    for (const { stop, node } of this.labels) {
+      node.dataset.hover = String(stop.stop_id === this.hovered);
+      node.dataset.selected = String(stop.stop_id === this.selected);
+    }
+  }
+
+  /** Project every label; `opacity` 0 removes the layer from hit testing and the tab order. */
+  update(camera: pc.CameraComponent, position: (id: string) => pc.Vec3 | undefined, opacity: number): void {
+    if (opacity !== this.opacity) {
+      this.opacity = opacity;
+      this.root.style.opacity = String(opacity);
+      this.root.style.visibility = opacity > 0.01 ? 'visible' : 'hidden';
+      this.root.dataset.live = String(opacity > 0.6);
+    }
+    if (opacity <= 0.01) return;
+    const placed: Box[] = [];
+    for (const label of this.labels) {
+      const world = position(label.stop.stop_id);
+      if (world) camera.worldToScreen(world, this.screen);
+      const visible = !!world && this.screen.z > 0;
+      if (visible !== label.shown) {
+        label.shown = visible;
+        label.node.style.display = visible ? '' : 'none';
+      }
+      if (!visible) continue;
+      if (!label.width) {
+        label.width = label.node.offsetWidth;
+        label.height = label.node.offsetHeight;
+      }
+      const { x, y } = this.screen;
+      const boxAt = (slot: number): Box => ({
+        left: x - label.width / 2 - gap, right: x + label.width / 2 + gap,
+        top: y + slots[slot] - label.height / 2 - gap, bottom: y + slots[slot] + label.height / 2 + gap,
+      });
+      const free = (box: Box) => placed.every((other) =>
+        box.right < other.left || box.left > other.right || box.bottom < other.top || box.top > other.bottom);
+      // Keep the current slot while it stays clear so labels do not flicker as the camera moves.
+      let box = boxAt(label.slot);
+      if (!free(box)) {
+        const next = slots.findIndex((_, slot) => free(boxAt(slot)));
+        if (next >= 0) {
+          label.slot = next;
+          box = boxAt(next);
+        }
+      }
+      placed.push(box);
+      const offset = slots[label.slot];
+      label.node.style.transform = `translate(${(x - label.width / 2).toFixed(1)}px, ${(y + offset - label.height / 2).toFixed(1)}px)`;
+      const reach = Math.abs(offset) - label.height / 2;
+      label.stem.style.height = `${reach.toFixed(1)}px`;
+      label.stem.dataset.side = offset < 0 ? 'below' : 'above';
+    }
+  }
+
+  destroy(): void {
+    this.sizes.disconnect();
+    this.root.remove();
+  }
+}
