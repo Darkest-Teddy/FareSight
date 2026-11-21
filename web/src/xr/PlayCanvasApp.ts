@@ -1,4 +1,5 @@
 import * as pc from 'playcanvas';
+import { Backdrop } from './Backdrop';
 import type {
   FareSightSceneEngine, SceneMode, XRDishData, XRFilterSummary, XRManifestData,
   XRPlaceData, XRSceneCallbacks, XRStopData, XRVehicleData,
@@ -63,6 +64,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private turntables!: Record<'map' | 'station' | 'dish', PickBounds>;
   private actions!: XRActionBar;
   private presence?: XRPresence;
+  private backdrop!: Backdrop;
   private gallery?: pc.Entity;
   private plinth!: pc.Entity;
   private pedestal!: pc.Entity;
@@ -97,7 +99,6 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private filtered = new Set<string>();
   private filters?: XRFilterSummary;
   private vehicles: XRVehicleData[] = [];
-  private telemetry = new Map<string, [number | null, number]>();
   private activeStop?: string;
   private place?: XRPlaceData;
   private manifest: XRManifestData | null = null;
@@ -133,6 +134,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
         clearColor: new pc.Color().fromString(studioBackdrop), nearClip: 0.025, farClip: 65, fov: 48,
       }) as pc.CameraComponent;
       this.addLights(app.root);
+      this.backdrop = new Backdrop(app.root, app.graphicsDevice);
       this.models = new ModelLibrary(app, this.callbacks.onDebugLog);
       this.reveal = new JarvisReveal(app.graphicsDevice, this.reducedMotion);
       this.splats = new SplatLoader(app, this.callbacks.onDebugLog, this.reducedMotion);
@@ -175,7 +177,6 @@ export class PlayCanvasApp implements FareSightSceneEngine {
       this.setPlaces(this.places, this.filtered);
       this.map.setVehicles(this.vehicles);
       if (this.filters) this.station.setFilters(this.filters);
-      for (const [id, data] of this.telemetry) this.station.setTelemetry(id, ...data);
       this.venue.setWillWeFit(...this.fit);
       this.applyScene('map');
       this.placeDesktopScenes();
@@ -274,11 +275,6 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   setLiveVehicles(vehicles: XRVehicleData[]): void {
     this.vehicles = vehicles;
     this.map?.setVehicles(vehicles);
-  }
-
-  setStationTelemetry(stopId: string, nextArrivalMin: number | null, matchingCount: number): void {
-    this.telemetry.set(stopId, [nextArrivalMin, matchingCount]);
-    this.station?.setTelemetry(stopId, nextArrivalMin, matchingCount);
   }
 
   async setScene(mode: SceneMode): Promise<void> {
@@ -789,8 +785,11 @@ export class PlayCanvasApp implements FareSightSceneEngine {
         else this.reveal.hide(this.plinth, 0.60, 420);
       }
     }
-    this.lens.clearColor = passthrough ? new pc.Color(0, 0, 0, 0) : new pc.Color().fromString(studioBackdrop);
     const flat = this.activeXR === 'none';
+    // The backdrop belongs to the flat-screen view only; headsets keep their own gallery and colour.
+    this.lens.clearColor = passthrough ? new pc.Color(0, 0, 0, 0)
+      : flat ? this.backdrop.clearColor : new pc.Color().fromString(studioBackdrop);
+    this.backdrop.root.enabled = flat;
     this.map.setImmersive(!flat);
     this.map.root.enabled = this.mode === 'map' || !!this.dive || this.leaving.has('map');
     this.station.root.enabled = this.mode === 'station' || this.mode === 'map' || !!this.dive || this.leaving.has('station');
@@ -966,6 +965,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     if (this.mode === 'dish') this.dish.update(dt);
     this.splats.update(dt);
     this.reveal.update(dt);
+    if (this.activeXR === 'none') this.backdrop.update(this.camera);
     this.updateSceneExits(dt);
     if (this.activeXR !== 'none') {
       this.presence?.updatePointers();
@@ -999,6 +999,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     this.reveal?.destroy();
     this.actions?.destroy();
     this.gallery?.destroy();
+    this.backdrop?.destroy();
     for (const surface of this.galleryMaterials) surface.destroy();
     this.reticle?.destroy();
     this.reticleMaterial?.destroy();

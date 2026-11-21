@@ -401,7 +401,6 @@ export class AppShell {
     this.engine?.setFilters(this.filters);
     this.engine?.setPlaces(this.places, new Set(this.filtered.map((place) => place.id)));
     if (this.fit && this.inside) this.engine?.setWillWeFit(true, this.filters.groupSize, this.seating);
-    this.updateTelemetry();
   }
 
   private locate() {
@@ -469,13 +468,6 @@ export class AppShell {
     this.drawer.updateStation(this.stop, this.stationData, this.filters.familyVisit ? campus : undefined);
   }
 
-  private updateTelemetry() {
-    if (!this.stop || !this.engineReady) return;
-    const arrivals = this.stationData.predictions.data?.predictions.flatMap((entry) => entry.arrival_min === null ? [] : [entry.arrival_min]) ?? [];
-    const count = this.filtered.filter((place) => place.stop_id === this.stop?.stop_id).length;
-    this.engine?.setStationTelemetry(this.stop.stop_id, arrivals.length ? Math.min(...arrivals) : null, count);
-  }
-
   private async refreshStation(reset = true) {
     if (!this.stop || this.mode !== 'station') return;
     const stop = this.stop;
@@ -491,7 +483,6 @@ export class AppShell {
       alerts: alerts.status === 'fulfilled' ? { data: alerts.value } : { error: 'Unable to check alerts. Check MBTA for current service.' },
     };
     this.updateStationDrawer();
-    this.updateTelemetry();
     if (reset && predictions.status === 'fulfilled' && predictions.value.predictions.some((entry) => entry.arrival_min !== null)) this.sound.playTrainChime();
   }
 

@@ -1,0 +1,148 @@
+/*
+ * FareSight landing page. One dark theme, one accent (the Green Line), one radius rule:
+ * interactive things are full pills, nothing else is boxed.
+ * Layers, bottom to top: stage 0, shade 1, veil 2, copy 3, bar 4, status 5.
+ */
+:root {
+  color-scheme: dark;
+  --bg: #05070c;
+  --ink: #f5f5f7;
+  --dim: rgb(245 245 247 / 66%);
+  --faint: rgb(245 245 247 / 52%);
+  --edge: rgb(255 255 255 / 16%);
+  --accent: #3ccb78;
+  --gutter: clamp(1.25rem, 5.5vw, 5.5rem);
+  --bar: 4rem;
+  font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', Roboto, sans-serif;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { scrollbar-width: thin; scrollbar-color: rgb(255 255 255 / 18%) transparent; }
+body { margin: 0; background: var(--bg); overflow-x: hidden; }
+h1, h2, p { margin: 0; }
+a { color: inherit; text-decoration: none; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 999px; }
+
+/* The scroll track. It is empty: its only job is to be tall. */
+main { height: 860vh; }
+
+#stage {
+  position: fixed; inset: 0; z-index: 0;
+  width: 100vw; height: 100vh; height: 100dvh;
+  display: block; opacity: 0;
+  transition: opacity 1.5s cubic-bezier(.16, 1, .3, 1);
+}
+body[data-state=ready] #stage { opacity: 1; }
+body[data-stage=missing] #stage { display: none; }
+/* The app's flat-screen station labels are not part of the headset view. */
+.map-labels { display: none; }
+
+/* Keeps the copy legible over the model without boxing it. */
+.shade {
+  position: fixed; inset: 0; z-index: 1; pointer-events: none;
+  background:
+    radial-gradient(120% 85% at 50% 42%, transparent 46%, rgb(5 7 12 / 72%) 100%),
+    linear-gradient(to top, rgb(5 7 12 / 78%), transparent 34%),
+    linear-gradient(to bottom, rgb(5 7 12 / 55%), transparent 16%);
+}
+.veil { position: fixed; inset: 0; z-index: 2; pointer-events: none; background: var(--bg); opacity: 0; }
+
+.bar {
+  position: fixed; inset: 0 0 auto; z-index: 4;
+  height: var(--bar); padding: 0 var(--gutter);
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 1.5rem;
+}
+.wordmark { justify-self: start; font-size: 1.06rem; font-weight: 650; letter-spacing: -.02em; }
+.chapters { display: flex; gap: clamp(1rem, 2.4vw, 2.25rem); font-size: .8rem; letter-spacing: -.005em; white-space: nowrap; }
+.chapters a { padding: .5rem 0; color: var(--faint); transition: color .35s ease; }
+.chapters a:hover { color: var(--dim); }
+.chapters a[aria-current] { color: var(--ink); }
+.bar .pill { justify-self: end; }
+.meter {
+  position: absolute; inset: auto 0 0; height: 1px;
+  background: var(--accent); transform-origin: 0 50%; transform: scaleX(0);
+}
+
+.pill {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 2.25rem; padding: 0 1.05rem;
+  border: 1px solid var(--edge); border-radius: 999px;
+  font-size: .8rem; font-weight: 550; white-space: nowrap;
+  color: var(--ink); background: rgb(255 255 255 / 6%);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  transition: background .25s ease, border-color .25s ease, transform .15s ease;
+}
+.pill:hover { background: rgb(255 255 255 / 13%); border-color: rgb(255 255 255 / 28%); }
+.pill:active { transform: scale(.975); }
+.pill.solid { height: 2.9rem; padding: 0 1.5rem; font-size: .95rem; color: #0a0b0e; background: var(--ink); border-color: var(--ink); }
+.pill.solid:hover { background: #fff; border-color: #fff; }
+
+/* Copy. Every beat is fixed over the stage; main.ts fades and drifts its .copy. */
+.beat {
+  position: fixed; inset: 0; z-index: 3;
+  padding: calc(var(--bar) + 1.5rem) var(--gutter) clamp(2.5rem, 9vh, 6rem);
+  display: grid; pointer-events: none; visibility: hidden;
+}
+.copy { opacity: 0; will-change: opacity, transform; pointer-events: auto; }
+h1, h2 { font-weight: 620; letter-spacing: -.038em; line-height: 1.03; text-wrap: balance; }
+h1 { font-size: clamp(2.6rem, 6.1vw, 5.6rem); max-width: 10.5em; }
+h2 { font-size: clamp(2.1rem, 4.5vw, 4.1rem); }
+.lead { margin-top: 1.15rem; max-width: 33ch; font-size: clamp(1.02rem, 1.28vw, 1.24rem); line-height: 1.42; letter-spacing: -.012em; color: var(--dim); text-wrap: pretty; }
+.note { margin-top: .85rem; max-width: 36ch; font-size: .92rem; line-height: 1.5; color: var(--faint); }
+.line { display: inline-flex; align-items: center; gap: .55rem; margin-bottom: 1rem; font-size: .82rem; font-weight: 550; color: var(--accent); }
+.line::before { content: ''; width: 1.6rem; height: 2px; border-radius: 2px; background: var(--accent); }
+.soon { margin-top: 1.4rem; font-size: .82rem; color: var(--faint); }
+
+.beat-hero { align-items: end; justify-items: start; }
+.beat-stops { align-items: end; justify-items: center; text-align: center; }
+.beat-stops .lead { margin-inline: auto; max-width: 44ch; }
+.beat-station { align-items: center; justify-items: start; }
+.beat-station .copy { max-width: 27rem; }
+.beat-place { align-items: end; justify-items: end; }
+.beat-place .copy { width: min(26rem, 100%); padding-bottom: 2vh; }
+.beat-place h2 { font-size: clamp(2rem, 3.6vw, 3.3rem); }
+.beat-inside { align-items: center; justify-items: center; text-align: center; }
+.beat-inside .lead { margin-inline: auto; max-width: 38ch; }
+.beat-inside .pill { margin-top: 1.25rem; }
+
+.status {
+  position: fixed; inset: auto 0 clamp(2.5rem, 9vh, 6rem); z-index: 5;
+  text-align: center; font-size: .82rem; color: var(--faint); pointer-events: none;
+}
+body[data-state=loading] .status::after {
+  content: ''; display: block; width: 7rem; height: 1px; margin: .9rem auto 0;
+  background: linear-gradient(90deg, transparent, var(--ink), transparent);
+  background-size: 50% 100%; background-repeat: no-repeat;
+  animation: sweep 1.5s cubic-bezier(.45, 0, .55, 1) infinite;
+}
+@keyframes sweep { from { background-position: -100% 0; } to { background-position: 200% 0; } }
+
+/* Tall and narrow screens: the model rides high, all copy reads from the bottom left. */
+@media (max-width: 860px) {
+  .bar { grid-template-columns: 1fr auto; }
+  .chapters { display: none; }
+  .beat, .beat-stops, .beat-inside { align-items: end; justify-items: start; text-align: left; }
+  .beat-stops .lead, .beat-inside .lead { margin-inline: 0; }
+  .beat-place .copy, .beat-station .copy { width: 100%; max-width: 30rem; padding-bottom: 0; }
+  .lead { max-width: 30ch; }
+  .shade {
+    background:
+      linear-gradient(to top, rgb(5 7 12 / 92%), rgb(5 7 12 / 60%) 30%, transparent 56%),
+      linear-gradient(to bottom, rgb(5 7 12 / 60%), transparent 14%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #stage { transition: none; }
+  body[data-state=loading] .status::after { animation: none; }
+  .pill { transition: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .pill { -webkit-backdrop-filter: none; backdrop-filter: none; background: #1a1c21; }
+}
