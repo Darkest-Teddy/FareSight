@@ -1,5 +1,5 @@
 const SHELL = 'faresight-shell-v1';
-const DEMO = 'faresight-demo-v1';
+const DEMO = 'faresight-demo-v2';
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
@@ -40,7 +40,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin || request.method !== 'GET' || request.headers.has('range')) return;
   if (url.pathname.startsWith('/assets-demo/') || url.pathname.toLowerCase().endsWith('.glb')) {
-    event.respondWith(cacheFirst(DEMO, request));
+    event.respondWith(networkFirst(DEMO, request));
   } else if (url.pathname.startsWith('/assets/')) {
     event.respondWith(cacheFirst(SHELL, request));
   } else if (request.mode === 'navigate' && url.pathname === '/') {
@@ -61,11 +61,24 @@ async function captureShell(response) {
   await cache.put('/', response);
 }
 
+// Regenerated models keep their file names, so demo assets are always checked against the
+// network and the cached copy is only used when the network is unavailable.
+async function networkFirst(key, request) {
+  try {
+    const response = await fetch(request);
+    if (response.ok) return store(await caches.open(key), request, response);
+  } catch { /* Offline: fall through to the cached copy. */ }
+  return cacheFirst(key, request);
+}
+
 async function cacheFirst(key, request) {
   const cache = await caches.open(key);
   const hit = await cache.match(request);
   if (hit) return hit;
-  const response = await fetch(request);
+  return store(cache, request, await fetch(request));
+}
+
+async function store(cache, request, response) {
   const contentType = response.headers.get('content-type') ?? '';
   const jsonAsset = new URL(request.url).pathname.endsWith('.json');
   if (response.status === 200 && !contentType.includes('text/html') && (!contentType.includes('application/json') || jsonAsset)) {

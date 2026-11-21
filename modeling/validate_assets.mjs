@@ -194,7 +194,7 @@ function parseModel(name) {
     });
   }
   const budget = name.startsWith('segment-')
-    ? [1, 24999, 12]
+    ? [1, 39999, 16]
     : name.startsWith('boston')
       ? [15000, 55000, 12]
       : [1, 5000, 8];
@@ -328,6 +328,7 @@ function inFootprint(x, z, ring) {
   return inside;
 }
 let venueCount = 0,
+  offDeckCount = 0,
   roofCount = 0;
 for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
   const a = stations[id],
@@ -350,34 +351,30 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
   assert.ok(route.points.some((p) => distance(p, a.tubePos) < 1e-7));
   const model = models[a.segmentFile.slice(0, -4)],
     { bounds, meshes } = model;
-  exactBounds(bounds, [-0.45, -0.18, -0.45], [0.45, bounds.max[1], 0.45]);
-  assert.ok(bounds.max[1] >= 0.3 && bounds.max[1] <= 0.62);
-  assert.equal(s.lcdNode, 'LCD_Screen');
-  assert.equal(s.dialNode, 'Rotary_Dial');
+  // The city floats on an island: a turf rim inside the 0.9 m footprint and a rock wedge below.
+  for (const k of [0, 2])
+    assert.ok(bounds.min[k] >= -0.4500001 && bounds.max[k] <= 0.4500001, id + ' footprint ' + reportBounds(bounds));
+  assert.ok(bounds.min[1] >= -0.3400001 && bounds.min[1] <= -0.22, id + ' island depth ' + reportBounds(bounds));
+  // Building heights are true to scale, so a low-rise neighbourhood stays low.
+  assert.ok(bounds.max[1] >= 0.03 && bounds.max[1] <= 0.62);
+  assert.ok(!('lcdNode' in s) && !('dialNode' in s), id + ' stale hardware anchors');
+  assert.ok(!meshes.has('LCD_Screen') && !meshes.has('Rotary_Dial'), id + ' stale hardware nodes');
   assert.equal(s.deckY, 0);
-  const lcd = meshes.get(s.lcdNode),
-    dial = meshes.get(s.dialNode);
-  assert.ok(lcd && dial);
-  const p = lcd.positions,
-    uv = lcd.uv;
-  assert.equal(p.length, 12);
-  assert.equal(uv.length, 8);
-  assert.deepEqual([...uv], [0, 1, 1, 1, 1, 0, 0, 0]);
-  for (let i = 0; i < 4; i++) {
-    approx(p[3 * i + 2], p[2]);
-    approx(lcd.normals[i * 3 + 2], 1);
-    assert.ok(p[i * 3] < 0 && p[i * 3 + 1] < 0 && p[i * 3 + 2] > 0.4);
+  const islandParts = ['Island turf', 'Island earth and rock'].map((name) => meshes.get(name));
+  let islandTris = 0;
+  for (const part of islandParts) {
+    assert.ok(part, id + ' island material');
+    assert.equal(part.mat.alphaMode ?? 'OPAQUE', 'OPAQUE');
+    assert.ok(!part.mat.emissiveFactor && !part.mat.pbrMetallicRoughness.baseColorTexture);
+    islandTris += part.indices.length / 3;
   }
-  assert.ok(p[3] > p[0] && p[7] > p[1]);
-  assert.ok(lcd.mat.pbrMetallicRoughness.baseColorTexture);
-  assert.ok(
-    Math.abs(dial.offset[0]) < 0.06 &&
-      dial.offset[1] < 0 &&
-      dial.offset[2] > 0.4,
-  );
-  for (let k = 0; k < 2; k++) {
-    const coords = dial.positions.filter((_, i) => i % 3 === k);
-    approx(Math.max(...coords) + Math.min(...coords), 0, 1e-6);
+  assert.ok(islandTris <= 2500, id + ' island triangles ' + islandTris);
+  // Off-deck markers stand on the turf rim, which is flat at deck level all the way round.
+  for (let i = 0; i < 720; i++) {
+    const angle = (i * Math.PI) / 360,
+      reach = 1 / Math.max(Math.abs(Math.cos(angle)), Math.abs(Math.sin(angle)));
+    for (const half of [0.4245, 0.4328, 0.437])
+      approx(topAt(meshes, half * reach * Math.cos(angle), half * reach * Math.sin(angle)), 0, 1e-7, id + ' turf rim');
   }
   const { centerLat, centerLon, spanMeters, buildings } = areas[id];
   assert.deepEqual(s.projection, {
@@ -386,12 +383,34 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
     spanMeters,
     deckSize: 0.856,
   });
-  const stopPlaces = places.filter((place) => place.stop_id === id);
+  const scale = 0.856 / spanMeters;
+  const deckPoint = (place) => [
+    (place.lon - centerLon) * 111320 * Math.cos((centerLat * Math.PI) / 180) * scale,
+    (centerLat - place.lat) * 110540 * scale,
+  ];
+  // Venues within 0.4 m of the deck centre are modelled in place; the rest are markers on the turf rim.
+  const allPlaces = places.filter((place) => place.stop_id === id);
+  const stopPlaces = allPlaces.filter((place) =>
+    deckPoint(place).every((n) => Math.abs(n) <= 0.4),
+  );
+  const farPlaces = allPlaces.filter((place) => !stopPlaces.includes(place));
   assert.deepEqual(
     Object.keys(s.placeAnchors).sort(),
     stopPlaces.map((p) => p.id).sort(),
   );
-  const scale = 0.856 / spanMeters;
+  assert.deepEqual(
+    Object.keys(s.offDeck).sort(),
+    farPlaces.map((p) => p.id).sort(),
+  );
+  for (const place of farPlaces) {
+    const { position, distanceM, compass } = s.offDeck[place.id];
+    const [x, z] = deckPoint(place);
+    approx(Math.max(Math.abs(position[0]), Math.abs(position[2])), 0.4328, 1e-9);
+    approx(position[0] * z, position[2] * x, 1e-9, place.id + ' bearing');
+    approx(position[1], topAt(meshes, position[0], position[2]) + 0.018, 2e-7);
+    assert.ok(distanceM >= 100 && /^(N|NE|E|SE|S|SW|W|NW)$/.test(compass));
+    offDeckCount++;
+  }
   const city = meshes.get('Masonry, foliage and streets');
   const roofs = new Map([['city', city]]);
   for (const { positions: p, offset, mat } of meshes.values()) {
@@ -407,13 +426,12 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
         id + ' emissive building',
       );
     }
-    for (let i = 0; i < p.length; i += 3)
-      if (p[i + 1] + offset[1] > 1e-7)
-        assert.ok(
-          Math.abs(p[i] + offset[0]) <= 0.4240001 &&
-            Math.abs(p[i + 2] + offset[2]) <= 0.4240001,
-          id + ' city crosses the bezel',
-        );
+    // Above deck level there is only the city, plus at most tiny turf tufts outside the plate.
+    for (let i = 0; i < p.length; i += 3) {
+      const y = p[i + 1] + offset[1],
+        reach = Math.max(Math.abs(p[i] + offset[0]), Math.abs(p[i + 2] + offset[2]));
+      if (y > 1e-7) assert.ok(reach <= 0.4240001 || (reach > 0.428 && y <= 0.004), id + ' city crosses the rim');
+    }
   }
   for (const place of stopPlaces) {
     const [x, y, z] = s.placeAnchors[place.id];
@@ -473,7 +491,7 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
     minSpace.toFixed(6),
   );
 }
-assert.equal(venueCount, 28);
+assert.equal(venueCount + offDeckCount, 28);
 console.log(
   venueCount +
     ' exact venue coordinates, ' +

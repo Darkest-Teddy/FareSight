@@ -99,6 +99,10 @@ export function displayTexture(area, station) {
   for (let x = 400; x < 460; x += 8)
     for (let y = 22; y < 39; y++)
       for (let u = 0; u < 4; u++) px(x + u, y, [129, 221, 206]);
+  return encodePng(w, h, pixels);
+}
+// `pixels` holds 8-bit RGB scanlines, each prefixed with a zero filter byte.
+export function encodePng(w, h, pixels) {
   const info = Buffer.alloc(13);
   info.writeUInt32BE(w);
   info.writeUInt32BE(h, 4);
