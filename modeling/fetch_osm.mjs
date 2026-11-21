@@ -3,10 +3,11 @@ import { fileURLToPath } from 'node:url';
 import { places } from '../server/src/db/seed.ts';
 import { focal } from './transit.mjs';
 
-// Each station is modelled as a square crop small enough for buildings to read at a realistic
-// scale on the 0.856 m deck. The crop is placed to keep as many curated venues in range as
-// possible; venues that still fall outside are listed as off-deck markers by segments.mjs.
-const SPANS = [400, 420, 440, 460, 480];
+// Each station is modelled as an 800 m square crop on the 0.856 m deck, twice the width of the
+// first models. The crop is placed to keep as many curated venues in range as possible; venues
+// that still fall outside are listed as off-deck markers by segments.mjs.
+const SPANS = [800];
+const SCHEMA = 4; // bump to refetch every crop after changing what is kept from OSM
 const VENUE_MARGIN = 0.9; // venues and the station stay inside this fraction of the half-span
 const stops = JSON.parse(readFileSync(new URL('./stops.json', import.meta.url)));
 
@@ -114,15 +115,27 @@ async function queryOverpass(ql) {
 }
 
 const round = (p) => [Number(p[0].toFixed(2)), Number(p[1].toFixed(2))];
+// Thins a closed outline (given without its repeated closing point) and keeps every corner
+// that stands clear of its neighbours, the last one included.
 function simplifyRing(ring, minDistSq) {
   if (ring.length <= 4) return ring;
   const out = [ring[0]];
-  for (let i = 1; i < ring.length - 1; i++) {
+  const far = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 >= minDistSq;
+  for (let i = 1; i < ring.length; i++)
+    if (far(ring[i], out.at(-1)) && (i < ring.length - 1 || far(ring[i], out[0]))) out.push(ring[i]);
+  return out;
+}
+// An open way keeps both of its ends, so roads still meet at their junctions after thinning.
+function simplifyLine(line, minDistSq) {
+  if (line.length <= 2) return line;
+  const out = [line[0]];
+  for (let i = 1; i < line.length - 1; i++) {
     const prev = out[out.length - 1];
-    const dx = ring[i][0] - prev[0];
-    const dz = ring[i][1] - prev[1];
-    if (dx * dx + dz * dz >= minDistSq) out.push(ring[i]);
+    const dx = line[i][0] - prev[0];
+    const dz = line[i][1] - prev[1];
+    if (dx * dx + dz * dz >= minDistSq) out.push(line[i]);
   }
+  out.push(line.at(-1));
   return out;
 }
 const signedArea = (ring) =>
@@ -192,7 +205,7 @@ async function fetchArea(area) {
   const b = bboxFor(area);
   const bb = `${b.south.toFixed(6)},${b.west.toFixed(6)},${b.north.toFixed(6)},${b.east.toFixed(6)}`;
   const ql = `
-[out:json][timeout:80];
+[out:json][timeout:80][maxsize:268435456];
 (
   way["building"](${bb});
   way["building:part"](${bb});
@@ -282,6 +295,12 @@ out body geom;
     const closed =
       pts.length >= 4 && pts[0][0] === pts.at(-1)[0] && pts[0][1] === pts.at(-1)[1];
     const tunnel = tags.tunnel && tags.tunnel !== 'no' && tags.tunnel !== 'building_passage';
+    // Grade separation is kept for the modeller: a tunnel ends at a portal, a bridge is raised.
+    const grade = {
+      tunnel: tunnel ? 'yes' : tags.tunnel === 'building_passage' || tags.covered === 'yes' ? 'passage' : null,
+      bridge: Boolean(tags.bridge && tags.bridge !== 'no'),
+      layer: Number.parseInt(tags.layer ?? '0', 10) || 0,
+    };
 
     if (tags.building || tags['building:part']) {
       if (closed) building(el.id, tags, pts.slice(0, -1));
@@ -289,11 +308,11 @@ out body geom;
       if (!tunnel && tags.level == null && tags.layer == null)
         platforms.push({ id: el.id, closed, points: closed ? pts.slice(0, -1) : pts });
     } else if (tags.railway) {
-      if (!tunnel) rails.push({ id: el.id, kind: tags.railway, points: simplifyRing(pts, 1) });
+      rails.push({ id: el.id, kind: tags.railway, ...grade, points: simplifyLine(pts, 1) });
     } else if (tags.highway) {
       const kind = tags.highway.replace(/_link$/, '');
       const sub = tags.footway ?? tags.service ?? null;
-      if (tunnel || (tags.area === 'yes' && kind !== 'pedestrian')) continue;
+      if (tags.area === 'yes' && kind !== 'pedestrian') continue;
       if (sub === 'sidewalk' || sub === 'crossing' || sub === 'parking_aisle') continue;
       const major = /^(motorway|trunk|primary|secondary|tertiary)$/.test(kind);
       roads.push({
@@ -304,8 +323,8 @@ out body geom;
         lanes: count(tags.lanes),
         widthM: meters(tags.width),
         oneway: tags.oneway === 'yes',
-        bridge: Boolean(tags.bridge && tags.bridge !== 'no'),
-        points: simplifyRing(pts, major ? 2 : 4),
+        ...grade,
+        points: simplifyLine(pts, major ? 2 : 4),
       });
     } else if (tags.natural === 'tree_row') {
       let carried = 0;
@@ -339,6 +358,7 @@ out body geom;
   );
   return {
     ...area,
+    schema: SCHEMA,
     bbox: b,
     buildings,
     roads,
@@ -371,7 +391,7 @@ for (const [stopId, stationName, label] of focal) {
   const old = cached[stopId];
   if (
     !refresh &&
-    old?.rails &&
+    old?.schema === SCHEMA &&
     old.centerLat === area.centerLat &&
     old.centerLon === area.centerLon &&
     old.spanMeters === area.spanMeters

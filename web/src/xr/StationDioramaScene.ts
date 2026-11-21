@@ -18,6 +18,7 @@ interface SegmentAnchor {
   placeAnchors?: Record<string, XYZ>;
   /** Venues beyond the modelled crop, pinned to the island rim on their bearing from the deck. */
   offDeck?: Record<string, OffDeckAnchor>;
+  stationAnchor?: { base: XYZ; top: number };
   pinAnchors: XYZ[];
 }
 
@@ -79,6 +80,7 @@ export class StationDioramaScene {
   private hero: pc.Entity;
   private deckContent: pc.Entity;
   private stationMarker: pc.Entity;
+  private stationPost: pc.Entity;
   private stationColor: pc.StandardMaterial;
   private fallback: pc.Entity;
   private pinModel: Promise<pc.ContainerResource | null>;
@@ -120,10 +122,13 @@ export class StationDioramaScene {
     this.materials.push(grass, earth, rock, street, limestone, brick, enamel, this.stationColor);
     this.stationMarker = child(this.deckContent, 'T-station medallion');
     this.stationMarker.enabled = false;
-    shape(this.stationMarker, 'Ivory rim', 'cylinder', enamel, [0, 0.0015, 0], [0.045, 0.003, 0.045]);
-    shape(this.stationMarker, 'Line enamel', 'cylinder', this.stationColor, [0, 0.003, 0], [0.040, 0.002, 0.040]);
-    shape(this.stationMarker, 'T cap', 'box', enamel, [0, 0.004, -0.006], [0.020, 0.001, 0.004]);
-    shape(this.stationMarker, 'T stem', 'box', enamel, [0, 0.004, 0.002], [0.004, 0.001, 0.012]);
+    shape(this.stationMarker, 'Ivory rim', 'cylinder', enamel, [0, 0.0015, 0], [0.036, 0.003, 0.036]);
+    shape(this.stationMarker, 'Line enamel', 'cylinder', this.stationColor, [0, 0.003, 0], [0.032, 0.002, 0.032]);
+    shape(this.stationMarker, 'T cap', 'box', enamel, [0, 0.004, -0.005], [0.016, 0.001, 0.0034]);
+    shape(this.stationMarker, 'T stem', 'box', enamel, [0, 0.004, 0.0016], [0.0034, 0.001, 0.0098]);
+    // The medallion is raised on a post so it clears the roofs around the station entrance.
+    this.stationPost = shape(this.stationMarker, 'Medallion post', 'cylinder', enamel, [0, 0, 0], [0.004, 0.001, 0.004]);
+    this.stationPost.enabled = false;
 
     // Placeholder floating island: a grass slab over earth and rock that taper to a tip. The
     // lower layers sit towards the front so the taper still reads from the steep desktop view.
@@ -263,8 +268,16 @@ export class StationDioramaScene {
     const projection = anchor?.projection;
     const deckY = anchor?.deckY ?? 0;
     const station = projection && projectToDeck(projection, stop?.lat, stop?.lon);
-    this.stationMarker.enabled = !!station;
-    if (station) this.stationMarker.setLocalPosition(station[0], deckY + 0.0024, station[1]);
+    const raised = anchor?.stationAnchor;
+    this.stationMarker.enabled = !!(raised ?? station);
+    this.stationPost.enabled = !!raised;
+    if (raised) {
+      const [x, baseY, z] = raised.base;
+      const rise = Math.max(0.001, raised.top - baseY);
+      this.stationMarker.setLocalPosition(x, raised.top, z);
+      this.stationPost.setLocalPosition(0, -rise / 2, 0);
+      this.stationPost.setLocalScale(0.004, rise, 0.004);
+    } else if (station) this.stationMarker.setLocalPosition(station[0], deckY + 0.0024, station[1]);
 
     let relabel = false;
     const placements = this.pins.map((pin) => {
