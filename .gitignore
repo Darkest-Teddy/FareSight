@@ -6,3 +6,6 @@ server/data/*.db*
 server/storage/uploads
 server/storage/outputs
 .DS_Store
+
+# Landing page screenshot output
+scripts/.shots

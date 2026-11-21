@@ -17,6 +17,18 @@ const demoPrefix = '/assets-demo/';
 export default defineConfig({
   publicDir,
   resolve: { alias: { '@faresight/shared': fileURLToPath(new URL('../shared/src/index.ts', import.meta.url)) } },
+  build: {
+    rollupOptions: {
+      // Two entries. The marketing page is deliberately a separate document
+      // from the app: it loads a 3D scene and a folder of scanned furniture,
+      // and none of that has any business being in the bundle the headset
+      // pulls down during a demo.
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        landing: fileURLToPath(new URL('./landing.html', import.meta.url)),
+      },
+    },
+  },
   plugins: [{
     name: 'faresight-demo-assets',
     apply: 'build',

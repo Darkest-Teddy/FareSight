@@ -1,0 +1,277 @@
+/*
+ * Landing page styling.
+ *
+ * Colours come from master plan 9.14 and are not reinterpreted here: navy
+ * ground, cyan for anything the product is doing, amber for money. Inter for
+ * everything except the dish names, which are set in a serif because the
+ * reference meal screen is, and because a dish name wants to read like a menu
+ * rather than like an interface label.
+ */
+
+:root {
+  color-scheme: dark;
+
+  --canvas: #0b1020;
+  --panel: #141b33;
+  --text: #fff;
+  --muted: #a8b3cf;
+  --accent: #4fe3ff;
+  --price: #ffb547;
+  --edge: #384561;
+
+  --measure: 34rem;
+  --rail: clamp(1.25rem, 5vw, 4.5rem);
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: auto; }
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--text);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The scene sits behind everything and never scrolls. */
+#stage {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 0;
+}
+
+#landing {
+  position: relative;
+  z-index: 1;
+}
+
+.act { position: relative; }
+
+/*
+ * The pin is what makes the scroll feel like one continuous shot: the content
+ * stays put for the whole height of the section while the scene moves behind
+ * it, so scrolling reads as time passing rather than as a page moving.
+ */
+.pin {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100svh;
+  display: flex;
+  padding: var(--rail);
+  pointer-events: none;
+}
+
+.copy { max-width: var(--measure); pointer-events: auto; }
+
+.copy-centre {
+  margin: auto;
+  text-align: center;
+  transition: opacity 600ms ease, transform 600ms ease;
+}
+
+.act-home.is-leaving .copy-centre {
+  opacity: 0;
+  transform: translateY(-1.5rem);
+}
+
+.copy-rail { margin-top: auto; margin-bottom: auto; }
+
+.eyebrow {
+  margin: 0 0 1.25rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.display {
+  margin: 0;
+  font-size: clamp(2.75rem, 9vw, 6.5rem);
+  font-weight: 800;
+  line-height: 0.95;
+  letter-spacing: -0.035em;
+}
+
+.display-line { display: block; }
+.display-accent { color: var(--accent); }
+
+.headline {
+  margin: 0;
+  font-size: clamp(1.75rem, 4vw, 3rem);
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+}
+
+.standfirst {
+  margin: 1.5rem 0 0;
+  max-width: 32ch;
+  font-size: clamp(1rem, 1.5vw, 1.1875rem);
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.copy-centre .standfirst { margin-inline: auto; }
+
+.cue {
+  margin: 3rem 0 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+  transition: opacity 300ms linear;
+}
+
+/* --- The dish panel ------------------------------------------------- */
+
+.dish-stack {
+  position: relative;
+  margin-left: auto;
+  margin-top: auto;
+  margin-bottom: auto;
+  width: min(25rem, 100%);
+  pointer-events: auto;
+}
+
+.dish {
+  /*
+   * Cards are stacked rather than laid out in a column so that only one is
+   * ever readable, and the change happens in place, next to the plate it is
+   * describing.
+   */
+  grid-area: 1 / 1;
+  display: grid;
+  gap: 0.75rem;
+  padding: 1.5rem 1.625rem 1.375rem;
+  border: 1px solid var(--edge);
+  border-radius: 1rem;
+  background: rgb(20 27 51 / 88%);
+  backdrop-filter: blur(14px);
+  opacity: 0;
+  transform: translateY(1.25rem);
+  transition: opacity 420ms ease, transform 420ms ease;
+}
+
+.dish-stack { display: grid; }
+
+.dish.is-active { opacity: 1; transform: none; }
+
+.dish-name {
+  margin: 0;
+  font-family: Fraunces, Georgia, 'Times New Roman', serif;
+  font-size: 1.875rem;
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+}
+
+.dish-description {
+  margin: -0.375rem 0 0;
+  font-family: Fraunces, Georgia, serif;
+  font-size: 1rem;
+  font-style: italic;
+  color: var(--muted);
+}
+
+.dish-figures {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.25rem 0.75rem;
+  margin: 0.5rem 0 0;
+  padding-top: 0.875rem;
+  border-top: 1px solid var(--edge);
+}
+
+.dish-figures dt {
+  grid-row: 1;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.dish-figures dd {
+  grid-row: 2;
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.figure-price, .figure-total { color: var(--price); }
+.figure-fare { color: var(--text); }
+.figure-total { font-size: 1.3125rem; }
+
+.dish-portion {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.dish-stop {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.line-dot {
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 50%;
+  flex: none;
+}
+
+.dish-provenance {
+  margin: 0;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.dish-provenance[data-state='measured'] { color: var(--accent); }
+
+/* --- Narrow screens -------------------------------------------------- */
+
+@media (max-width: 860px) {
+  .pin { flex-direction: column; justify-content: flex-end; gap: 1.5rem; }
+  .copy-rail { margin: 0; }
+  .copy-rail .standfirst { display: none; }
+  .dish-stack { margin: 0; width: 100%; }
+}
+
+/*
+ * Reduced motion still gets every state, just without the easing. The
+ * director already skips its smoothing; this takes the transitions out of
+ * the flat layer so the two stay in step.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .dish, .copy-centre, .cue { transition-duration: 1ms; }
+}
+
+/* Shown only if the scene cannot start at all. */
+.stage-fallback {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  padding: var(--rail);
+  text-align: center;
+  background: var(--canvas);
+  color: var(--muted);
+  z-index: 2;
+}
