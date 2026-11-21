@@ -1,0 +1,129 @@
+{
+  "source": "Poly Haven (polyhaven.com)",
+  "license": "CC0 1.0 Universal — no attribution required, credited anyway.",
+  "assets": [
+    {
+      "slug": "lythwood_room",
+      "name": "Lythwood Room",
+      "authors": [
+        "Greg Zaal"
+      ],
+      "license": "CC0",
+      "kind": "hdri",
+      "role": "home",
+      "file": "hdri/lythwood_room_2k.hdr"
+    },
+    {
+      "slug": "warm_restaurant",
+      "name": "Warm Restaurant",
+      "authors": [
+        "Greg Zaal",
+        "Jarod Guest"
+      ],
+      "license": "CC0",
+      "kind": "hdri",
+      "role": "restaurant",
+      "file": "hdri/warm_restaurant_2k.hdr"
+    },
+    {
+      "slug": "Sofa_01",
+      "name": "Sofa 01",
+      "authors": [
+        "Kirill Sannikov"
+      ],
+      "license": "CC0",
+      "kind": "model",
+      "role": "home",
+      "file": "models/Sofa_01/Sofa_01_1k.gltf"
+    },
+    {
+      "slug": "CoffeeTable_01",
+      "name": "Coffee Table 01",
+      "authors": [
+        "Fernando Quinn"
+      ],
+      "license": "CC0",
+      "kind": "model",
+      "role": "home",
+      "file": "models/CoffeeTable_01/CoffeeTable_01_1k.gltf"
+    },
+    {
+      "slug": "potted_plant_01",
+      "name": "Potted Plant 01",
+      "authors": [
+        "Rico Cilliers"
+      ],
+      "license": "CC0",
+      "kind": "model",
+      "role": "home",
+      "file": "models/potted_plant_01/potted_plant_01_1k.gltf"
+    },
+    {
+      "slug": "ClassicConsole_01",
+      "name": "Classic Console 01",
+      "authors": [
+        "Kirill Sannikov"
+      ],
+      "license": "CC0",
+      "kind": "model",
+      "role": "home",
+      "file": "models/ClassicConsole_01/ClassicConsole_01_1k.gltf"
+    },
+    {
+      "slug": "WoodenTable_01",
+      "name": "Wooden Table 01",
+      "authors": [
+        "Ethan Place"
+      ],
+      "license": "CC0",
+      "kind": "model",
+      "role": "restaurant",
+      "file": "models/WoodenTable_01/WoodenTable_01_1k.gltf"
+    },
+    {
+      "slug": "dining_chair_02",
+      "name": "Dining Chair 02",
+      "authors": [
+        "James Ray Cock"
+      ],
+      "license": "CC0",
+      "kind": "model",
+      "role": "restaurant",
+      "file": "models/dining_chair_02/dining_chair_02_1k.gltf"
+    },
+    {
+      "slug": "carved_wooden_plate",
+      "name": "Carved Wooden Plate",
+      "authors": [
+        "Jan Martens"
+      ],
+      "license": "CC0",
+      "kind": "model",
+      "role": "restaurant",
+      "file": "models/carved_wooden_plate/carved_wooden_plate_1k.gltf"
+    },
+    {
+      "slug": "wooden_bowl_01",
+      "name": "Wooden Bowl 01",
+      "authors": [
+        "Oliver Harries"
+      ],
+      "license": "CC0",
+      "kind": "model",
+      "role": "restaurant",
+      "file": "models/wooden_bowl_01/wooden_bowl_01_1k.gltf"
+    },
+    {
+      "slug": "wine_bottles_01",
+      "name": "Wine Bottles 01",
+      "authors": [
+        "Rico Cilliers",
+        "Jurita Burger"
+      ],
+      "license": "CC0",
+      "kind": "model",
+      "role": "restaurant",
+      "file": "models/wine_bottles_01/wine_bottles_01_1k.gltf"
+    }
+  ]
+}
