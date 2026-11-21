@@ -4,18 +4,18 @@ import { offlineCatalog } from '../data/fallbackData';
 import { JarvisReveal } from '../xr/JarvisReveal';
 import { MapSculptureScene } from '../xr/MapSculptureScene';
 import { StationDioramaScene } from '../xr/StationDioramaScene';
-import { assetBase, child, clamp, damp, material, ModelLibrary, shape, smooth } from '../xr/sceneSupport';
+import { Backdrop } from '../xr/Backdrop';
+import { assetBase, child, clamp, damp, ModelLibrary, smooth } from '../xr/sceneSupport';
 
 /**
- * The landing page's 3D stage. It builds the same gallery, map sculpture and station diorama a
- * headset shows (physical plaques, plinth, floor rings, no flat-screen panels) and lets one
+ * The landing page's 3D stage. It floats the app's map sculpture and station diorama (with a
+ * headset's physical plaques, no flat-screen panels) in the app's own dusk sky, and lets one
  * number, the scroll progress, pose the camera and scrub the app's own map-to-station dive.
  */
 
 export const STOP_ID = 'place-bucen';
 export const PLACE_ID = 'bu-ramen-01';
 
-const backdrop = '#07080b';
 const mapHeight = 1.0;
 // Same constants as the in-app dive, so the landing page shows the real transition.
 const seedScale = 0.006;
@@ -67,9 +67,7 @@ export class IntroScene {
   private reveal!: JarvisReveal;
   private map!: MapSculptureScene;
   private station!: StationDioramaScene;
-  private plinth!: pc.Entity;
-  private pedestal!: pc.Entity;
-  private materials: pc.StandardMaterial[] = [];
+  private backdrop!: Backdrop;
   private resizeObserver?: ResizeObserver;
   private events = new AbortController();
   private reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -99,19 +97,14 @@ export class IntroScene {
     this.app = app;
     app.setCanvasFillMode(pc.FILLMODE_NONE);
     app.scene.ambientLight = new pc.Color(0.38, 0.39, 0.42);
-    // The gallery floor has no horizon: it falls off into the backdrop.
-    const fog = app.scene.fog;
-    fog.type = pc.FOG_LINEAR;
-    fog.color.fromString(backdrop);
-    fog.start = 2.3;
-    fog.end = 7.2;
 
     this.camera = child(app.root, 'Viewer');
+    // The same sky dome the app's flat-screen view uses.
+    this.backdrop = new Backdrop(app.root, app.graphicsDevice);
     this.lens = this.camera.addComponent('camera', {
-      clearColor: new pc.Color().fromString(backdrop), nearClip: 0.02, farClip: 40, fov: 44,
+      clearColor: this.backdrop.clearColor, nearClip: 0.02, farClip: 40, fov: 44,
     }) as pc.CameraComponent;
     this.addLights(app.root);
-    this.buildGallery(app.root, app.graphicsDevice);
 
     const log = (text: string, level?: string) => { if (level === 'error') console.error(text); };
     this.models = new ModelLibrary(app, log);
@@ -160,34 +153,6 @@ export class IntroScene {
     }
   }
 
-  /** The headset gallery: an unlit floor, two floor rings and the plinth the models stand on. */
-  private buildGallery(root: pc.Entity, device: pc.GraphicsDevice): void {
-    const gallery = child(root, 'VR gallery');
-    const floor = material('#141821', 1);
-    const rings = material('#2a3242', 1);
-    for (const surface of [floor, rings]) {
-      surface.diffuse.set(0, 0, 0);
-      surface.useLighting = false;
-      surface.update();
-    }
-    const finish = material('#292e39', 0.12);
-    this.materials.push(floor, rings, finish);
-    const deck = child(gallery, 'Gallery floor');
-    const disk = pc.Mesh.fromGeometry(device, new pc.CircleGeometry({ radius: 8, sectors: 128, rings: 1 }));
-    deck.addComponent('render', { meshInstances: [new pc.MeshInstance(disk, floor, deck)] });
-    for (const radius of [1.5, 3.2]) {
-      const ring = child(gallery, `Floor ring ${radius} m`, [0, 0.002, 0]);
-      const mesh = pc.Mesh.fromGeometry(device, new pc.TorusGeometry({
-        ringRadius: radius, tubeRadius: 0.003, segments: 160, sides: 6,
-      }));
-      ring.setLocalScale(1, 0.2, 1);
-      ring.addComponent('render', { meshInstances: [new pc.MeshInstance(mesh, rings, ring)] });
-    }
-    this.plinth = child(gallery, 'Tabletop plinth');
-    this.pedestal = shape(this.plinth, 'Plinth column', 'cylinder', finish, [0, 0.4, 0], [0.36, 0.8, 0.36]);
-    shape(this.plinth, 'Plinth foot', 'cylinder', finish, [0, 0.016, 0], [0.53, 0.032, 0.53]);
-  }
-
   private resize(): void {
     if (!this.app) return;
     const width = Math.max(1, this.canvas.clientWidth);
@@ -223,9 +188,6 @@ export class IntroScene {
       this.station.root.setLocalScale(size, size, size);
       this.station.root.setPosition(center);
     }
-    const height = Math.max(0.10, pc.math.lerp(origin.y - 0.02, this.stage.y - 0.16, travel));
-    this.pedestal.setLocalPosition(0, height / 2, 0);
-    this.pedestal.setLocalScale(0.36, height, 0.36);
 
     if (u === this.lastDive) return;
     this.lastDive = u;
@@ -313,6 +275,7 @@ export class IntroScene {
     this.map.setImmersive(p < CLEAR_AT);
     this.applyFocus(smooth((p - FOCUS[0]) / (FOCUS[1] - FOCUS[0])));
     this.poseCamera(p, dt);
+    this.backdrop.update(this.camera);
     this.map.update(dt, this.camera, this.lens, 0);
     if (this.lastDive > 0) this.station.update(dt, this.camera);
     this.reveal.update(dt);
@@ -325,7 +288,7 @@ export class IntroScene {
     this.station?.destroy();
     this.reveal?.destroy();
     this.models?.destroy();
-    for (const surface of this.materials) surface.destroy();
+    this.backdrop?.destroy();
     this.app?.destroy();
     this.app = undefined;
   }
