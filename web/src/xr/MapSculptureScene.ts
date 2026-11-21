@@ -1,7 +1,7 @@
 import * as pc from 'playcanvas';
 import type { XRPlaceData, XRStopData, XRVehicleData } from './bridgeTypes';
 import { CanvasPanel3D } from './CanvasPanel3D';
-import { assetBase, child, clamp, cyan, fetchAssetJson, material, project, shape, target,
+import { assetBase, brass, child, clamp, fetchAssetJson, material, project, shape, target,
   type DebugLog, type HitTarget, type ModelLibrary, type XYZ } from './sceneSupport';
 
 interface StationAnchor {
@@ -21,6 +21,8 @@ interface Track {
 interface Beacon {
   stop: XRStopData;
   root: pc.Entity;
+  stem: pc.Entity;
+  surface: pc.StandardMaterial;
   panel: CanvasPanel3D;
   actions: HitTarget[];
 }
@@ -85,7 +87,7 @@ export class MapSculptureScene {
   private trainRoot: pc.Entity;
   private beacons: Beacon[] = [];
   private materials: pc.StandardMaterial[] = [];
-  private beaconSurface: pc.StandardMaterial;
+  private beaconStem: pc.StandardMaterial;
   private tracks = new Map<string, Track[]>();
   private anchors: Record<string, StationAnchor> = {};
   private places: XRPlaceData[] = [];
@@ -107,14 +109,14 @@ export class MapSculptureScene {
     this.fallback = child(this.root, 'Map sculpture fallback');
     this.beaconRoot = child(this.root, 'Station beacons');
     this.trainRoot = child(this.root, 'Live trains');
-    this.beaconSurface = material(cyan, 0.55);
+    this.beaconStem = material(brass);
 
-    const deck = material('#234660', 0.16);
-    const edge = material('#197486', 0.28);
-    const water = material('#183852', 0.10);
-    this.materials.push(this.beaconSurface, deck, edge, water);
-    shape(this.fallback, 'Acrylic base', 'box', deck, [0, 0.028, 0], [1.5, 0.055, 1.05]);
-    shape(this.fallback, 'Lit edge', 'box', edge, [0, 0.008, 0], [1.515, 0.012, 1.065]);
+    const deck = material('#838177');
+    const edge = material('#393a3b');
+    const water = material('#547480');
+    this.materials.push(this.beaconStem, deck, edge, water);
+    shape(this.fallback, 'Map base', 'box', deck, [0, 0.028, 0], [1.5, 0.055, 1.05]);
+    shape(this.fallback, 'Base trim', 'box', edge, [0, 0.008, 0], [1.515, 0.012, 1.065]);
     const river = shape(this.fallback, 'Charles River', 'box', water, [0, 0.056, -0.13], [1.49, 0.007, 0.14]);
     river.setLocalEulerAngles(0, -14, 0);
 
@@ -150,17 +152,15 @@ export class MapSculptureScene {
   }
 
   setStops(stops: XRStopData[]): void {
-    for (const beacon of this.beacons) {
-      beacon.panel.destroy();
-      beacon.root.destroy();
-    }
+    for (const beacon of this.beacons) this.destroyBeacon(beacon);
     this.beacons = stops.map((stop) => {
       const root = child(this.beaconRoot, stop.name);
       const panel = new CanvasPanel3D(this.device, root, stop.name, 0.23, 0.078, [0, 0.077, 0]);
-      shape(root, 'Station light', 'sphere', this.beaconSurface, [0, 0.017, 0], [0.033, 0.033, 0.033]);
-      shape(root, 'Beacon stem', 'cylinder', this.beaconSurface, [0, 0.036, 0], [0.007, 0.055, 0.007]);
+      const surface = material(stop.primary_color);
+      shape(root, 'Station bead', 'sphere', surface, [0, 0.017, 0], [0.033, 0.033, 0.033]);
+      const stem = shape(root, 'Beacon stem', 'cylinder', this.beaconStem, [0, 0, 0], [0.006, 1, 0.006]);
       const select = () => this.selectStop(stop.stop_id);
-      return { stop, root, panel, actions: [panel.hit(select), target(root, [0.075, 0.07, 0.075], select)] };
+      return { stop, root, stem, surface, panel, actions: [panel.hit(select), target(root, [0.075, 0.07, 0.075], select)] };
     });
     this.positionBeacons();
     this.updateLabels();
@@ -195,14 +195,18 @@ export class MapSculptureScene {
       root.setLocalPosition(...position);
     }
     const ordered = [...this.beacons].sort((a, b) => a.root.getLocalPosition().x - b.root.getLocalPosition().x);
-    ordered.forEach(({ root, panel }, index) => {
+    ordered.forEach(({ root, panel, stem }, index) => {
       const position = root.getLocalPosition();
       const nearby = ordered.slice(0, index).reverse().find((other) => {
         const point = other.root.getLocalPosition();
         return position.x - point.x < panel.width * 0.9 && Math.abs(position.z - point.z) < 0.15;
       });
       const raised = nearby?.panel.entity.getLocalPosition().y === 0.087;
-      panel.entity.setLocalPosition(0, raised ? 0.159 : 0.087, 0);
+      const panelY = raised ? 0.159 : 0.087;
+      const stemTop = panelY - panel.height / 2;
+      panel.entity.setLocalPosition(0, panelY, 0);
+      stem.setLocalPosition(0, (stemTop + 0.017) / 2, 0);
+      stem.setLocalScale(0.006, stemTop - 0.017, 0.006);
     });
   }
 
@@ -213,10 +217,8 @@ export class MapSculptureScene {
     }
     for (const { stop, panel } of this.beacons) {
       const count = counts.get(stop.stop_id) ?? 0;
-      panel.setText([
-        { text: stop.name, size: 105, weight: 700 },
-        { text: `${count} matching ${count === 1 ? 'spot' : 'spots'}`, color: cyan, size: 74, weight: 500 },
-      ], this.selected === stop.stop_id ? cyan : stop.primary_color);
+      panel.setCallout(stop.name, `${count} matching ${count === 1 ? 'spot' : 'spots'}`,
+        { selected: this.selected === stop.stop_id });
     }
   }
 
@@ -308,10 +310,16 @@ export class MapSculptureScene {
     for (const train of this.trains.values()) this.updateTrain(train, dt);
   }
 
+  private destroyBeacon(beacon: Beacon): void {
+    beacon.panel.destroy();
+    beacon.root.destroy();
+    beacon.surface.destroy();
+  }
+
   destroy(): void {
     this.abort.abort();
     this.alive = false;
-    for (const { panel } of this.beacons) panel.destroy();
+    for (const beacon of this.beacons) this.destroyBeacon(beacon);
     this.root.destroy();
     for (const { surface } of this.trains.values()) surface.destroy();
     for (const surface of this.materials) surface.destroy();

@@ -35,12 +35,6 @@ function palette(m) {
     trim: b('Brushed chamfers', { metal: 0.68, rough: 0.26 }),
     city: b('Masonry, foliage and streets', { rough: 0.79 }),
     window: b('Enamel and window panes', { metal: 0.39, rough: 0.25 }),
-    glass: b('Spectral architectural glass', {
-      alpha: 0.71,
-      rough: 0.17,
-      metal: 0.23,
-      double: true,
-    }),
     light: b('Luminous architectural tracery', {
       emission: '#405153',
       rough: 0.35,
@@ -628,24 +622,25 @@ function exposedShells(buildings) {
 
 // A repeating sash, mullion and sill for the miniature street elevations (32 x 32 RGB PNG).
 const sashTile = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAyElEQVR42u3VOQoCQRSE4bmzK+5eQEcHe1wmdsXdQ5gJHsBA8AyCGCi8sCqwBjpy4M8K3kdHHbxfT68FGfCvQBy5FGlArjPFQpd8o5MM5LszzAA6yUAhnGMG0EkGir0FZgCdZKDUX2IG0EkGytEKM4BOMmC3fk8GKoM1ZrfoJANVt8EMoJMM1OItZgCdZKA+3GEG0EkGGqM9ZgCdZKA5PmAG0EkGWpMjZgCdZKCdnDAD6CQDHv+D6+WcuuzTzwAvwON+85r3F3wAl3Y27/RpLRsAAAAASUVORK5CYII=',
+  'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAgElEQVR42mP88+s7Ay0BEwONwagFA28BC1bR2TPnk2FWanoisRYwMDCs2LoPUzDQz4OBgWH9ph2YUhHeTqORPJpMsSYYEqT+/iLNAqxpcTSZjlowwjIa9nT99xeeJI8VMGI2W65dvUi2e7W09QlbMBrJoxaQmg9evnhOUwtonkwBm7goOXn/qZ0AAAAASUVORK5CYII=',
+  'base64',
+);
+// One opaque curtain-wall bay, with a recessed pane, mullion and slab edge.
+const towerTile = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAYUlEQVR42mM8dnA7Ay0BEwONwagFA28By569+4a4D7S0tCCsVRs2MzAwPHjxi6AedwejnQfOjaaioRPJaHxBISFitBGpbDQORi0YtWDUglELaFRcf/n8iRhtRCobjQNiAAAV4BMmGqAtIAAAAABJRU5ErkJggg==',
   'base64',
 );
 const masonry = [
-  ['#ae7972', '#855c5b', '#c6a69b'],
-  ['#d9c8b0', '#b1a28d', '#ede2c8'],
-  ['#a1b1bc', '#798b9b', '#c4d0d3'],
-  ['#b38b7c', '#97786e', '#d8bc9e'],
-  ['#9999a6', '#717381', '#b9bdc6'],
-  ['#c0b6af', '#998e89', '#d9d0c1'],
+  '#9f5c4a',
+  '#8e4e3f',
+  '#ab6f58',
+  '#dad3c5',
+  '#cdc5b5',
+  '#c2c6cb',
 ];
-const spectral = [
-  ['#553790', '#b349bf', '#ffa4df', '#a0f2fa', '#ff83d2'],
-  ['#4157a4', '#477fd4', '#93faff', '#d9a0fb', '#8cedfb'],
-];
-// Two shallow, angled planes meet on a luminous ridge. Split the original roof
-// triangles at that line, preserving setbacks, concavities and the street footprint.
-function crystalRoof(s, b, hue, neon) {
+const towerFinishes = ['#d2c7b2', '#e4e3df', '#b9b9b5'];
+
+function pitchedRoof(s, b, roofColor, cornice) {
   const [[x0, x1], [z0, z1]] = b.bounds;
   const direction = x1 - x0 < z1 - z0 ? [0.94, 0.34] : [0.31, 0.95];
   const project = (p) => p[0] * direction[0] + p[1] * direction[1];
@@ -682,9 +677,9 @@ function crystalRoof(s, b, hue, neon) {
       const piece = simplify(split(tri, side), 1e-9, true);
       if (signedArea(piece) < 1e-12) continue;
       face(
-        s.glass,
+        s.city,
         piece.reverse().map((p) => to3(p, height(p))),
-        side < 0 ? hue[2] : hue[3],
+        roofColor,
       );
     }
   for (const [a, c] of b.visibleWalls) {
@@ -702,12 +697,11 @@ function crystalRoof(s, b, hue, neon) {
         last = to3(end, b.height);
       const trim0 = Math.max(b.height, h0 - 0.0011),
         trim1 = Math.max(b.height, h1 - 0.0011);
-      for (const [surf, pts, tint] of [
-        [s.glass, [low, to3(start, trim0), to3(end, trim1), last], hue[1]],
+      for (const [pts, tint] of [
+        [[low, to3(start, trim0), to3(end, trim1), last], roofColor],
         [
-          neon,
           [to3(start, trim0), to3(start, h0), to3(end, h1), to3(end, trim1)],
-          hue[4],
+          cornice,
         ],
       ]) {
         for (const tri of [
@@ -718,150 +712,87 @@ function crystalRoof(s, b, hue, neon) {
             Math.hypot(...cross(sub(tri[1], tri[0]), sub(tri[2], tri[0]))) >
             1e-12
           )
-            face(surf, tri, tint);
+            face(s.city, tri, tint);
       }
     }
   }
+  return height;
 }
-function renderBuilding(s, b, detail) {
-  const tone = masonry[b.id % masonry.length];
-  const hue = spectral[b.tint],
-    neon = b.tint ? s.neonBlue : s.neonPink;
+
+// Fit each mechanical enclosure inside one exposed roof triangle, clear of venue and fallback pins.
+function penthouse(s, b, roofHeight, pins) {
+  for (const tri of b.visibleRoof.toSorted((a, c) => turn(...c) - turn(...a))) {
+    const p = [0, 1].map((k) => tri.reduce((n, q) => n + q[k], 0) / 3);
+    const radius = Math.min(
+      ...tri.map((a, i) => segmentDistance(p, a, tri[(i + 1) % 3])),
+    );
+    const w = Math.min(0.028, radius * 1.45),
+      d = w * 0.67;
+    if (w < 0.007 || pins.some((q) => Math.hypot(...sub(q, p)) < w)) continue;
+    const corners = rect(p[0], 0, p[1], w, d);
+    const sill = corners.map(([x, , z]) => [x, roofHeight([x, z]) - 0.0002, z]);
+    const top = Math.max(...sill.map((q) => q[1])) + w * 0.38;
+    loft(s.city, [sill, rect(p[0], top, p[1], w, d)], '#77756e', {
+      top: false,
+      bottom: false,
+    });
+    box(s.city, p[0], top + 0.0005, p[1], w * 1.04, 0.001, d * 1.04, '#c2bdae');
+    return;
+  }
+}
+function renderBuilding(s, b, detail, pins) {
+  const tower =
+    b.heightM >= 28 &&
+    !/Memorial Hall|Memorial Church|Myles Standish/i.test(b.name ?? '');
+  const finish = tower
+    ? towerFinishes[b.id % towerFinishes.length]
+    : masonry[b.id % masonry.length];
+  const roofColor = tower
+    ? '#928e83'
+    : ['#c7c0b1', '#b5afa3', '#a9a397'][b.id % 3];
+  const cornice = '#d8d1c2';
   const y = b.height;
-  const corniceHeight = Math.min(0.0026, y * 0.07);
   const crown =
     b.hero &&
     y > 0.07 &&
     b.visibleRoof.length &&
     b.visibleRoof.reduce((n, tri) => n + turn(...tri) / 2, 0) > b.area * 0.98;
-  if (crown) crystalRoof(s, b, hue, neon);
-  else
-    roofFaces(
-      b.hero ? s.glass : s.city,
-      b.visibleRoof,
-      y,
-      b.hero ? hue[2] : tone[2],
-    );
-  for (const [i, [a, end, base]] of b.visibleWalls.entries()) {
-    const trimY = Math.max(base + (y - base) * 0.1, y - corniceHeight);
+  let roofHeight = () => y;
+  if (crown) roofHeight = pitchedRoof(s, b, roofColor, cornice);
+  else roofFaces(s.city, b.visibleRoof, y, roofColor);
+  if (tower) penthouse(s, b, roofHeight, pins);
+  for (const [a, end, base] of b.visibleWalls) {
     const length = Math.hypot(...sub(a, end));
     if (length < 1e-7) continue;
     const cut = a.some(
       (v, j) =>
         Math.abs(Math.abs(v) - edge) < 1e-8 && Math.abs(v - end[j]) < 1e-8,
     );
-    const raised = (p, h) => [p[0], h, p[1]];
-    const wall = (surface, bottom, top, color, start = a, finish = end) =>
-      face(
-        surface,
-        [
-          raised(start, bottom),
-          raised(start, top),
-          raised(finish, top),
-          raised(finish, bottom),
-        ],
-        color,
-      );
-    if (b.hero) {
-      const lo = raised(a, base),
-        hi = raised(a, trimY),
-        next = raised(end, trimY),
-        foot = raised(end, base);
-      const sideShade = (i + b.id) % 3;
-      for (const [points, colors] of [
-        [
-          [lo, hi, next],
-          [hue[0], hue[2], hue[sideShade + 1]],
-        ],
-        [
-          [lo, next, foot],
-          [hue[0], hue[sideShade + 1], hue[1]],
-        ],
-      ]) {
-        const normal = norm(
-          cross(sub(points[1], points[0]), sub(points[2], points[0])),
-        );
-        s.glass.indices.push(
-          ...points.map((p, k) => s.glass.vertex(p, normal, colors[k])),
-        );
-      }
-      wall(neon, trimY, y, hue[4]);
-    } else {
-      const cornice = detail && length > 0.014;
-      const top = cornice ? trimY : y;
-      const bodyColor = tone[b.id % 6 === 0 ? 1 : 0];
-      if (cut || length < 0.004) wall(s.city, base, top, bodyColor);
-      else {
-        const cols = Math.max(1, Math.round(length / 0.009)),
-          stories = Math.max(1, Math.round((top - base) / 0.02));
-        face(
-          s.facade,
-          [
-            raised(a, base),
-            raised(a, top),
-            raised(end, top),
-            raised(end, base),
-          ],
-          bodyColor,
-          [
-            [0, stories],
-            [0, 0],
-            [cols, 0],
-            [cols, stories],
-          ],
-        );
-      }
-      if (cornice) wall(s.city, trimY, y, tone[2]);
-    }
-    // Coplanar decoration would flicker in the headset. Lift facade details out by 0.08 mm.
-    const shift = [
-      (0.00008 * (end[1] - a[1])) / length,
-      (0.00008 * (a[0] - end[0])) / length,
+    const trimmed = (b.hero || detail || tower) && length > 0.014;
+    const top = trimmed ? y - Math.min(0.0026, y * 0.07, (y - base) * 0.9) : y;
+    const quad = (lo, hi) => [
+      to3(a, lo),
+      to3(a, hi),
+      to3(end, hi),
+      to3(end, lo),
     ];
-    const at = (t) => mix(a, end, t).map((v, k) => v + shift[k]);
-    if (cut || !inBounds(at(0)) || !inBounds(at(1)) || length < 0.008) continue;
-    if (b.hero) {
-      wall(
-        neon,
-        base,
-        trimY,
-        hue[4],
-        at(0.01),
-        at(Math.min(0.16, 0.01 + 0.0012 / length)),
+    if (cut || length < 0.004) face(s.city, quad(base, top), finish);
+    else {
+      const cols = Math.max(1, Math.round(length / (tower ? 0.008 : 0.009)));
+      // Align slab edges across adjoining elevations, including walls above a setback.
+      const stories = Math.max(
+        1,
+        Math.round((y - 0.00255) / (tower ? 0.015 : 0.02)),
       );
-      if (length > 0.022) {
-        const count = Math.min(
-          14,
-          Math.max(1, Math.floor((trimY - base) / 0.021)),
-        );
-        for (let j = 1; j <= count; j++) {
-          const h = base + ((trimY - base) * j) / (count + 1);
-          wall(
-            s.window,
-            h,
-            Math.min(trimY, h + 0.00085),
-            hue[3],
-            at(0.07),
-            at(0.93),
-          );
-        }
-      }
-      if (length > 0.018 && y - base > 0.07) {
-        const q = at(0.08),
-          r = at(0.92),
-          delta = (trimY - base) * 0.1;
-        face(
-          s.light,
-          [
-            raised(q, base + delta),
-            raised(q, base + delta + 0.0015),
-            raised(r, trimY - delta + 0.0015),
-            raised(r, trimY - delta),
-          ],
-          hue[3],
-        );
-      }
+      const v = (h) => ((y - h) * stories) / (y - 0.00255);
+      face(tower ? s.tower : s.facade, quad(base, top), finish, [
+        [0, v(base)],
+        [0, v(top)],
+        [cols, v(top)],
+        [cols, v(base)],
+      ]);
     }
+    if (trimmed) face(s.city, quad(top, y), cornice);
   }
 }
 function tree(s, [x, z], h, pine) {
@@ -975,7 +906,7 @@ function topAt(meshes, [x, z]) {
   if (!Number.isFinite(y)) throw new Error('No deck under pin at ' + [x, z]);
   return [x, y + 0.018, z];
 }
-function fallbackPins(buildings, meshes) {
+function fallbackSites(buildings) {
   const candidates = buildings
     .filter((b) => b.visibleRoof.length)
     .map((b) => {
@@ -992,7 +923,7 @@ function fallbackPins(buildings, meshes) {
     picks.push(next);
     candidates.splice(candidates.indexOf(next), 1);
   }
-  return picks.map((p) => topAt(meshes, p));
+  return picks;
 }
 export function segments(dir) {
   const { areas } = JSON.parse(
@@ -1014,6 +945,14 @@ export function segments(dir) {
       bytes: sashTile,
       material: s.facade.material,
       name: 'Miniature window sash',
+    });
+    s.tower = m.surface(
+      m.material('Satin curtain wall', { rough: 0.52, metal: 0.21 }),
+    );
+    m.textures.push({
+      bytes: towerTile,
+      material: s.tower.material,
+      name: 'Glazing and floor plates',
     });
     box(s.city, 0, -0.0035, 0, deckSize, 0.007, deckSize, '#b2b2a6', 0.017);
     const venues = places
@@ -1077,7 +1016,6 @@ export function segments(dir) {
       );
       highlights.add(nearest);
     }
-    let color = 0;
     // Reserve facade detail for large, legible street fronts. All eligible footprints keep roofs and walls.
     const detailed = new Set(
       buildings
@@ -1087,20 +1025,21 @@ export function segments(dir) {
     const scaleHeight = (h) => 0.46 * Math.tanh(0.014 * h);
     for (const b of buildings) {
       b.hero = highlights.has(b) || landmark.test(b.name ?? '');
-      if (b.hero) b.tint = color++ % 2;
       b.height =
         scaleHeight(b.heightM) +
         Math.max(0, 0.35 - scaleHeight(tallest)) * (b.heightM / tallest) ** 5;
     }
     const rendered = exposedShells(buildings);
-    for (const b of rendered) renderBuilding(s, b, detailed.has(b));
+    const sites = fallbackSites(rendered);
+    const pins = sites.concat(venues.map((v) => v.p));
+    for (const b of rendered) renderBuilding(s, b, detailed.has(b), pins);
     plant(s, parks, buildings, roads, venues, random, 40);
     const meshes = m.surfaces.map((surface) => ({
       ...surface,
       positions: Float32Array.from(surface.positions),
     }));
     const tris = meshes.reduce((n, s) => n + s.indices.length / 3, 0);
-    if (tris >= 35000)
+    if (tris >= 25000)
       throw new Error(id + ' exceeds geometry budget: ' + tris);
     anchors[id] = {
       lcdNode: 'LCD_Screen',
@@ -1110,7 +1049,7 @@ export function segments(dir) {
       placeAnchors: Object.fromEntries(
         venues.map(({ id, p }) => [id, topAt(meshes, p)]),
       ),
-      pinAnchors: fallbackPins(rendered, meshes),
+      pinAnchors: sites.map((p) => topAt(meshes, p)),
     };
     m.save(dir + 'segment-' + id + '.glb');
     console.log(

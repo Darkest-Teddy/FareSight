@@ -1,5 +1,5 @@
 import * as pc from 'playcanvas';
-import { child, cyan, shape, target, type HitTarget, type XYZ } from './sceneSupport';
+import { brass, calloutAmber, child, cyan, ivory, shape, target, type HitTarget, type XYZ } from './sceneSupport';
 
 interface PanelLine {
   text: string;
@@ -132,7 +132,51 @@ export class CanvasPanel3D {
   }
 
   setOpacity(value: number): void {
-    this.surface.material.opacity = value;
+    const material = this.surface.material;
+    if (material.opacity === value) return;
+    material.opacity = value;
+    material.update();
+  }
+
+  setCallout(
+    name: string, detail: string,
+    { category, muted = false, selected = false }: { category?: string; muted?: boolean; selected?: boolean } = {},
+  ): void {
+    this.surface.draw(JSON.stringify(['callout', name, detail, category, muted, selected]), (ctx, width, height) => {
+      const padding = 43;
+      const contentWidth = width - padding * 2;
+      ctx.beginPath();
+      ctx.roundRect(9, 9, width - 18, height - 18, 20);
+      ctx.fillStyle = muted ? '#292d33' : '#1b212e';
+      ctx.fill();
+      ctx.strokeStyle = muted ? '#888b90' : selected ? ivory : brass;
+      ctx.lineWidth = selected ? 15 : 11;
+      ctx.stroke();
+
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = muted ? '#d2d3d5' : '#ffffff';
+      ctx.font = '700 100px system-ui, sans-serif';
+      ctx.fillText(name, padding, height * 0.32, contentWidth);
+
+      const baseline = height * 0.72;
+      ctx.font = '600 65px system-ui, sans-serif';
+      if (category) {
+        const badgeWidth = Math.min(contentWidth * 0.62, ctx.measureText(detail).width + 36);
+        ctx.fillStyle = muted ? '#34383d' : '#382c21';
+        ctx.fillRect(padding, baseline - 44, badgeWidth, 88);
+        ctx.fillStyle = muted ? '#c6c8cb' : calloutAmber;
+        ctx.fillText(detail, padding + 18, baseline, badgeWidth - 36);
+
+        ctx.fillStyle = muted ? '#bfc2c6' : ivory;
+        ctx.font = '700 64px system-ui, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(category, width - padding, baseline, contentWidth - badgeWidth - 28);
+        ctx.textAlign = 'left';
+      } else {
+        ctx.fillStyle = selected ? ivory : brass;
+        ctx.fillText(detail, padding, baseline, contentWidth);
+      }
+    });
   }
 
   hit(action: () => void): HitTarget {

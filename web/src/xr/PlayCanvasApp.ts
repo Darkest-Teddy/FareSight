@@ -10,9 +10,10 @@ import { OrbitCamera } from './OrbitCamera';
 import { SplatLoader } from './SplatLoader';
 import { StationDioramaScene } from './StationDioramaScene';
 import { VenueSplatScene } from './VenueSplatScene';
-import { child, clamp, cyan, damp, material, ModelLibrary, ScenePicker, shape, type HitTarget, type XYZ } from './sceneSupport';
+import { brass, child, clamp, damp, material, ModelLibrary, ScenePicker, shape, type HitTarget, type XYZ } from './sceneSupport';
 
 type ActiveXR = 'none' | 'vr' | 'ar';
+const studioBackdrop = '#151922';
 
 export class PlayCanvasApp implements FareSightSceneEngine {
   private app?: pc.Application;
@@ -75,12 +76,12 @@ export class PlayCanvasApp implements FareSightSceneEngine {
       app.setCanvasFillMode(pc.FILLMODE_NONE);
       this.canvas.style.width = width;
       this.canvas.style.height = height;
-      app.scene.ambientLight = new pc.Color(0.29, 0.35, 0.45);
+      app.scene.ambientLight = new pc.Color(0.38, 0.39, 0.42);
       app.scene.gsplat.splatBudget = 160_000;
       this.rig = child(app.root, 'Camera rig');
       this.camera = child(this.rig, 'Viewer');
       this.lens = this.camera.addComponent('camera', {
-        clearColor: new pc.Color().fromString('#0B1020'), nearClip: 0.025, farClip: 65, fov: 48,
+        clearColor: new pc.Color().fromString(studioBackdrop), nearClip: 0.025, farClip: 65, fov: 48,
       }) as pc.CameraComponent;
       this.addLights(app.root);
       this.models = new ModelLibrary(app, this.callbacks.onDebugLog);
@@ -98,7 +99,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
         back: () => this.navigate(this.mode === 'dish' ? 'venue' : this.mode === 'venue' ? 'station' : 'map'),
         virtualTable: () => this.setPassthroughFallback(!this.virtualTable),
       });
-      this.reticleMaterial = material(cyan, 0.85);
+      this.reticleMaterial = material(brass, 0.22);
       this.reticle = shape(app.root, 'Table placement indicator', 'torus', this.reticleMaterial, [0, 0, 0], [0.12, 0.011, 0.12]);
       this.reticle.enabled = false;
       this.orbit = new OrbitCamera(this.canvas, this.camera, this.desktopPose(),
@@ -132,9 +133,9 @@ export class PlayCanvasApp implements FareSightSceneEngine {
 
   private addLights(root: pc.Entity): void {
     const lights = [
-      { name: 'Studio key', tint: '#f3f6ff', intensity: 1.55, angles: [37, -31, 36] },
-      { name: 'Cyan rim', tint: '#76eaff', intensity: 0.95, angles: [30, 146, -27] },
-      { name: 'Warm fill', tint: '#ffb59d', intensity: 0.48, angles: [63, 44, 35] },
+      { name: 'Warm studio key', tint: '#fff6e8', intensity: 1.75, angles: [37, -31, 36] },
+      { name: 'Sky fill', tint: '#c8d8ee', intensity: 0.68, angles: [63, 44, 35] },
+      { name: 'Warm bounce', tint: '#e9d7bf', intensity: 0.45, angles: [30, 146, -27] },
     ];
     for (const { name, tint, intensity, angles } of lights) {
       const light = child(root, name);
@@ -313,7 +314,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     const aspect = this.canvas.clientWidth / Math.max(this.canvas.clientHeight, 1);
     const portrait = clamp(0.79 / Math.max(aspect, 0.4), 1, 1.60);
     if (this.mode === 'station') {
-      return { pivot: new pc.Vec3(0, 0.10, 0), yaw: 0.12, pitch: 0.53, distance: 1.64 * portrait };
+      return { pivot: new pc.Vec3(0.10, 0.08, 0), yaw: 0.24, pitch: 0.48, distance: 1.86 * portrait };
     }
     if (this.mode === 'dish') {
       return { pivot: new pc.Vec3(0, 0.035, 0), yaw: 0, pitch: 0.66, distance: 0.86 * portrait, min: 0.21 };
@@ -459,9 +460,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
 
   private applyPresentation(): void {
     const passthrough = this.isPassthrough();
-    const clear = new pc.Color().fromString('#0B1020');
-    if (passthrough) clear.set(0, 0, 0, 0);
-    this.lens.clearColor = clear;
+    this.lens.clearColor = passthrough ? new pc.Color(0, 0, 0, 0) : new pc.Color().fromString(studioBackdrop);
     this.map.root.enabled = this.mode === 'map';
     this.station.root.enabled = this.mode === 'station';
     this.venue.root.enabled = this.mode === 'venue' || (this.mode === 'dish' && !passthrough);

@@ -4,6 +4,9 @@ import type { XRSceneCallbacks } from './bridgeTypes';
 export const assetBase = '/assets-demo/';
 export const cyan = '#62edff';
 export const amber = '#ffbb78';
+export const brass = '#c9ab7d';
+export const ivory = '#f0e4cd';
+export const calloutAmber = '#ffb547';
 export type XYZ = [number, number, number];
 export type DebugLog = XRSceneCallbacks['onDebugLog'];
 

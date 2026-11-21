@@ -194,7 +194,7 @@ function parseModel(name) {
     });
   }
   const budget = name.startsWith('segment-')
-    ? [1, 36000, 12]
+    ? [1, 24999, 12]
     : name.startsWith('boston')
       ? [25000, 55000, 19]
       : [1, 5000, 8];
@@ -395,9 +395,21 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
     stopPlaces.map((p) => p.id).sort(),
   );
   const scale = 0.856 / spanMeters;
-  const glass = meshes.get('Spectral architectural glass');
-  assert.equal(glass.mat.alphaMode, 'BLEND');
-  for (const { positions: p, offset } of meshes.values()) {
+  const city = meshes.get('Masonry, foliage and streets');
+  const roofs = new Map([['city', city]]);
+  for (const { positions: p, offset, mat } of meshes.values()) {
+    if (p.some((v, i) => i % 3 === 1 && v + offset[1] > 0.0025)) {
+      assert.equal(
+        mat.alphaMode ?? 'OPAQUE',
+        'OPAQUE',
+        id + ' translucent building',
+      );
+      assert.deepEqual(
+        mat.emissiveFactor ?? [0, 0, 0],
+        [0, 0, 0],
+        id + ' emissive building',
+      );
+    }
     for (let i = 0; i < p.length; i += 3)
       if (p[i + 1] + offset[1] > 1e-7)
         assert.ok(
@@ -418,10 +430,10 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
     if (buildings.some((b) => inFootprint(east, south, b.ring))) {
       assert.ok(top > 0.005, place.id + ' missing roof');
       approx(
-        topAt(new Map([['glass', glass]]), x, z),
+        topAt(roofs, x, z),
         top,
         2e-7,
-        place.id + ' highlighted rooftop',
+        place.id + ' architectural rooftop',
       );
       roofCount++;
     } else {
