@@ -267,14 +267,13 @@ export class XRPresence {
         return;
       }
 
-      const surface = material('#c2b5a2');
+      const surface = material('#595d64');
       surface.useMetalness = true;
+      surface.metalness = 0;
       surface.glossInvert = true;
-      surface.gloss = 0.47;
-      surface.clearCoat = 0.16;
-      surface.clearCoatGloss = 0.53;
-      surface.emissive.fromString('#cc874e');
-      surface.emissiveIntensity = 0.06;
+      surface.gloss = 0.88;
+      surface.emissive.fromString('#c88a4b');
+      surface.emissiveIntensity = 0;
       surface.update();
       for (const instance of instances) {
         instance.material = surface;
@@ -1111,7 +1110,7 @@ export class XRPresence {
         const rotation = joint.getRotation();
         if (validJointPose(position, rotation)) bone.setPositionAndRotation(position, rotation);
       }
-      visual.surface.emissiveIntensity = 0.06 + 0.30 * closure;
+      visual.surface.emissiveIntensity = 0.18 * closure;
       return;
     }
 

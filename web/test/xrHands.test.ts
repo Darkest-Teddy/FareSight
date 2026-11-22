@@ -248,6 +248,7 @@ for (const side of ['left', 'right'] as const) {
     presence.updatePointers();
     assert.ok(skinVolume(instance.mesh, assertPose(instance, joints, 2)) > 0.00001);
     const openEmission = surface.emissiveIntensity;
+    assert.equal(openEmission, 0);
 
     const contact = thumb.clone().lerp(thumb, index, 0.45).add(new pc.Vec3(0, -0.020, 0.013));
     moveTip(open, digits[0].slice(-2), contact.clone().add(new pc.Vec3(0, -0.005, 0)));
@@ -256,7 +257,7 @@ for (const side of ['left', 'right'] as const) {
     applyPose(joints, open);
     presence.updatePointers();
     assert.ok(skinVolume(instance.mesh, assertPose(instance, joints, 3)) > 0.00001);
-    assert.ok(surface.emissiveIntensity > openEmission + 0.15);
+    assert.ok(surface.emissiveIntensity > openEmission && surface.emissiveIntensity <= 0.18);
 
     const missing = 'pinky-finger-phalanx-distal';
     const bone = rig.findByName(missing)!;
