@@ -30,7 +30,8 @@ export function seoMetadata(envName: string, loadEnv: typeof viteLoadEnv, pages 
     transformIndexHtml(html, { path }) {
       const url = pageUrls.get(path);
       if (!url) return;
-      const absolute = (value: string) => /^\/(?!\/)/.test(value) ? new URL(value, url).href : value;
+      // Contribute builds with a relative base, so its paths start with ./ instead of /.
+      const absolute = (value: string) => /^\.?\/(?!\/)/.test(value) ? new URL(value, url).href : value;
 
       return {
         html: html

@@ -102,7 +102,7 @@ pnpm --filter @faresight/server run deploy-web        # Add --dry-run to see wha
 
 `VITE_API_ORIGIN` is read by the build, not by `deploy-web`: it is the public address of the Fastify server. The CDN serves files only, so the app cannot reach `/api` through it. Leave it unset to ship the built-in demo data.
 
-`VITE_CONTRIBUTE_URL` is also read by the build: it is the public address of Vantage Contribute. Both pages check the visitor before they draw anything. A phone is sent to that address; everyone else, Meta Quest included, sees the landing page (`/intro.html`) first and reaches the app from its buttons. Opening `/index.html` directly in a new tab leads back to the landing page. Without `VITE_CONTRIBUTE_URL`, phones get the landing page too.
+`VITE_CONTRIBUTE_URL` is also read by the build: it is the public address of Vantage Contribute. Both pages check the visitor before they draw anything. A phone is sent to that address; everyone else, Meta Quest included, sees the landing page (`/intro.html`) first and reaches the app from its buttons. Opening `/index.html` directly in a new tab leads back to the landing page. Without `VITE_CONTRIBUTE_URL`, phones get the landing page too. When the Fastify server serves the web app itself (`--serve-web`), it also serves a built `contribute/dist` at `/contribute/`, so there the value is `https://<your domain>/contribute/`.
 
 Deploy once so the bucket exists, and in the Vultr console create a CDN pull zone whose origin is `https://<WEB_BUCKET>.<endpoint host>`, for example `https://faresight-web.ewr2.vultrobjects.com`. Put its ID in `VULTR_CDN_PULL_ZONE_ID`. The last two rows are optional: without them the files are still uploaded, but the CDN is not purged.
 
