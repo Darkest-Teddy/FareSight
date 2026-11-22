@@ -39,7 +39,7 @@ async function setup(t, overrides = {}) {
   const config = {
     ...getConfig(), database: join(dir, 'faresight.db'), uploads: join(dir, 'uploads'), outputs: join(dir, 'outputs'),
     host: '127.0.0.1', port: 0, mode: 'auto', adminPasscode: 'test-passcode', geminiKey: undefined,
-    atlasKey: undefined, replicateKey: undefined, ...overrides,
+    atlasKey: undefined, replicateKey: undefined, captures: undefined, autoPublish: false, ...overrides,
   };
   let app;
   let origin;

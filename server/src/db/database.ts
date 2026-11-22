@@ -58,6 +58,8 @@ type RecordByTable = {
 
 export class Store {
   readonly sqlite: DatabaseSync;
+  /** Called after every job change. Capture storage uses it to mirror job progress into Postgres. */
+  onJobUpdate?: (job: JobRecord) => void;
 
   constructor(filename: string) {
     if (filename !== ':memory:') mkdirSync(dirname(filename), { recursive: true });
@@ -186,6 +188,7 @@ export class Store {
   updateJob(job: JobRecord, changes: Partial<JobRecord>): JobRecord {
     const updated = { ...job, ...changes, updated_at: new Date().toISOString() };
     this.put('jobs', updated);
+    this.onJobUpdate?.(updated);
     return updated;
   }
 

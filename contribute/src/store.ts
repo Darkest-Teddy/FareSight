@@ -11,6 +11,8 @@ export interface ScanRecord {
   label: string;
   photoCount: number;
   createdAt: string;
+  /** Set when the photos went to object storage. Status then comes from the capture, with live updates. */
+  captureId?: string;
 }
 
 export type ScanState =
@@ -83,6 +85,7 @@ class ScanTracker {
   private listeners = new Set<() => void>();
   private timer?: number;
   private polling = false;
+  private streams = new Map<string, EventSource>();
   /** Poll quickly while the scans screen is open, slowly otherwise. */
   fast = false;
 
@@ -102,7 +105,34 @@ class ScanTracker {
     return () => { this.listeners.delete(listener); };
   }
 
-  private emit() { for (const listener of this.listeners) listener(); }
+  private emit() {
+    this.watch();
+    for (const listener of this.listeners) listener();
+  }
+
+  private active(id: string) {
+    const state = this.state(id);
+    return state.status === 'loading' || state.status === 'offline' || (state.status === 'ok' && activeStages.has(state.job.status));
+  }
+
+  /**
+   * Keeps a server-sent event stream open for each capture that is still building, so a change
+   * shows up at once. An event only triggers a re-read, so a missed one costs nothing but a poll interval.
+   */
+  private watch() {
+    if (typeof EventSource === 'undefined') return;
+    for (const [id, stream] of this.streams) {
+      if (this.records.some((record) => record.id === id) && this.active(id)) continue;
+      stream.close();
+      this.streams.delete(id);
+    }
+    for (const { id, captureId } of this.records) {
+      if (!captureId || this.streams.has(id) || !this.active(id)) continue;
+      const stream = new EventSource(api.captureEventsUrl(captureId));
+      for (const type of ['status', 'asset', 'failed']) stream.addEventListener(type, () => this.schedule(0));
+      this.streams.set(id, stream);
+    }
+  }
 
   add(record: ScanRecord, job: GenerationJob) {
     this.records = [record, ...this.records.filter((entry) => entry.id !== record.id)];
@@ -140,15 +170,11 @@ class ScanTracker {
   private async poll() {
     if (this.polling || document.visibilityState !== 'visible') return;
     this.polling = true;
-    const pending = this.records.filter(({ id }) => {
-      const state = this.state(id);
-      return state.status === 'loading' || state.status === 'offline'
-        || (state.status === 'ok' && activeStages.has(state.job.status));
-    });
-    await Promise.all(pending.map(async ({ id }) => {
+    const pending = this.records.filter(({ id }) => this.active(id));
+    await Promise.all(pending.map(async ({ id, captureId }) => {
       const previous = this.state(id);
       try {
-        this.states.set(id, { status: 'ok', job: await api.job(id) });
+        this.states.set(id, { status: 'ok', job: captureId ? await api.captureJob(captureId) : await api.job(id) });
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) this.states.set(id, { status: 'missing' });
         else this.states.set(id, { status: 'offline', job: 'job' in previous ? previous.job : undefined });

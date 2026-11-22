@@ -1,5 +1,6 @@
-import { MAX_ROOM_PHOTOS, type Place, type RoomModelTier, type Stop } from '@faresight/shared';
+import { MAX_ROOM_PHOTOS, type GenerationJob, type Place, type RoomModelTier, type Stop } from '@faresight/shared';
 import { api } from '../api';
+import { sendCapture, type CaptureUpload } from '../captureUpload';
 import { categoryLabel, coverage, servesDishes } from '../data';
 import { button, el, errorText, haptic, icon, iconButton, motion, replay, svg, wait, type IconName } from '../dom';
 import { prepareImage } from '../photos';
@@ -64,6 +65,8 @@ export class VenueView {
   private busy = false;
   private finished = false;
   private alive = true;
+  /** The room capture being sent to object storage, and the photos it was started with. */
+  private capture?: { upload: CaptureUpload; shots: Shot[] };
 
   constructor(
     private readonly place: Place,
@@ -326,6 +329,38 @@ export class VenueView {
     return shot;
   }
 
+  /** Sends a room's photos straight to object storage. A second try reuses the capture if the photos are the same. */
+  private async sendRoom(shots: Shot[]) {
+    const same = this.capture?.shots.length === shots.length && shots.every((shot, index) => shot === this.capture?.shots[index]);
+    if (!same) this.capture = undefined;
+    const label = (sent: number) => this.renderFooter({ label: `Sending photo ${Math.min(shots.length, sent + 1)} of ${shots.length}…`, fraction: sent / (shots.length + 1) });
+    label(this.capture?.upload.sent.size ?? 0);
+    const result = await sendCapture({
+      placeId: this.place.id, files: shots.map((shot) => shot.file), tier: this.tier, capture: this.capture?.upload,
+      onCapture: (upload) => { this.capture = { upload, shots }; },
+      onFrame: (seq, state, sent) => {
+        shots[seq].node.dataset.state = state;
+        label(sent);
+        if (sent === shots.length) this.renderFooter({ label: 'Starting the 3D build…', fraction: shots.length / (shots.length + 1) });
+      },
+    });
+    return result;
+  }
+
+  private async finish(kind: Kind, photoCount: number, label: string, { job, captureId }: { job: GenerationJob; captureId?: string }) {
+    scans.add({
+      id: job.id, placeId: this.place.id, placeName: this.place.name, stopId: this.stop.stop_id, kind,
+      label, photoCount, createdAt: job.created_at, captureId,
+    }, job);
+    this.finished = true;
+    this.send.classList.add('is-done');
+    this.send.prepend(icon('check'));
+    this.renderFooter({ label: 'Scan started', fraction: 1 });
+    haptic([10, 50, 18]);
+    await wait(motion(850));
+    if (this.alive) this.actions.done(job.id);
+  }
+
   private async submit() {
     if (this.busy || this.finished || this.problem()) return;
     const kind = this.kind;
@@ -335,6 +370,7 @@ export class VenueView {
     this.root.classList.add('is-sending');
     this.renderGrid();
     try {
+      if (kind === 'room' && await api.captureStorage()) return await this.finish(kind, shots.length, 'The space', await this.sendRoom(shots));
       for (const [index, shot] of shots.entries()) {
         this.renderFooter({ label: `Sending photo ${index + 1} of ${shots.length}…`, fraction: index / (shots.length + 1) });
         if (shot.uploadId) continue;
@@ -365,17 +401,7 @@ export class VenueView {
           plate_diameter_m: Number.isFinite(width) ? width / 100 : undefined,
         }, code));
       const dish = this.place.dishes.find((entry) => entry.id === this.dishId)?.name ?? newDish;
-      scans.add({
-        id: job.id, placeId: this.place.id, placeName: this.place.name, stopId: this.stop.stop_id, kind,
-        label: kind === 'room' ? 'The space' : dish, photoCount: uploadIds.length, createdAt: job.created_at,
-      }, job);
-      this.finished = true;
-      this.send.classList.add('is-done');
-      this.send.prepend(icon('check'));
-      this.renderFooter({ label: 'Scan started', fraction: 1 });
-      haptic([10, 50, 18]);
-      await wait(motion(850));
-      if (this.alive) this.actions.done(job.id);
+      await this.finish(kind, uploadIds.length, kind === 'room' ? 'The space' : dish, { job });
     } catch (error) {
       this.feedback.textContent = errorText(error);
       replay(this.send, 'is-shaking');

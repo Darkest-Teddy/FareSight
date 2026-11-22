@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { createGunzip } from 'node:zlib';
 import type { Asset, Vector3 } from '@faresight/shared';
 import type { Config } from '../config.ts';
+import { upgradeSpz } from './spzUpgrade.ts';
 
 const run = promisify(execFile);
 const options = { timeout: 120_000, maxBuffer: 2 * 1024 * 1024 };
@@ -170,6 +171,16 @@ export async function convertSplat(config: Config, jobId: string, kind: 'room' |
       await rm(temporary, { force: true });
     } finally {
       await rm(limited, { force: true });
+    }
+  }
+  if (format === 'spz') {
+    // Served as is, so it has to be a version the viewer can read. Atlas still writes version 2.
+    const upgraded = upgradeSpz(await readFile(original));
+    if (upgraded) {
+      const viewable = resolve(config.outputs, `${jobId}.spz`);
+      await writeFile(`${viewable}.part`, upgraded);
+      await rename(`${viewable}.part`, viewable);
+      return { path: viewable, count: geometry.count, format, metadata };
     }
   }
   return { path: normalized, count: geometry.count, format, metadata };
