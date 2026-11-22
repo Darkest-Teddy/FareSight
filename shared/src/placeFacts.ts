@@ -300,56 +300,15 @@ export const PLACE_FACTS: Record<string, PlaceFacts> = {
     "details": {
       "checked_on": "2026-11-22",
       "address": "George Sherman Union Food Hall, 775 Commonwealth Avenue, Boston, MA 02215",
-      "website": "https://www.bu.edu/dining/location/the-halal-shack/",
+      "website": null,
       "phone": "617-358-1885",
       "hours_verified": false,
       "hours_note": "Thanksgiving 2026: closed November 21; open November 22–23, 11:00–19:00; closed November 24–29.",
       "hours_source": "https://www.bu.edu/dining/thanksgiving-week-2026/",
-      "awards": [
-        {
-          "title": "Restaurant review: The Halal Shack at the GSU",
-          "org": "BU Today",
-          "year": 2023,
-          "scope": "local",
-          "url": "https://www.bu.edu/articles/2023/gsu-halal-shack-restaurant-review/"
-        }
-      ],
-      "ratings": [
-        {
-          "source": "GuideToBU",
-          "rating": 4.5,
-          "count": 234,
-          "url": "https://www.guidetobu.com/food/halal-shack/"
-        }
-      ],
-      "review_highlights": [
-        "BU Today's 2023 reviewers praised filling portions, seasoned rice and spicy chicken, although one found the beef dry.",
-        "Crispy cauliflower with tahini and fresh vegetable toppings stood out among the vegetarian options.",
-        "The reviewers flagged extra charges for premium additions, and one found the falafel small and bland.",
-        "One BU Today reviewer received his bowl within a few minutes."
-      ],
-      "review_excerpts": [
-        {
-          "author": "Sam Thomas",
-          "source": "BU Today",
-          "text": "My meal was ready within a few minutes",
-          "rating": null,
-          "date_label": "November 3, 2023",
-          "url": "https://www.bu.edu/articles/2023/gsu-halal-shack-restaurant-review/"
-        },
-        {
-          "author": "Sujena Soumyanath",
-          "source": "BU Today",
-          "text": "Coated in golden batter, the cauliflower blended perfectly with the wrap’s tangy tahini sauce.",
-          "rating": null,
-          "date_label": "November 3, 2023",
-          "url": "https://www.bu.edu/articles/2023/gsu-halal-shack-restaurant-review/"
-        }
-      ],
-      "review_sources": [
-        "https://www.bu.edu/articles/2023/gsu-halal-shack-restaurant-review/",
-        "https://www.guidetobu.com/food/halal-shack/"
-      ]
+      "awards": [],
+      "ratings": [],
+      "review_highlights": [],
+      "review_sources": []
     }
   },
   "bu-beach-01": {

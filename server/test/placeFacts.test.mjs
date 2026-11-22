@@ -47,7 +47,12 @@ test('researched hours and details reach the catalog and refresh stale stored pl
   const restaurants = catalog.filter(({ category }) => category === 'restaurant');
   assert.equal(restaurants.length, 35);
   const validScopes = new Set(['local', 'national', 'international']);
+  // The GSU is listed as the building, with no venue of its own to review.
+  const gsu = restaurants.find(({ id }) => id === 'bu-halal-01');
+  assert.equal(gsu.name, 'GSU');
+  assert.deepEqual(gsu.details.ratings, []);
   for (const place of restaurants) {
+    if (place === gsu) continue;
     assert.ok(place.details, `Missing details for ${place.id}`);
     assert.ok(place.details.ratings.length > 0, `Missing ratings for ${place.id}`);
     assert.ok(place.details.review_highlights.length >= 3, `Missing review highlights for ${place.id}`);

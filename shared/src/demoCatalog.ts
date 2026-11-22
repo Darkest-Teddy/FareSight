@@ -22,7 +22,7 @@ const listings: Listing[][] = [
   [
     ['bu-pavement-01', 'Pavement Coffeehouse', 'study', 42.34985, -71.10721, 50, 9, '07:00', '19:00', ['coffee', 'bagels', 'study'], 'Bagels between lectures and a library nook for reading.', true],
     ['bu-nudpob-01', 'Nud Pob Thai Cuisine', 'restaurant', 42.34986, -71.10731, 60, 17, '11:30', '21:30', ['thai', 'noodles', 'curry'], 'Campus standby for pad see ew and Thai curries.', true, true],
-    ['bu-halal-01', 'The Halal Shack at the GSU', 'restaurant', 42.35100, -71.10917, 225, 13, '11:00', '20:00', ['halal', 'rice bowls', 'shawarma'], 'Halal rice bowls and wraps in the George Sherman Union food hall.', true],
+    ['bu-halal-01', 'GSU', 'restaurant', 42.35100, -71.10917, 225, 13, '11:00', '20:00', ['food hall'], 'George Sherman Union.', true],
     ['bu-beach-01', 'BU Beach', 'outdoor', 42.35117, -71.10557, 180, 0, '06:00', '22:00', ['picnic', 'outdoors', 'river'], 'Grassy campus lawn overlooking the Charles.', true],
     ['bu-grill-01', 'University Grill & Pizza', 'restaurant', 42.34960, -71.10558, 130, 10, '11:00', '22:00', ['pizza', 'subs', 'takeout'], 'Slices and hot subs for a quick campus lunch.', true, true],
     ['bu-starbucks-01', 'Starbucks (Warren Towers)', 'study', 42.34908, -71.10358, 290, 7.5, '07:00', '20:00', ['coffee', 'study', 'espresso'], 'Campus coffeehouse at Warren Towers on Commonwealth Ave with espresso bar and study seating.', true],
