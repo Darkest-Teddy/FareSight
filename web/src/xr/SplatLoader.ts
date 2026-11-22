@@ -29,7 +29,9 @@ interface Placement {
 }
 
 const softGaussianBudget = 160_000;
-const hardGaussianLimit = 450_000;
+// An Atlas draft room that could not be decimated arrives at 524,288 Gaussians. This leaves room for it plus
+// a few dishes. Rooms converted with splat-transform stay near 100,000, which is what a Quest wants.
+const hardGaussianLimit = 800_000;
 const materializeSeconds = 2.2;
 const starkModifier = { glsl: `
 ${jarvisPalette}

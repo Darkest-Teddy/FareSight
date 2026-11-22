@@ -160,6 +160,8 @@ export interface GenerationJob {
   id: string;
   kind: 'room' | 'dish';
   place_id: string;
+  /** Set when the photos came from a capture in object storage instead of uploads on the server. */
+  capture_id?: string | null;
   dish_id?: string | null;
   dish_name?: string | null;
   status: JobStage;
