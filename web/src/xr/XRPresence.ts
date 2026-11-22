@@ -23,9 +23,24 @@ const inspectionOffset = new pc.Vec3(0, 0.035, -0.135);
 const reachSeconds = 0.22;
 interface HandModel {
   root: pc.Entity;
+  visual: HandFallback | HandRig;
+}
+
+interface HandFallback {
+  kind: 'fallback';
+  root: pc.Entity;
   joints: Map<pc.XrJoint, pc.Entity>;
   bones: { from: pc.XrJoint; to: pc.XrJoint; entity: pc.Entity }[];
-  tips: pc.StandardMaterial;
+  surface: pc.StandardMaterial;
+}
+
+interface HandRig {
+  kind: 'rig';
+  root: pc.Entity;
+  bones: pc.GraphNode[];
+  wristBindPosition: pc.Vec3;
+  inverseWristBindRotation: pc.Quat;
+  surface: pc.StandardMaterial;
 }
 
 interface Pointer {
@@ -127,6 +142,11 @@ function signalMaterial(hex: string, intensity: number): pc.StandardMaterial {
   return surface;
 }
 
+function validJointPose(position: pc.Vec3, rotation: pc.Quat): boolean {
+  const length = rotation.lengthSq();
+  return Number.isFinite(position.lengthSq()) && Number.isFinite(length) && length > 0;
+}
+
 export class XRPresence {
   private pointers = new Map<pc.XrInputSource, Pointer>();
   private trackedHands = new Set<pc.XrInputSource['handedness']>();
@@ -186,7 +206,7 @@ export class XRPresence {
       root, hover: null, contact: null, lastPoke: -Infinity, lastPokeTarget: null, flashUntil: -Infinity,
       selectConsumed: false, selectTarget: null, snapHeld: false, recenterHeld: false, voiceHeld: false,
     };
-    if (source.hand) pointer.hand = this.makeHand(root, source.hand);
+    if (source.hand) pointer.hand = this.makeHand(root, source.hand, source);
     if (source.targetRayMode === pc.XRTARGETRAY_POINTER) {
       pointer.beam = this.primitive(root, 'Pointer ray', 'cylinder', this.idle);
       pointer.dot = this.primitive(root, 'Pointer hit dot', 'sphere', this.hovered);
@@ -211,28 +231,66 @@ export class XRPresence {
     return entity;
   }
 
-  private makeHand(parent: pc.Entity, hand: pc.XrHand): HandModel {
+  private makeHand(parent: pc.Entity, hand: pc.XrHand, source: pc.XrInputSource): HandModel {
     const root = child(parent, 'Tracked hand');
     root.enabled = false;
+    const fallback = child(root, 'Tracked hand fallback');
     const tips = material(brass, 1);
     tips.emissiveIntensity = 0.18;
     const joints = new Map<pc.XrJoint, pc.Entity>();
     for (const joint of hand.joints) {
       const accented = joint.id === 'index-finger-tip' || joint.id === 'thumb-tip';
-      joints.set(joint, this.primitive(root, joint.id, 'sphere', accented ? tips : this.glove));
+      joints.set(joint, this.primitive(fallback, joint.id, 'sphere', accented ? tips : this.glove));
     }
-    const bones: HandModel['bones'] = [];
+    const bones: HandFallback['bones'] = [];
     for (const finger of hand.fingers) {
       let previous = hand.wrist;
       for (const joint of finger.joints) {
         if (previous) {
-          const entity = this.primitive(root, `${previous.id} to ${joint.id}`, 'cylinder', this.glove);
+          const entity = this.primitive(fallback, `${previous.id} to ${joint.id}`, 'cylinder', this.glove);
           bones.push({ from: previous, to: joint, entity });
         }
         previous = joint;
       }
     }
-    return { root, joints, bones, tips };
+    const model: HandModel = { root, visual: { kind: 'fallback', root: fallback, joints, bones, surface: tips } };
+    const { handedness } = source;
+    if (handedness !== pc.XRHAND_LEFT && handedness !== pc.XRHAND_RIGHT) return model;
+    void this.models.load(`${assetBase}vr-hand-${handedness}.glb`).then((resource) => {
+      if (!resource || this.pointers.get(source)?.hand !== model) return;
+      const rig = resource.instantiateRenderEntity();
+      const instances = (rig.findComponents('render') as pc.RenderComponent[]).flatMap(({ meshInstances }) => meshInstances);
+      const rigBones = [...new Set(instances.flatMap(({ skinInstance }) => skinInstance?.bones ?? []))];
+      const wrist = rigBones.find(({ name }) => name === 'wrist');
+      if (!wrist) {
+        rig.destroy();
+        return;
+      }
+
+      const surface = material('#c2b5a2');
+      surface.useMetalness = true;
+      surface.glossInvert = true;
+      surface.gloss = 0.47;
+      surface.clearCoat = 0.16;
+      surface.clearCoatGloss = 0.53;
+      surface.emissive.fromString('#cc874e');
+      surface.emissiveIntensity = 0.06;
+      surface.update();
+      for (const instance of instances) {
+        instance.material = surface;
+        instance.cull = false;
+      }
+      model.visual = {
+        kind: 'rig', root: rig, bones: rigBones.filter((bone) => bone !== wrist), surface,
+        wristBindPosition: wrist.getPosition().clone(),
+        inverseWristBindRotation: wrist.getRotation().clone().invert(),
+      };
+      rig.enabled = false;
+      root.addChild(rig);
+      fallback.destroy();
+      tips.destroy();
+    });
+    return model;
   }
 
   private makeController(source: pc.XrInputSource): pc.Entity {
@@ -266,7 +324,7 @@ export class XRPresence {
     this.releaseGrab(source, false);
     this.releaseHandheld(source, false);
     pointer.root.destroy();
-    pointer.hand?.tips.destroy();
+    pointer.hand?.visual.surface.destroy();
     pointer.controller?.destroy();
     this.pointers.delete(source);
   }
@@ -1029,16 +1087,41 @@ export class XRPresence {
   }
 
   private updateHand(model: HandModel, hand: pc.XrHand): void {
+    const { visual } = model;
     const thumb = hand.getJointById('thumb-tip');
     const index = hand.getJointById('index-finger-tip');
     const pinch = thumb && index ? thumb.getPosition().distance(index.getPosition()) : pinchRange;
-    model.tips.emissiveIntensity = 0.18 + 1.25 * clamp(1 - pinch / pinchRange, 0, 1);
-    for (const [joint, entity] of model.joints) {
+    const closure = Number.isFinite(pinch) ? clamp(1 - pinch / pinchRange, 0, 1) : 0;
+    if (visual.kind === 'rig') {
+      const wrist = hand.wrist;
+      if (!wrist) { visual.root.enabled = false; return; }
+      const wristPosition = wrist.getPosition();
+      const wristRotation = wrist.getRotation();
+      visual.root.enabled = validJointPose(wristPosition, wristRotation);
+      if (!visual.root.enabled) return;
+
+      // The GLB joints are siblings. Anchor the last valid local pose of any missing joint to the wrist.
+      this.rotation.mul2(wristRotation, visual.inverseWristBindRotation);
+      this.rotation.transformVector(visual.wristBindPosition, this.middle);
+      visual.root.setPositionAndRotation(this.middle.mulScalar(-1).add(wristPosition), this.rotation);
+      for (const bone of visual.bones) {
+        const joint = hand.getJointById(bone.name);
+        if (!joint) continue;
+        const position = joint.getPosition();
+        const rotation = joint.getRotation();
+        if (validJointPose(position, rotation)) bone.setPositionAndRotation(position, rotation);
+      }
+      visual.surface.emissiveIntensity = 0.06 + 0.30 * closure;
+      return;
+    }
+
+    visual.surface.emissiveIntensity = 0.18 + 1.25 * closure;
+    for (const [joint, entity] of visual.joints) {
       entity.setPosition(joint.getPosition());
       const diameter = 2 * joint.radius;
       entity.setLocalScale(diameter, diameter, diameter);
     }
-    for (const { from, to, entity } of model.bones) {
+    for (const { from, to, entity } of visual.bones) {
       this.segment(entity, from.getPosition(), to.getPosition(), Math.min(from.radius, to.radius) * 1.45);
     }
   }
