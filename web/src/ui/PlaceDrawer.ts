@@ -115,7 +115,7 @@ function publishedReviews(place: Place): { nodes: HTMLElement[]; hint: string } 
   const details = place.details;
   const nodes: HTMLElement[] = [];
   if (!details) return { nodes, hint: '' };
-  if (details.ratings.length || details.review_highlights.length) {
+  if (details.ratings.length || details.review_highlights.length || details.review_excerpts?.length) {
     const reviews = block('What reviewers say');
     if (details.ratings.length) {
       reviews.append(breakdown(details.ratings.map(({ source, rating, count }) =>
@@ -126,6 +126,15 @@ function publishedReviews(place: Place): { nodes: HTMLElement[]; hint: string } 
       for (const text of details.review_highlights) items.append(element('li', '', text));
       reviews.append(items);
     }
+    if (details.review_excerpts?.length) {
+      for (const excerpt of details.review_excerpts.slice(0, 3)) {
+        reviews.append(renderBriefingReview({
+          author: excerpt.author, source: excerpt.source, text: excerpt.text,
+          rating: excerpt.rating ?? undefined, date_label: excerpt.date_label ?? undefined,
+          url: excerpt.url ?? undefined,
+        }));
+      }
+    }
     reviews.append(element('p', 'muted', `Summarized from public reviews · checked ${details.checked_on}`));
     nodes.push(reviews);
   }
@@ -135,7 +144,11 @@ function publishedReviews(place: Place): { nodes: HTMLElement[]; hint: string } 
     for (const award of details.awards) {
       const item = element('li');
       const title = [award.title, award.year].filter(Boolean).join(', ');
-      item.append(award.url ? link(title, award.url) : element('span', '', title), element('small', '', award.org));
+      const scope = award.scope ? `${award.scope[0].toUpperCase()}${award.scope.slice(1)}` : '';
+      item.append(
+        award.url ? link(title, award.url) : element('span', '', title),
+        element('small', '', [scope, award.org].filter(Boolean).join(' · ')),
+      );
       items.append(item);
     }
     awards.append(items);

@@ -277,9 +277,17 @@ export function buildPlaceBriefingCard(details: PlaceDecision, web?: LiveReviews
   ] });
   if (web?.live && web.reviews?.length) {
     sections.push({ kind: 'reviews', heading: 'Live web reviews', items: web.reviews.map(liveBriefingReview) });
+  } else if (facts?.review_excerpts?.length) {
+    sections.push({ kind: 'reviews', heading: 'Public reviews', items: facts.review_excerpts.map((excerpt) => ({
+      author: excerpt.author, source: excerpt.source, text: excerpt.text,
+      rating: excerpt.rating ?? undefined, date_label: excerpt.date_label ?? undefined,
+      url: excerpt.url ?? undefined,
+    })) });
   }
   if (facts?.awards.length) sections.push({ kind: 'list', heading: 'Recognition', items: facts.awards.map((award) => ({
     label: [award.title, award.year].filter(Boolean).join(', '), detail: award.org,
+    badge: award.scope ? `${award.scope[0].toUpperCase()}${award.scope.slice(1)}` : undefined,
+    url: award.url ?? undefined,
   })) });
   sections.push(details.reviews.length ? { kind: 'reviews', heading: 'Diner Reviews', items: details.reviews.map((review) => ({
     author: review.author_label, text: review.text, sample: review.sample,
