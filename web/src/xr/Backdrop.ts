@@ -1,23 +1,27 @@
 import * as pc from 'playcanvas';
 import { child } from './sceneSupport';
 
+/** The horizon tone. The page background in tokens.css (--canvas) uses the same value. */
+export const paperHorizon = '#F5F0E6';
+
 /**
- * Sky gradient from zenith (0) through the horizon (0.5) to straight down (1). The lower half
- * brightens towards the nadir, so the models read as lit from above without needing a floor.
+ * Sky gradient from zenith (0) through the horizon (0.5) to straight down (1). A warm paper
+ * cove: nearly flat above, deepening a little towards the nadir. The darker floor grounds the
+ * models and keeps the brightest part of the view out of the lower field. The whole range is
+ * narrow on purpose, since a stronger step reads as a grey floor.
  */
 const sky: [number, string][] = [
-  [0, '#05070c'], [0.30, '#0a101b'], [0.44, '#162238'], [0.5, '#2c3550'],
-  [0.56, '#1a2234'], [0.68, '#151b29'], [0.84, '#2a3144'], [1, '#444b62'],
+  [0, '#FAF7F0'], [0.38, '#F8F3EA'], [0.5, paperHorizon], [0.64, '#F0E9DD'], [0.82, '#EAE2D3'], [1, '#E6DDCC'],
 ];
 const skyRadius = 32;
 
 /**
- * The backdrop of the flat-screen view: a dusk skybox. It is one unlit dome that stays centred
+ * The backdrop of the flat-screen view: a paper-toned skybox. It is one unlit dome that stays centred
  * on the viewer, so it never intersects a model and shows no parallax.
  */
 export class Backdrop {
   readonly root: pc.Entity;
-  readonly clearColor = new pc.Color().fromString(sky[0][1]);
+  readonly clearColor = new pc.Color().fromString(paperHorizon);
   private texture: pc.Texture;
   private material = new pc.StandardMaterial();
 

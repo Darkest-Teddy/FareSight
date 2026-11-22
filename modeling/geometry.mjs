@@ -41,11 +41,15 @@ export class Surface {
   constructor(material, name, translation) {
     Object.assign(this, { material, name, translation });
   }
-  vertex(p, n, color, uv) {
+  /**
+   * `alpha` is this vertex's opacity, 0 to 1. It only shows on a material made with `blend`, and
+   * because it is per vertex a fade across a face interpolates instead of stepping.
+   */
+  vertex(p, n, color, uv, alpha = 1) {
     const i = this.positions.length / 3;
     this.positions.push(...p);
     this.normals.push(...n);
-    this.colors.push(...vertexColor(color), 255);
+    this.colors.push(...vertexColor(color), Math.round(Math.max(0, Math.min(1, alpha)) * 255));
     if (uv) this.uvs.push(...uv);
     return i;
   }
@@ -64,6 +68,8 @@ export class Model {
       emission,
       double = false,
       color = '#ffffff',
+      // Alpha-blended even at full base alpha, for surfaces whose opacity lives in vertex colour.
+      blend = false,
     } = {},
   ) {
     const mat = {
@@ -74,7 +80,7 @@ export class Model {
         roughnessFactor: rough,
       },
     };
-    if (alpha < 1) mat.alphaMode = 'BLEND';
+    if (alpha < 1 || blend) mat.alphaMode = 'BLEND';
     if (double) mat.doubleSided = true;
     if (emission) mat.emissiveFactor = rgb(emission).map(linear);
     return this.materials.push(mat) - 1;

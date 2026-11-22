@@ -12,6 +12,40 @@ export function button(label: string, action: () => void, className = '') {
   return node;
 }
 
+// Static line icons on a 24 px grid. Strokes take the text colour, so they follow every button state.
+const icons = {
+  close: '<path d="M6 6l12 12M18 6 6 18"/>',
+  more: '<circle cx="5" cy="12" r="1.6" class="fill"/><circle cx="12" cy="12" r="1.6" class="fill"/><circle cx="19" cy="12" r="1.6" class="fill"/>',
+  chevron: '<path d="m6 9 6 6 6-6"/>',
+  list: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.3" class="fill"/><circle cx="4.5" cy="12" r="1.3" class="fill"/><circle cx="4.5" cy="18" r="1.3" class="fill"/>',
+  sliders: '<path d="M4 8h8M18 8h2M4 16h2M12 16h8"/><circle cx="15" cy="8" r="2.4"/><circle cx="9" cy="16" r="2.4"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>',
+  alert: '<path d="M12 7v6.5M12 17v.2"/>',
+  map: '<path d="m9 4-6 2.2v13.6L9 17.6l6 2.2 6-2.2V4l-6 2.2zM9 4v13.6M15 6.2v13.6"/>',
+  venue: '<path d="M4.5 10.5V20h15v-9.5M3 9l2-5h14l2 5a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0zM10 20v-5h4v5"/>',
+  upload: '<path d="M12 16V4.5M7.5 9 12 4.5 16.5 9M4.5 19.5h15"/>',
+  pair: '<path d="M10 14a4 4 0 0 0 5.7 0l3.2-3.2a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3.2 3.2a4 4 0 0 0 5.7 5.7l1-1"/>',
+} as const;
+export type IconName = keyof typeof icons;
+
+export function icon(name: IconName) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('icon');
+  svg.innerHTML = icons[name];
+  return svg;
+}
+
+/** A button that shows only an icon. The label is its accessible name and tooltip. */
+export function iconButton(name: IconName, label: string, action: () => void, className = '') {
+  const node = button('', action, `icon-button ${className}`.trim());
+  node.append(icon(name));
+  node.setAttribute('aria-label', label);
+  node.title = label;
+  return node;
+}
+
 export function previewBadge() {
   const badge = element('span', 'preview-badge', '3D');
   badge.setAttribute('aria-hidden', 'true');
@@ -51,6 +85,30 @@ export function section(title: string) {
   node.append(element('h3', '', title));
   return node;
 }
+
+/** A titled group inside a fold or section. */
+export function block(title: string) {
+  const node = element('div', 'fold-block');
+  node.append(element('h4', '', title));
+  return node;
+}
+
+/**
+ * A collapsible section. `hint` is a one-line readout shown beside the title, so the
+ * collapsed row still answers the common question. The node keeps its open state when
+ * its body is re-rendered.
+ */
+export function fold(title: string) {
+  const node = element('details', 'fold');
+  const summary = element('summary');
+  const name = element('span', 'fold-title', title);
+  const hint = element('span', 'fold-hint');
+  summary.append(name, hint, icon('chevron'));
+  const body = element('div', 'fold-body');
+  node.append(summary, body);
+  return { node, summary, title: name, hint, body };
+}
+export type Fold = ReturnType<typeof fold>;
 
 export function errorText(error: unknown) {
   return (error instanceof Error ? error.message : String(error)).replaceAll('—', '–');

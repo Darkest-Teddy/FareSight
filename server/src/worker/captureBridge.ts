@@ -31,6 +31,7 @@ export function startCaptureBridge(store: Store, config: Config, captures: Captu
   const { pool, storage, settings } = captures;
   let draining: Promise<void> | undefined;
   let stopped = false;
+  let reconcileDue = false;
 
   async function claim() {
     const { rows } = await pool.query<CaptureJobRow>(`
@@ -102,6 +103,11 @@ export function startCaptureBridge(store: Store, config: Config, captures: Captu
   function drain() {
     if (draining || stopped) return;
     draining = (async () => {
+      // Runs inside the drain, so it never looks at a job that is being handed over at that moment.
+      if (reconcileDue) {
+        reconcileDue = false;
+        await reconcile();
+      }
       for (let job = await claim(); job && !stopped; job = await claim()) {
         await handOver(job).catch((error) => giveUp(job, error));
       }
@@ -110,6 +116,26 @@ export function startCaptureBridge(store: Store, config: Config, captures: Captu
 
   async function heartbeat() {
     await pool.query(`update jobs set heartbeat_at = now() where worker_id = $1 and status in ${active}`, [settings.workerId]);
+    reconcileDue = true;
+    drain();
+  }
+
+  /**
+   * Brings Postgres back in line with the pipeline for the jobs this worker holds. The heartbeat keeps
+   * those jobs away from the reaper, so anything that went wrong on this side has to be repaired here.
+   */
+  async function reconcile() {
+    const { rows } = await pool.query<CaptureJobRow>(`
+      select * from jobs where worker_id = $1
+        and (status in ${active} or (status = 'needs_review' and updated_at > now() - interval '1 hour'))
+    `, [settings.workerId]);
+    for (const job of rows) {
+      const record = store.get('jobs', job.id);
+      // The pipeline's word wins, which repairs a progress update that never reached Postgres.
+      if (record) await syncJob(captures, record);
+      // Claimed but never handed over, because the process stopped midway.
+      else if (job.status === 'claimed') await giveUp(job, new Error('The worker restarted before the photos were fetched'));
+    }
   }
 
   /** Jobs whose worker went quiet go back to the queue, or fail once they are out of attempts. */

@@ -1,22 +1,25 @@
 import type { VoiceState, VoiceTranscript } from '../voice/RealtimeVoice';
-import { button, element } from './dom';
+import { button, element, icon } from './dom';
 
 export interface LiveVoiceDockActions {
   toggle(): void;
   stop(): void;
   toggleMute(): void;
   sendText(text: string): boolean;
+  /** Called when the transcript dock opens, so the shell can make room for it. */
+  opened?(): void;
 }
 
 const stateLabels: Record<VoiceState, string> = {
-  idle: 'GPT Live', connecting: 'Connecting…', listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking', error: 'GPT Live',
+  idle: 'GPT Live', connecting: 'Connecting…', listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking', error: 'Retry GPT Live',
 };
+const live = (state: VoiceState) => state === 'listening' || state === 'thinking' || state === 'speaking';
 
 export class LiveVoiceDock {
   readonly trigger: HTMLButtonElement;
   readonly root = element('section', 'voice-dock panel');
-  private readonly triggerDot = element('span', 'voice-dot');
-  private readonly triggerLabel = element('span', '', 'GPT Live');
+  private readonly triggerGlyph = element('span', 'voice-glyph');
+  private readonly triggerLabel = element('span', 'voice-label', 'GPT Live');
   private readonly statusBadge = element('span', 'voice-state', 'Ready');
   private readonly modelMeta = element('span', 'voice-model', 'gpt-live-1.1');
   private readonly errorNote = element('p', 'message error');
@@ -36,8 +39,13 @@ export class LiveVoiceDock {
     this.trigger.setAttribute('aria-expanded', 'false');
     this.trigger.setAttribute('aria-controls', 'faresight-voice-dock');
     this.trigger.setAttribute('aria-pressed', 'false');
-    this.triggerDot.setAttribute('aria-hidden', 'true');
-    this.trigger.append(this.triggerDot, this.triggerLabel);
+    this.trigger.dataset.state = 'idle';
+    // One glyph per state: a microphone, a spinner while connecting, level bars while live, a mark on error.
+    const bars = element('span', 'voice-bars');
+    bars.append(element('i'), element('i'), element('i'));
+    this.triggerGlyph.setAttribute('aria-hidden', 'true');
+    this.triggerGlyph.append(icon('mic'), element('span', 'voice-spinner'), bars, icon('alert'));
+    this.trigger.append(this.triggerLabel, this.triggerGlyph);
 
     this.root.id = 'faresight-voice-dock';
     this.root.setAttribute('aria-label', 'FareSight Live Voice Assistant');
@@ -46,7 +54,8 @@ export class LiveVoiceDock {
     const head = element('header', 'voice-head');
     const titleWrap = element('div', 'voice-title-wrap');
     titleWrap.append(this.statusBadge, this.modelMeta);
-    this.closeBtn = button('Hide', () => this.setOpen(false), 'quiet');
+    this.closeBtn = button('Hide', () => { this.setOpen(false); this.trigger.focus(); }, 'quiet');
+    this.closeBtn.setAttribute('aria-label', 'Hide transcript');
     head.append(titleWrap, this.closeBtn);
     this.statusBadge.setAttribute('role', 'status');
     this.errorNote.setAttribute('role', 'alert');
@@ -91,13 +100,29 @@ export class LiveVoiceDock {
   }
 
   private handleTriggerClick(): void {
+    // While a session runs with the transcript collapsed, the button brings the transcript back.
+    if (this.root.hidden && (live(this.state) || this.state === 'connecting')) {
+      this.setOpen(true);
+      return;
+    }
     this.setOpen(this.state === 'idle' || this.state === 'error');
     this.actions.toggle();
   }
 
+  get isOpen(): boolean { return !this.root.hidden; }
+
   setOpen(open: boolean): void {
+    const changed = this.root.hidden === open;
     this.root.hidden = !open;
     this.trigger.setAttribute('aria-expanded', String(open));
+    this.describeTrigger();
+    if (open && changed) this.actions.opened?.();
+  }
+
+  private describeTrigger(): void {
+    const started = live(this.state) || this.state === 'connecting';
+    this.trigger.title = this.state === 'error' ? 'Retry GPT Live'
+      : !started ? 'Talk to GPT Live' : this.root.hidden ? 'Show transcript' : 'End GPT Live session';
   }
 
   setModel(model: string): void {
@@ -108,19 +133,20 @@ export class LiveVoiceDock {
     this.state = state;
     this.root.dataset.state = state;
     this.trigger.dataset.state = state;
-    const live = state === 'listening' || state === 'thinking' || state === 'speaking';
-    const started = live || state === 'connecting';
+    const active = live(state);
+    const started = active || state === 'connecting';
     this.connectBtn.hidden = started;
     this.connectBtn.textContent = state === 'error' ? 'Retry GPT Live' : 'Start GPT Live';
-    this.muteBtn.hidden = !live;
+    this.muteBtn.hidden = !active;
     this.endBtn.hidden = !started;
     this.endBtn.textContent = state === 'connecting' ? 'Cancel' : 'End session';
-    this.form.hidden = !live;
+    this.form.hidden = !active;
     this.trigger.setAttribute('aria-pressed', String(started));
     this.triggerLabel.textContent = stateLabels[state];
-    this.statusBadge.textContent = state === 'error' ? 'Connection error' : stateLabels[state];
+    this.statusBadge.textContent = state === 'error' ? 'Connection error' : state === 'idle' ? 'Ready' : stateLabels[state];
     this.errorNote.textContent = detail ?? '';
     this.errorNote.hidden = !detail;
+    this.describeTrigger();
     if (state === 'error') {
       this.setOpen(true);
     } else if (state === 'connecting') {

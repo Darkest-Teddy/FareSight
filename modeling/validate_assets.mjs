@@ -211,8 +211,9 @@ function parseModel(name) {
     : name.startsWith('boston')
       // Floor lowered from 15000: the sculpture now uses flat track plates instead of swept
       // tubes and has no deck, street grid or river, so the honest triangle count is far lower.
-      // The ceiling is the one that matters for performance and is unchanged.
-      ? [4000, 55000, 12]
+      // The ceiling is the one that matters for performance and is unchanged. Thirteen primitives:
+      // the twelve opaque surfaces and the translucent ground plate, which has to be its own.
+      ? [4000, 55000, 13]
       : uiModels.includes(name)
         ? [1, 5000, 20]
         : [1, 5000, 8];
@@ -338,8 +339,39 @@ for (const line of paths) {
   void ys;
   offsets.set(line.color, offset + spans * 16 + 8);
 }
-for (const [color, count] of offsets)
-  assert.equal(count, map.meshes.get('Lacquer ' + color).positions.length / 3);
+// After the plates, each line's surface holds its casing: per line, two flanges and two outer
+// walls along every span, wrapped round both ends. It sits beside the plate and never above it.
+for (const [color, count] of offsets) {
+  const positions = map.meshes.get('Lacquer ' + color).positions;
+  const sameColor = paths.filter((l) => l.color === color);
+  const casing = sameColor.reduce((n, l) => n + (l.points.length - 1) * 16 + 32, 0);
+  assert.equal(positions.length / 3, count + casing, color + ' casing vertices');
+  const level = sameColor[0].points[0][1];
+  assert.ok(sameColor.every((l) => l.points.every((p) => p[1] === level)));
+  for (let i = count * 3; i < positions.length; i += 3) {
+    const y = positions[i + 1];
+    assert.ok(
+      Math.abs(y - (level - 0.0014)) < 1e-6 || Math.abs(y - (level + 0.0014 - 0.0004)) < 1e-6,
+      color + ' casing height ' + y,
+    );
+  }
+}
+// The ground is the one translucent surface: a sheet under the city whose colour and opacity are
+// in its vertex colours, with the contact shadows a hair above it. Everything else is opaque, and
+// neither the city nor the landmarks light themselves.
+{
+  const plate = map.meshes.get('Ground plate');
+  assert.ok(plate, 'ground plate');
+  assert.equal(plate.mat.alphaMode, 'BLEND');
+  assert.ok(!plate.mat.emissiveFactor);
+  const heights = new Set();
+  for (let i = 1; i < plate.positions.length; i += 3) heights.add(plate.positions[i].toFixed(5));
+  assert.deepEqual([...heights].sort(), ['0.03940', '0.03960'], 'plate and shadow levels');
+  for (const [name, { mat }] of map.meshes) {
+    if (name !== 'Ground plate') assert.equal(mat.alphaMode ?? 'OPAQUE', 'OPAQUE', name);
+    if (/^(City blocks|Landmark)/.test(name)) assert.ok(!mat.emissiveFactor, name + ' is self-lit');
+  }
+}
 function topAt(meshes, x, z) {
   let height = -Infinity;
   for (const { positions: p, indices, offset } of meshes.values()) {

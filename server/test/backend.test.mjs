@@ -315,7 +315,7 @@ test('upload, intake, failed download with restart and retry, room and dish publ
   const asset = await server.request(`/api/assets/${reviewed.asset_id}`);
   assert.equal(asset.provenance, 'demo_splat');
   assert(asset.gaussian_count > 0);
-  assert.equal(asset.metadata.target_gaussians, 100000);
+  assert.equal(asset.metadata.target_gaussians, 400000);
   assert(asset.metadata.splat_transform_command.includes('.sog'));
   assert.equal((await fetch(server.origin() + asset.url)).status, 200);
   const published = await server.request(`/api/assets/${asset.id}/publish`, {

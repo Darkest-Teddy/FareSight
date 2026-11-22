@@ -6,6 +6,8 @@ import { promisify } from 'node:util';
 import { createGunzip } from 'node:zlib';
 import type { Asset, Vector3 } from '@faresight/shared';
 import type { Config } from '../config.ts';
+import { decimatePly, decimateSpz } from './splatDecimate.ts';
+import type { PlyLayout } from './splatDecimate.ts';
 import { upgradeSpz } from './spzUpgrade.ts';
 
 const run = promisify(execFile);
@@ -104,8 +106,12 @@ export function inspectSplat(buffer: Buffer, centerDish = false) {
       max[axis] -= midpoint;
     }
   }
-  return { count, bounds: { min, max }, width };
+  const layout: PlyLayout = { offset, stride, count, little: format === 'binary_little_endian', properties };
+  return { count, bounds: { min, max }, width, layout };
 }
+
+/** No published splat has more Gaussians than this. Rooms are cut to it; dishes are cut much lower. */
+export const maxGaussians = 400_000;
 
 let cli: Promise<string[] | undefined> | undefined;
 function splatCli(): Promise<string[] | undefined> {
@@ -129,7 +135,7 @@ export async function convertSplat(config: Config, jobId: string, kind: 'room' |
   const limited = resolve(config.outputs, `${jobId}-decimated.ply`);
   const sog = resolve(config.outputs, `${jobId}.sog`);
   const temporary = resolve(config.outputs, `${jobId}.part.sog`);
-  let geometry: { count: number; bounds?: NonNullable<Asset['metadata']>['bounds']; width?: number };
+  let geometry: { count: number; bounds?: NonNullable<Asset['metadata']>['bounds']; width?: number; layout?: PlyLayout };
   if (format === 'spz') {
     geometry = { count: await readSpzCount(original) };
   } else {
@@ -138,7 +144,7 @@ export async function convertSplat(config: Config, jobId: string, kind: 'room' |
     await writeFile(`${normalized}.part`, payload);
     await rename(`${normalized}.part`, normalized);
   }
-  const target = kind === 'room' ? 100_000 : 60_000;
+  const target = kind === 'room' ? maxGaussians : 60_000;
   const command = await splatCli();
   const decimate = geometry.count > target;
   // SplatTransform requires .ply output when --decimate is the final action.
@@ -175,12 +181,25 @@ export async function convertSplat(config: Config, jobId: string, kind: 'room' |
   }
   if (format === 'spz') {
     // Served as is, so it has to be a version the viewer can read. Atlas still writes version 2.
-    const upgraded = upgradeSpz(await readFile(original));
-    if (upgraded) {
-      const viewable = resolve(config.outputs, `${jobId}.spz`);
-      await writeFile(`${viewable}.part`, upgraded);
-      await rename(`${viewable}.part`, viewable);
-      return { path: viewable, count: geometry.count, format, metadata };
+    // Without SplatTransform it is also cut down to the target here, or a full Atlas room is too heavy to render smoothly.
+    const reduced = decimateSpz(await readFile(original), target);
+    const source = reduced?.file ?? await readFile(original);
+    const viewable = upgradeSpz(source) ?? reduced?.file;
+    if (viewable) {
+      const path = resolve(config.outputs, `${jobId}.spz`);
+      await writeFile(`${path}.part`, viewable);
+      await rename(`${path}.part`, path);
+      if (reduced) metadata.conversion_status = 'spz_decimated';
+      return { path, count: reduced?.count ?? geometry.count, format, metadata };
+    }
+  }
+  if (geometry.layout) {
+    const reduced = decimatePly(await readFile(normalized), geometry.layout, target);
+    if (reduced) {
+      await writeFile(`${normalized}.part`, reduced.file);
+      await rename(`${normalized}.part`, normalized);
+      metadata.conversion_status = 'ply_decimated';
+      return { path: normalized, count: reduced.count, format, metadata };
     }
   }
   return { path: normalized, count: geometry.count, format, metadata };

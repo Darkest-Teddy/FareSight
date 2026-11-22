@@ -72,7 +72,7 @@ function frame(dt: number): number {
   }
 
   const interior = body.dataset.room === 'ready' ? ramp(eased, ROOM_START, 0.98) : 0;
-  veil.style.opacity = (interior * 0.38).toFixed(3);
+  veil.style.opacity = (interior * 0.5).toFixed(3);
   root.style.setProperty('--interior', interior.toFixed(3));
   meter.style.transform = `scaleX(${eased.toFixed(4)})`;
   const current = eased < 0.36 ? 'map' : eased < 0.82 ? 'station' : eased < 0.955 ? 'place' : 'inside';

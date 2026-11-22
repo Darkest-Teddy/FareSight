@@ -3,9 +3,12 @@ import { child, clamp } from './sceneSupport';
 
 export const jarvisPoints = { hero: 26_000, prop: 8_000, detail: 2_200 } as const;
 
+// The reveal draws a model in as a graphite stipple that resolves into colour, like a pencil
+// drawing being inked. The names keep their original "blue" and "ice" roles: the body tone of the
+// scan and its brighter glint. On the paper backdrop those are graphite and sunflower.
 export const jarvisPalette = `
-const vec3 jarvisBlue = vec3(0.117647, 0.745098, 1.0);
-const vec3 jarvisIce = vec3(0.784314, 0.968627, 1.0);
+const vec3 jarvisBlue = vec3(0.290, 0.318, 0.365);
+const vec3 jarvisIce = vec3(1.0, 0.788, 0.235);
 `;
 
 export const jarvisWaves = `
@@ -19,14 +22,13 @@ float jarvisGrowth(float offset) { return smoothstep(-0.06, 0.24, offset); }
 
 vec3 jarvisLitBlue(vec3 original) {
     float lum = clamp(dot(original, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
-    return mix(vec3(0.06, 0.32, 0.56), jarvisBlue, lum);
+    return mix(vec3(0.42, 0.45, 0.50), vec3(0.93, 0.92, 0.89), lum);
 }
 
 vec3 jarvisMaterialColor(vec3 blue, vec3 original, float offset) {
     float color = smoothstep(-0.05, 0.20, offset);
     float edge = 1.0 - smoothstep(0.005, 0.055, abs(offset - 0.035));
-    vec3 cyan = mix(jarvisBlue, jarvisIce, 0.35);
-    return mix(mix(blue, original, color), cyan, 0.20 * edge);
+    return mix(mix(blue, original, color), jarvisIce, 0.34 * edge);
 }
 `;
 
@@ -71,10 +73,10 @@ const pointShader = {
         gl_Position.z -= clamp(depthBias, 0.0, max(0.0, gl_Position.z + gl_Position.w));
         float worldSize = uJarvisBounds.w * length(matrix_model[1].xyz);
         float scale = mix(0.55, 1.0, smoothstep(0.012, 0.27, worldSize));
-        gl_PointSize = mix(2.5, 12.0, grow) * scale;
+        gl_PointSize = mix(2.0, 9.0, grow) * scale;
         float seed = fract(sin(dot(aPosition, vec3(127.1, 311.7, 74.7))) * 43758.5453);
         float shimmer = 0.87 + 0.13 * sin(27.0 * uJarvisProgress + 6.283 * seed);
-        vJarvisAlpha = arrival * (1.0 - fuse) * mix(0.86, 0.66, grow) * shimmer;
+        vJarvisAlpha = arrival * (1.0 - fuse) * mix(0.62, 0.46, grow) * shimmer;
         vJarvisGlint = 0.20 * grow * shimmer + 0.20 * (1.0 - smoothstep(0.025, 0.095, wave.x));
     }
   `,
@@ -89,7 +91,7 @@ const pointShader = {
         float alpha = (0.80 * core + 0.20 * halo) * vJarvisAlpha;
         if (alpha < 0.008) discard;
         vec3 color = mix(jarvisBlue, jarvisIce, vJarvisGlint * core);
-        gl_FragColor = vec4(color * (0.66 + 0.34 * core), alpha);
+        gl_FragColor = vec4(color, alpha);
     }
   `,
 };
@@ -316,8 +318,8 @@ function cloneForScan(original: pc.StandardMaterial): pc.StandardMaterial {
       vec3 blue = jarvisLitBlue(originalColor);
       ${original.cull === pc.CULLFACE_BACK ? `
         if (!gl_FrontFacing) {
-          originalColor = mix(originalColor, vec3(0.04, 0.13, 0.22), 0.70);
-          blue = mix(blue, vec3(0.10, 0.32, 0.49), 0.55);
+          originalColor = mix(originalColor, vec3(0.62, 0.61, 0.58), 0.70);
+          blue = mix(blue, vec3(0.60, 0.61, 0.62), 0.55);
         }
       ` : ''}
       gl_FragColor.rgb = jarvisMaterialColor(blue, originalColor, jarvisWave.z);

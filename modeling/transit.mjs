@@ -14,9 +14,71 @@ import {
   mix,
   mul,
   add,
+  rgb,
+  cross,
 } from './geometry.mjs';
 import { cityBlocks } from './city.mjs';
-import { groundBlob } from './ground.mjs';
+import { groundPlate } from './ground.mjs';
+
+// ---------------------------------------------------------------------------------------------
+// Colour of the map sculpture. The model sits on a light, warm backdrop, so the hierarchy runs
+// the opposite way to a glowing map on black: the tracks are the darkest, most saturated things
+// on the plate, the city is pale, and nothing lights itself. Geometry is decided further down;
+// everything that sets a tone is collected here (and in ground.mjs and city.mjs for the plate,
+// the shadows and the blocks).
+// ---------------------------------------------------------------------------------------------
+
+/** Ink for the keylines round stations. The same near-black as the contact shadows. */
+const INK = '#22252B';
+
+/** The white of a station bead. */
+const BEAD_WHITE = '#f4f6fa';
+
+/**
+ * The casing: a darker keyline down both sides of every track plate, as on a printed transit map.
+ * It is what holds a line's edge against a pale ground, and orange needs it most -- true MBTA
+ * orange is only 2.2:1 against cream. Keyed by the line's official colour; a line that is not
+ * listed gets its own colour taken CASING_DARKNESS of the way to black.
+ */
+const CASING = {
+  '#00843D': '#005C2B',
+  '#DA291C': '#9E1B12',
+  '#ED8B00': '#9A5200',
+  '#003DA5': '#002A73',
+};
+const CASING_DARKNESS = 0.34;
+/** How far the casing shows beyond each side of the plate, and how far below its top it sits. */
+const casingOverhang = 0.0012;
+const casingDrop = 0.0004;
+
+/**
+ * How much of its own colour a track plate and a station centre give off unlit, as a share of the
+ * line colour. Small on purpose: it is not a glow, it only keeps the colour from going muddy on
+ * the side turned away from the key light.
+ */
+const LACQUER_GLOW = 0.2;
+const ENAMEL_GLOW = 0.2;
+/** Self-light on the white station bodies. Their ink rings share the material, so nearly none. */
+const MARKER_GLOW = '#0b0c0e';
+
+/** Width of the ink ring round an ordinary bead, and how far its outer edge dips. */
+const beadInkWidth = 0.0012;
+const beadInkDip = 0.0005;
+
+/**
+ * Landmarks, in the same slate as the city but a step darker and bluer than the blocks round
+ * them, so the Prudential still reads as the Prudential without lighting itself.
+ */
+const LANDMARK = {
+  post: '#73809A',
+  plinth: '#8A96AF',
+  shaft: '#98A5BE',
+  tower: '#8F9CB8',
+  glassTower: '#8499BE',
+  granite: '#AAB4C8',
+  graniteTip: '#BFC8D9',
+  crown: '#B9C6DC',
+};
 
 // Station coordinate snapshot from api-v3.mbta.com/stops, parent stations only.
 const stops = JSON.parse(readFileSync(new URL('stops.json', import.meta.url)));
@@ -194,6 +256,66 @@ function flatTrack(surface, points, halfWidth, thickness, color = '#ffffff') {
   loft(surface, rings, color);
 }
 
+/** A face wound so that it looks toward `toward`, whichever order its corners were given in. */
+function faceToward(surface, pts, toward, color) {
+  const n = norm(cross(sub(pts[1], pts[0]), sub(pts[2], pts[0])));
+  const facing = n[0] * toward[0] + n[1] * toward[1] + n[2] * toward[2];
+  face(surface, facing < 0 ? [...pts].reverse() : pts, color);
+}
+
+// The casing of a track plate: a flange a little wider than the plate and a hair below its top,
+// with a wall down its outer edge. From above it is a dark line either side of the colour; from
+// the side it is the plate's dark edge. Only the parts that can be seen are built -- the two
+// flanges and the two outer walls -- and the ends are wrapped so a terminus is cased as well.
+//
+// It goes in the plate's own surface and is coloured by vertex colour, so it costs no draw call
+// and whatever the runtime does to a line's material (dimming the lines not in focus) takes the
+// casing with it.
+function trackCasing(surface, points, halfWidth, thickness, tint) {
+  const half = thickness / 2;
+  const frames = points.map((point, i) => {
+    const tangent = norm(
+      sub(points[Math.min(i + 1, points.length - 1)], points[Math.max(i - 1, 0)]),
+    );
+    return { point, along: norm([tangent[0], 0, tangent[2]]), side: norm([-tangent[2], 0, tangent[0]]) };
+  });
+  // One extra frame beyond each end, so the casing runs round the terminus.
+  const beyond = (frame, sign) => ({
+    ...frame,
+    point: add(frame.point, mul(frame.along, sign * casingOverhang)),
+    end: true,
+  });
+  const run = [beyond(frames[0], -1), ...frames, beyond(frames.at(-1), 1)];
+  const rows = run.map(({ point, side }) => {
+    const top = point[1] + half - casingDrop;
+    const bottom = point[1] - half;
+    const at = (reach, y) => [point[0] + side[0] * reach, y, point[2] + side[2] * reach];
+    return [-1, 1].map((hand) => ({
+      inner: at(hand * halfWidth, top),
+      outer: at(hand * (halfWidth + casingOverhang), top),
+      foot: at(hand * (halfWidth + casingOverhang), bottom),
+    }));
+  });
+  const up = [0, 1, 0];
+  for (let i = 1; i < rows.length; i++) {
+    const a = rows[i - 1];
+    const b = rows[i];
+    const cap = run[i - 1].end || run[i].end;
+    // Past the end of the plate there is nothing in the middle, so the flange spans the full width.
+    if (cap) faceToward(surface, [a[0].outer, a[1].outer, b[1].outer, b[0].outer], up, tint);
+    for (const hand of [0, 1]) {
+      const outward = mul(run[i].side, hand ? 1 : -1);
+      if (!cap) faceToward(surface, [a[hand].inner, a[hand].outer, b[hand].outer, b[hand].inner], up, tint);
+      faceToward(surface, [a[hand].outer, a[hand].foot, b[hand].foot, b[hand].outer], outward, tint);
+    }
+  }
+  for (const [row, frame, sign] of [
+    [rows[0], run[0], -1],
+    [rows.at(-1), run.at(-1), 1],
+  ])
+    faceToward(surface, [row[0].outer, row[1].outer, row[1].foot, row[0].foot], mul(frame.along, sign), tint);
+}
+
 // Sculpture layout: the network floats in three shallow layers, with no deck beneath it.
 const slabTop = 0.04;
 /**
@@ -225,6 +347,31 @@ const mixHex = (a, b, t) =>
         .padStart(2, '0');
     })
     .join('');
+
+/**
+ * The vertex colour that turns a material of colour `base` into `target`. Vertex colour multiplies
+ * the material's base colour in linear light, so this is their ratio channel by channel; where the
+ * base has none of a channel the ratio is undefined and the average of the others stands in.
+ */
+function tintToward(base, target) {
+  const linear = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const encode = (l) => (l <= 0.0031308 ? l * 12.92 : 1.055 * l ** (1 / 2.4) - 0.055);
+  const from = rgb(base).map(linear);
+  const to = rgb(target).map(linear);
+  const ratios = from.map((v, i) => (v > 1e-4 ? Math.min(1, to[i] / v) : null));
+  const known = ratios.filter((r) => r !== null);
+  const fallback = known.reduce((n, r) => n + r, 0) / (known.length || 1);
+  return (
+    '#' +
+    ratios
+      .map((r) =>
+        Math.round(encode(r ?? fallback) * 255)
+          .toString(16)
+          .padStart(2, '0'),
+      )
+      .join('')
+  );
+}
 
 function drum(surface, [x, , z], bottom, top, radius, color, sides = 14) {
   loft(
@@ -266,19 +413,21 @@ const landmarkList = [
   ['Citgo Sign',            42.34875, -71.09540, 26, 10,   58, 'sign'],
 ];
 
-function landmarks(surface, accent) {
+function landmarks(surface, accent, ground) {
   for (const [, lat, lon, w, d, metres, form] of landmarkList) {
     const [x, , z] = project(lat, lon, 0);
     const base = slabTop;
     const h = metres * METRES * landmarkLift;
     const width = w * METRES * landmarkWidth;
     const depth = d * METRES * landmarkWidth;
+    // Every landmark stands in a contact shadow the shape of its own foot.
+    const foot = (fw, fd) => ground.footprintShadow(rect(x, 0, z, fw, fd).map((p) => [p[0], p[2]]));
 
     if (form === 'sign') {
       // A billboard on a slim gantry: unmistakable at Kenmore, and cheap.
       const postH = h * 0.45;
-      box(surface, x, base + postH / 2, z, 0.0012, postH, 0.0012, '#8690a3');
-      box(accent, x, base + postH + (h - postH) / 2, z, width, h - postH, 0.0015, '#d2dae6');
+      box(surface, x, base + postH / 2, z, 0.0012, postH, 0.0012, LANDMARK.post);
+      box(accent, x, base + postH + (h - postH) / 2, z, width, h - postH, 0.0015, LANDMARK.crown);
       continue;
     }
 
@@ -287,23 +436,25 @@ function landmarks(surface, accent) {
       loft(surface, [
         rect(x, base, z, width, depth),
         rect(x, base + h * 0.88, z, width * 0.62, depth * 0.62),
-      ], '#ccd3e0');
+      ], LANDMARK.granite);
       loft(surface, [
         rect(x, base + h * 0.88, z, width * 0.62, depth * 0.62),
         rect(x, base + h, z, width * 0.06, depth * 0.06),
-      ], '#dde3ed');
+      ], LANDMARK.graniteTip);
+      foot(width, depth);
       continue;
     }
 
     if (form === 'clock') {
       // Stepped base, shaft, then a lighter crown that reads as the clock stage.
       const shaft = h * 0.68;
-      box(surface, x, base + shaft * 0.18, z, width * 1.5, shaft * 0.36, depth * 1.5, '#9ea8bd');
+      box(surface, x, base + shaft * 0.18, z, width * 1.5, shaft * 0.36, depth * 1.5, LANDMARK.plinth);
       loft(surface, [
         rect(x, base + shaft * 0.36, z, width, depth),
         rect(x, base + shaft, z, width * 0.86, depth * 0.86),
-      ], '#b3bccd');
-      box(accent, x, base + shaft + (h - shaft) * 0.4, z, width * 0.74, (h - shaft) * 0.8, depth * 0.74, '#d2dae6');
+      ], LANDMARK.shaft);
+      box(accent, x, base + shaft + (h - shaft) * 0.4, z, width * 0.74, (h - shaft) * 0.8, depth * 0.74, LANDMARK.crown);
+      foot(width * 1.5, depth * 1.5);
       continue;
     }
 
@@ -311,29 +462,33 @@ function landmarks(surface, accent) {
       loft(surface, [
         rect(x, base, z, width, depth),
         rect(x, base + h, z, width * 0.78, depth * 0.78),
-      ], '#a8b3c7');
+      ], LANDMARK.tower);
+      foot(width, depth);
       continue;
     }
 
     // slab: a plain rectangular prism, the Hancock read.
-    box(surface, x, base + h / 2, z, width, h, depth, '#96a8c2');
+    box(surface, x, base + h / 2, z, width, h, depth, LANDMARK.glassTower);
+    foot(width, depth);
   }
 }
 
 /**
- * A station bead: a white disc with the line's colour inset on top.
+ * A station bead: a white disc with the line's colour inset on top and an ink ring round it.
  *
  * Both discs are raised clear of the plate so neither z-fights with it, and the white ring is
- * wider than the plate itself, which is what makes a stop legible at map scale.
+ * wider than the plate itself, which is what makes a stop legible at map scale. The bead overhangs
+ * the track, and white on a pale ground has no edge, so a thin ink collar runs round the rim: it
+ * dips slightly outward, which shows it from every side and hides the white wall beneath it.
  */
 const dotOuter = 0.0068;
 const dotInner = 0.0042;
 
-function stationDot(white, colour, [x, , z], deck, tint) {
+function stationDot(white, colour, [x, , z], deck) {
   const base = deck + 0.0004;
   const lip = base + 0.0014;
   // White body.
-  loft(white, [circle(x, base, z, dotOuter, 20), circle(x, lip, z, dotOuter, 20)], '#f4f6fa', {
+  loft(white, [circle(x, base, z, dotOuter, 20), circle(x, lip, z, dotOuter, 20)], BEAD_WHITE, {
     bottom: false,
     top: false,
   });
@@ -342,13 +497,21 @@ function stationDot(white, colour, [x, , z], deck, tint) {
   const inner = circle(x, lip, z, dotInner, 20);
   for (let j = 0; j < 20; j++) {
     const k = (j + 1) % 20;
-    face(white, [outer[j], inner[j], inner[k], outer[k]], '#f4f6fa');
+    face(white, [outer[j], inner[j], inner[k], outer[k]], BEAD_WHITE);
   }
-  // Coloured cap, a hair proud of the white so it never z-fights.
+  // Coloured cap, a hair proud of the white so it never z-fights. The enamel material carries the
+  // line colour, so the cap itself is left untinted.
   const cap = lip + 0.0003;
-  loft(colour, [circle(x, lip, z, dotInner, 20), circle(x, cap, z, dotInner, 20)], tint, {
+  loft(colour, [circle(x, lip, z, dotInner, 20), circle(x, cap, z, dotInner, 20)], '#ffffff', {
     bottom: false,
   });
+  // Ink collar.
+  const brim = circle(x, lip - 0.0002, z, dotOuter, 20);
+  const edge = circle(x, lip - 0.0002 - beadInkDip, z, dotOuter + beadInkWidth, 20);
+  for (let j = 0; j < 20; j++) {
+    const k = (j + 1) % 20;
+    face(white, [edge[j], brim[j], brim[k], edge[k]], INK);
+  }
 }
 
 // Center and half-width of the Charles, from the Allston bend to the harbor mouth.
@@ -382,51 +545,39 @@ export const riverBanks = [
 export function mapSculpture(dir) {
   const m = new Model();
   const batch = (name, options) => m.surface(m.material(name, options));
-  const city = batch('City blocks', {
-    rough: 0.74,
-    metal: 0.05,
-    // Slightly self-lit so the mass reads against the void instead of going to silhouette.
-    emission: '#131924',
-  });
-  const marker = batch('Station markers', {
-    rough: 0.35,
-    emission: '#6b7078',
-  });
-  const stone = batch('Landmark stone', {
-    rough: 0.68,
-    metal: 0.06,
-    // A touch of self-lit warmth so silhouettes separate from the void behind them.
-    emission: '#1a2130',
-  });
-  const glint = batch('Landmark glass', {
-    rough: 0.22,
-    metal: 0.35,
-    emission: '#1d2736',
-  });
-  landmarks(stone, glint);
+  // The plate is the one translucent surface. Its colour and opacity are in its vertex colours;
+  // the material is plain white and only says "blend me".
+  const plate = batch('Ground plate', { rough: 0.9, metal: 0, blend: true });
+  const city = batch('City blocks', { rough: 0.74, metal: 0.05 });
+  const marker = batch('Station markers', { rough: 0.55, emission: MARKER_GLOW });
+  const stone = batch('Landmark stone', { rough: 0.68, metal: 0.06 });
+  const glint = batch('Landmark glass', { rough: 0.22, metal: 0.35 });
 
   // No deck. The brief is a floating network: track plates, stations and a few landmarks, with
-  // nothing underneath them. The slab, its trim, the inlaid street grid and the Charles were all
-  // features of that deck and go with it.
+  // nothing underneath them but a sheet of gray glass. The slab, its trim, the inlaid street grid
+  // and the Charles were all features of that deck and went with it.
 
   const anchors = {},
     lines = [],
     shells = new Map(),
     marked = new Set(),
-    levels = new Map();
-  for (const [id, routeId, name, color, core, knots] of routes) {
+    levels = new Map(),
+    drums = [];
+  for (const [id, routeId, name, color, , knots] of routes) {
     if (!shells.has(color)) {
+      // The official line colour, as printed. The brighter `core` in the routes table was for a
+      // map that glowed on black; on a light ground it would only wash the lines out.
       shells.set(color, [
         batch('Lacquer ' + color, {
           rough: 0.34,
           metal: 0.05,
-          color: mixHex(color, core, 0.45),
-          emission: mixHex('#000000', core, 0.42),
+          color,
+          emission: mixHex('#000000', color, LACQUER_GLOW),
         }),
         batch('Station enamel ' + color, {
           rough: 0.3,
-          color: core,
-          emission: mixHex('#000000', core, 0.5),
+          color,
+          emission: mixHex('#000000', color, ENAMEL_GLOW),
         }),
       ]);
     }
@@ -454,7 +605,7 @@ export function mapSculpture(dir) {
         // Ordinary stop: a white disc with the route colour inset, deliberately wider than the
         // track plate (0.0084 across) so every stop reads as a bead on the line rather than a
         // bump in it.
-        stationDot(marker, enamel, p, p[1] + trackThickness / 2, core);
+        stationDot(marker, enamel, p, p[1] + trackThickness / 2);
         continue;
       }
       // Explorable stop: a white-rimmed drum on the deck with the line colour on top.
@@ -470,16 +621,30 @@ export function mapSculpture(dir) {
           circle(p[0], top - 0.0012, p[2], 0.0165, 40),
           circle(p[0], top, p[2], 0.0153, 40),
         ],
-        '#f4f6fa',
+        BEAD_WHITE,
         { bottom: false, top: false },
       );
       const outer = circle(p[0], top, p[2], 0.0153, 40),
         inner = circle(p[0], top, p[2], 0.0108, 40);
       for (let j = 0; j < 40; j++) {
         const l = (j + 1) % 40;
-        face(marker, [outer[j], inner[j], inner[l], outer[l]], '#f4f6fa');
+        face(marker, [outer[j], inner[j], inner[l], outer[l]], BEAD_WHITE);
       }
       face(enamel, [...inner].reverse(), '#ffffff');
+      // Ink, so the white drum has an edge on a pale ground: a band over the foot, where it meets
+      // the plate, and a ring round the rim of the top that carries on down the chamfer. Each sits
+      // a hair outside the white it covers.
+      const inkBands = [
+        [circle(p[0], skirt, p[2], 0.0192, 40), circle(p[0], skirt + 0.0026, p[2], 0.0165, 40)],
+        [circle(p[0], top - 0.0014, p[2], 0.0168, 40), circle(p[0], top + 0.0002, p[2], 0.0155, 40)],
+        [circle(p[0], top + 0.0002, p[2], 0.0155, 40), circle(p[0], top + 0.0002, p[2], 0.0145, 40)],
+      ];
+      for (const [low, high] of inkBands)
+        for (let j = 0; j < 40; j++) {
+          const l = (j + 1) % 40;
+          face(marker, [low[j], high[j], high[l], low[l]], INK);
+        }
+      drums.push(p);
       anchors[stationId] = {
         name: label,
         areaCode: 'AREA - ' + areaCode,
@@ -493,12 +658,26 @@ export function mapSculpture(dir) {
       };
     }
   }
-  // Ground first, so it sits behind everything. It shares the city's surface, so the whole
-  // base and all 300 buildings remain a single draw call.
-  groundBlob(city, lines, slabTop - 0.0006);
+  // Every plate is in place; now case them. The casing follows the plates in each line's surface,
+  // so the plates keep their place at the front of the vertex buffer.
+  for (const line of lines)
+    trackCasing(
+      shells.get(line.color)[0],
+      line.points,
+      trackHalfWidth,
+      trackThickness,
+      tintToward(line.color, CASING[line.color] ?? mixHex(line.color, '#000000', CASING_DARKNESS)),
+    );
+
+  // The ground, then everything that casts a shadow on it, in that order: the shadows share the
+  // plate's surface and blend over it only because they follow it in the index buffer.
+  const ground = groundPlate(plate, lines, slabTop - 0.0006);
+  for (const line of lines) ground.trackShadow(line.points);
+  for (const p of drums) ground.discShadow(p[0], p[2], 0.0192, 0.009, undefined, 40);
+  landmarks(stone, glint, ground);
 
   // The city goes in last: it needs every centreline so it can avoid building on the tracks.
-  const blocks = cityBlocks(city, lines, slabTop);
+  const blocks = cityBlocks(city, lines, slabTop, ground);
   if (process.env.FARESIGHT_VERBOSE) console.log('city blocks placed:', blocks);
 
   // Transfer posts tie stacked platforms of different lines together.
@@ -507,7 +686,12 @@ export function mapSculpture(dir) {
     const low = Math.min(...heights),
       high = Math.max(...heights);
     if (high - low < 1e-6) continue;
-    drum(marker, platforms[0], low, high + trackThickness / 2 + 0.0012, 0.0046, '#f4f6fa', 16);
+    drum(marker, platforms[0], low, high + trackThickness / 2 + 0.0012, 0.0046, BEAD_WHITE, 16);
+    // An ink ring round the stretch of post that shows between the two platforms.
+    const from = low + trackThickness / 2 + 0.0021;
+    const to = high - trackThickness / 2;
+    const mid = (from + to) / 2;
+    drum(marker, platforms[0], mid - 0.0004, mid + 0.0004, 0.0051, INK, 16);
   }
   m.save(dir + 'boston-map-sculpture.glb');
   json(dir + 'station-anchors.json', anchors);

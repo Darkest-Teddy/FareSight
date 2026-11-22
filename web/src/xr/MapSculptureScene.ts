@@ -4,7 +4,7 @@ import type { XRPlaceData, XRStopData, XRVehicleData } from './bridgeTypes';
 import { PhysicalPlaque } from './CanvasPanel3D';
 import { jarvisPoints, type JarvisReveal } from './JarvisReveal';
 import { MapLabels } from './MapLabels';
-import { assetBase, brass, child, clamp, damp, fetchAssetJson, material, project, shape, target,
+import { assetBase, brass, child, clamp, damp, fetchAssetJson, highlightInk, ink, material, project, shape, target,
   type DebugLog, type HitTarget, type ModelLibrary, type XYZ } from './sceneSupport';
 
 interface StationAnchor {
@@ -64,6 +64,8 @@ const pollInterval = 10;
 const trainLift = 0.0102;
 const maxSnapError = 0.03 ** 2;
 const burstTime = 0.7;
+/** Mesh name of the translucent ground in boston-map-sculpture.glb (modeling/ground.mjs). */
+const groundPlate = 'Ground plate';
 const mapRevealTime = 1.45;
 
 function makeTrack(points: XYZ[]): Track {
@@ -140,8 +142,11 @@ export class MapSculptureScene {
   private selected?: string;
   private hovered?: string;
   private highlighted = new Set<string>();
-  private readonly whiteTint = new pc.Color(1, 1, 1);
-  private readonly highlightTint = new pc.Color().fromString('#4fe3ff');
+  /** Focus rings are ink: on a pale plate a ring has to be darker than its surroundings to show. */
+  private readonly ringTint = new pc.Color().fromString(ink);
+  private readonly highlightTint = new pc.Color().fromString(highlightInk);
+  /** Lines that are not in focus wash out toward this tone instead of going dark. */
+  private readonly restTint = new pc.Color().fromString('#CFCDC7');
   private visible = false;
   private detailsVisible = false;
   private immersive = false;
@@ -165,7 +170,7 @@ export class MapSculptureScene {
     this.ringMesh.incRefCount();
     this.labels = new MapLabels(canvas, (id) => this.selectStop(id), hoverStop);
 
-    const deck = material('#1a2233');
+    const deck = material('#CFCDC7');
     this.materials.push(this.beaconStem, deck);
     shape(this.fallback, 'Map base', 'box', deck, [0, 0.02, 0], [1.5, 0.04, 1.05]);
 
@@ -195,6 +200,18 @@ export class MapSculptureScene {
         for (const mesh of render.meshInstances) {
           const surface = mesh.material;
           if (!(surface instanceof pc.StandardMaterial)) continue;
+          if (mesh.node.name === groundPlate || surface.name === groundPlate) {
+            // The plate's rim fade and its contact shadows are baked into vertex alpha. glTF has no
+            // flag for that, so it is switched on here. The plate never writes depth and draws
+            // before every other transparent surface, so rings and glass blend over it.
+            surface.opacityVertexColor = true;
+            surface.opacityVertexColorChannel = 'a';
+            surface.blendType = pc.BLEND_NORMAL;
+            surface.depthWrite = false;
+            surface.update();
+            mesh.drawBucket = 220;
+            continue;
+          }
           const line = /^Lacquer (#[0-9a-f]{6})$/i.exec(mesh.node.name);
           if (line) {
             this.lineSurfaces.set(line[1].toLowerCase(),
@@ -221,8 +238,8 @@ export class MapSculptureScene {
     for (const beacon of this.beacons) this.destroyBeacon(beacon);
     this.beacons = stops.map((stop) => {
       const root = child(this.beaconRoot, stop.name);
-      const ringSurface = material('#ffffff', 1, 0);
-      const burstSurface = material('#ffffff', 1, 0);
+      const ringSurface = material(ink, 1, 0);
+      const burstSurface = material(ink, 1, 0);
       for (const surface of [ringSurface, burstSurface]) {
         surface.useLighting = false;
         surface.update();
@@ -486,10 +503,10 @@ export class MapSculptureScene {
     }
     const blend = damp(dt, 9);
     for (const [color, line] of this.lineSurfaces) {
-      const goal = focusColors.size === 0 || focusColors.has(color) ? 1 : 0.32;
+      const goal = focusColors.size === 0 || focusColors.has(color) ? 1 : 0.22;
       if (Math.abs(line.level - goal) < 0.002) continue;
       line.level = pc.math.lerp(line.level, goal, blend);
-      line.material.diffuse.copy(line.diffuse).mulScalar(line.level);
+      line.material.diffuse.lerp(this.restTint, line.diffuse, line.level);
       line.material.emissive.copy(line.emissive).mulScalar(line.level);
       line.material.update();
     }
@@ -506,7 +523,7 @@ export class MapSculptureScene {
         ? 0.064 + 0.016 * breath
         : pc.math.lerp(0.046 + 0.01 * breath, 0.058, beacon.glow);
       beacon.ring.setLocalScale(size, 0.02, size);
-      const tint = isHighlighted ? this.highlightTint : this.whiteTint;
+      const tint = isHighlighted ? this.highlightTint : this.ringTint;
       beacon.ringSurface.emissive.copy(tint);
       beacon.ringSurface.diffuse.copy(tint);
       beacon.ringSurface.opacity = this.detailsVisible ? pc.math.lerp(0.28 + 0.2 * breath, 1, beacon.glow) : 0;
