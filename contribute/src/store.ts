@@ -1,5 +1,6 @@
 import type { RoomModelTier } from '@faresight/shared';
 import { api, ApiError, jobStatus, type ContributorJob, type JobRequest } from './api';
+import type { CaptureUpload } from './captureUpload';
 
 export interface DraftPhoto {
   file: Blob;
@@ -21,6 +22,7 @@ export interface ScanDraft {
   dishName?: string;
   diameter?: string;
   pending?: PendingSubmission;
+  capture?: CaptureUpload;
 }
 
 const DRAFTS = 'venue-drafts';
@@ -88,6 +90,9 @@ export const drafts = {
       ? (keepPhotos ? { ...current, pending: undefined } : undefined)
       : current);
   },
+  finishCapture(placeId: string, captureId: string) {
+    return updateDraft(placeId, 'room', (current) => current?.capture?.id === captureId ? undefined : current);
+  },
 };
 
 /** A generation job this device started. The server keeps the job itself; this is the local index. */
@@ -100,6 +105,8 @@ export interface ScanRecord {
   label: string;
   photoCount: number;
   createdAt: string;
+  /** Set when the photos went to object storage. Status then comes from the capture, with live updates. */
+  captureId?: string;
 }
 
 export type ScanState =
@@ -180,6 +187,7 @@ class ScanTracker {
   private timer?: number;
   private polling = false;
   private lastReviewPoll = 0;
+  private streams = new Map<string, EventSource>();
   /** Poll quickly while the scans screen is open, slowly otherwise. */
   fast = false;
 
@@ -199,7 +207,32 @@ class ScanTracker {
     return () => { this.listeners.delete(listener); };
   }
 
-  private emit() { for (const listener of this.listeners) listener(); }
+  private emit() {
+    this.watch();
+    for (const listener of this.listeners) listener();
+  }
+
+  /**
+   * Keeps a server-sent event stream open for each capture that is still building, so a change
+   * shows up at once. An event only triggers a re-read, so a missed one costs nothing but a poll interval.
+   */
+  private watch() {
+    if (typeof EventSource === 'undefined') return;
+    for (const [id, stream] of this.streams) {
+      if (this.records.some((record) => record.id === id) && pollType(this.state(id))) continue;
+      stream.close();
+      this.streams.delete(id);
+    }
+    for (const { id, captureId } of this.records) {
+      if (!captureId || this.streams.has(id) || !pollType(this.state(id))) continue;
+      const stream = new EventSource(api.captureEventsUrl(captureId));
+      for (const type of ['status', 'asset', 'failed']) stream.addEventListener(type, () => {
+        this.lastReviewPoll = 0;
+        this.schedule(0);
+      });
+      this.streams.set(id, stream);
+    }
+  }
 
   add(record: ScanRecord, job: ContributorJob) {
     this.records = [record, ...this.records.filter((entry) => entry.id !== record.id)];
@@ -250,11 +283,11 @@ class ScanTracker {
       return type === 'active' || (type === 'review' && reviewDue);
     });
     if (checkingReview) this.lastReviewPoll = now;
-    await Promise.all(pending.map(async ({ id }) => {
+    await Promise.all(pending.map(async ({ id, captureId }) => {
       const previous = this.states.get(id);
       let state: ScanState;
       try {
-        state = { status: 'ok', job: await api.job(id) };
+        state = { status: 'ok', job: captureId ? await api.captureJob(captureId) : await api.job(id) };
       } catch (error) {
         state = error instanceof ApiError && error.status === 404
           ? { status: 'missing' }

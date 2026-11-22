@@ -65,6 +65,9 @@ export class WorkerLeaseLost extends Error {}
 
 export class Store {
   readonly sqlite: DatabaseSync;
+  private jobUpdates?: Map<string, JobRecord>;
+  /** Called after every job change. Capture storage uses it to mirror job progress into Postgres. */
+  onJobUpdate?: (job: JobRecord) => void;
 
   constructor(filename: string) {
     if (filename !== ':memory:') mkdirSync(dirname(filename), { recursive: true });
@@ -237,6 +240,8 @@ export class Store {
         SELECT 1 FROM worker_lease WHERE owner = ? AND generation = ? AND expires > ?
       )
     `).run(JSON.stringify(updated), job.id, lease.owner, lease.generation, Date.now()).changes) throw new WorkerLeaseLost();
+    if (this.jobUpdates) this.jobUpdates.set(updated.id, updated);
+    else this.onJobUpdate?.(updated);
     return updated;
   }
 
@@ -247,14 +252,20 @@ export class Store {
 
   transaction<T>(action: () => T): T {
     this.sqlite.exec('BEGIN IMMEDIATE');
+    const updates = new Map<string, JobRecord>();
+    this.jobUpdates = updates;
+    let value: T;
     try {
-      const value = action();
+      value = action();
       this.sqlite.exec('COMMIT');
-      return value;
     } catch (error) {
       this.sqlite.exec('ROLLBACK');
       throw error;
+    } finally {
+      this.jobUpdates = undefined;
     }
+    for (const job of updates.values()) this.onJobUpdate?.(job);
+    return value;
   }
 
   claimWorker(owner: string): WorkerLease | undefined {

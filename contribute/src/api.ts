@@ -46,6 +46,7 @@ async function request<T>(path: string, body?: object | FormData, code?: string,
     const timedOut = error instanceof DOMException && error.name === 'TimeoutError';
     throw new ApiError(timedOut ? 'The server took too long to answer.' : 'Could not reach the FareSight server.', 0);
   }
+  if (response.status === 204) return undefined as T;
   const data = await response.json().catch(() => undefined);
   if (!response.ok || data === undefined) {
     throw new ApiError(data?.error ?? data?.message ?? `Server returned HTTP ${response.status}.`, response.status);
@@ -66,8 +67,50 @@ export interface JobRequest {
   model_tier?: RoomModelTier;
 }
 
+export interface UploadFile { name: string; content_type: string; size: number }
+export interface UploadUrl { name: string; key: string; url: string; expires_at: string }
+export interface FrameRecord { seq: number; key: string; t_ms: number }
+
+let captureStorage: Promise<boolean> | undefined;
+
 export const api = {
   places: () => request<Place[]>('/restaurants'),
+
+  /**
+   * Whether this server keeps room photos in object storage. If so, the phone sends them
+   * straight to the bucket; otherwise they go through `upload` as before.
+   */
+  captureStorage() {
+    return captureStorage ??= request<{ captures?: boolean }>('/health').then(({ captures }) => captures === true, () => {
+      captureStorage = undefined;
+      return false;
+    });
+  },
+
+  async createCapture(placeId: string, deviceInfo: object, code: string) {
+    return (await request<{ capture_id: string }>('/captures', { place_id: placeId, mode: 'room', device_info: deviceInfo }, code)).capture_id;
+  },
+
+  /** Short-lived URLs to PUT each file to. The server names the keys; `name` is `frames/NNNNNN.jpg` or `frames.json`. */
+  async uploadUrls(captureId: string, files: UploadFile[], code: string) {
+    return (await request<{ urls: UploadUrl[] }>(`/captures/${pathId(captureId)}/upload-urls`, { files }, code)).urls;
+  },
+
+  registerFrames: (captureId: string, frames: FrameRecord[], code: string) =>
+    request<void>(`/captures/${pathId(captureId)}/frames`, { frames }, code),
+
+  /** Starts the build once every file is in the bucket. Calling it again returns the same job. */
+  async completeCapture(captureId: string, tier: RoomModelTier | undefined, code: string) {
+    return (await request<{ job_id: string }>(`/captures/${pathId(captureId)}/complete`, { model_tier: tier }, code)).job_id;
+  },
+
+  async captureJob(captureId: string) {
+    const { generation_job } = await request<{ generation_job: ContributorJob | null }>(`/captures/${pathId(captureId)}`);
+    if (!generation_job) throw new ApiError('This capture has not been sent yet.', 404);
+    return generation_job;
+  },
+
+  captureEventsUrl: (captureId: string) => `${apiOrigin}/api/captures/${pathId(captureId)}/events`,
 
   /**
    * Checks an invite code without creating anything. The upload route authenticates before it

@@ -1,5 +1,5 @@
 import type { JobStage } from '@faresight/shared';
-import { api, jobStatus } from '../api';
+import { api, ApiError, jobStatus } from '../api';
 import { button, el, errorText, haptic, icon, timeAgo } from '../dom';
 import { scans, type ScanRecord, type ScanState } from '../store';
 import { withCode } from '../ui/CodeSheet';
@@ -140,17 +140,29 @@ export class ScansView {
     card.actionsFor = actionsFor;
     card.actions.replaceChildren();
     if (actionsFor === 'failed') {
-      const retry = button('Try again', () => void this.retry(record.id, card, retry), 'primary small');
+      const retry = button('Try again', () => void this.retry(record, card, retry), 'primary small');
       retry.prepend(icon('retry'));
       card.actions.append(retry);
     }
     if (actionsFor) card.actions.append(button(status === 'ready' ? 'Clear' : 'Remove', () => scans.remove(record.id), 'ghost small'));
   }
 
-  private async retry(id: string, card: Card, control: HTMLButtonElement) {
+  private async retry(record: ScanRecord, card: Card, control: HTMLButtonElement) {
     control.disabled = true;
     try {
-      scans.update(await withCode((code) => api.retry(id, code)));
+      const job = await withCode((code) => api.retry(record.id, code)).catch(async (error) => {
+        const { captureId } = record;
+        if (!captureId || !(error instanceof ApiError) || error.status !== 404) throw error;
+        const state = scans.state(record.id);
+        const tier = 'job' in state ? state.job?.model_tier : undefined;
+        await withCode((code) => api.completeCapture(captureId, tier, code));
+        return api.captureJob(captureId);
+      });
+      if (job.id === record.id) scans.update(job);
+      else {
+        scans.remove(record.id);
+        scans.add({ ...record, id: job.id, createdAt: job.created_at }, job);
+      }
       haptic(10);
     } catch (error) {
       card.note.textContent = errorText(error);

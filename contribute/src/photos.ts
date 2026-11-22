@@ -34,12 +34,12 @@ async function decode(file: File) {
   }
 }
 
-export async function prepareImage(file: File): Promise<File> {
+export async function prepareImage(file: File, jpegOnly = false): Promise<File> {
   const { source, width, height, close } = await decode(file);
   try {
     if (!width || !height) throw new Error('This photo has no readable dimensions.');
     if (width * height > MAX_PIXELS) throw new Error('This photo exceeds the 64 megapixel limit.');
-    if (file.size <= LIMIT && await matchesUploadFormat(file)) return file;
+    if (file.size <= LIMIT && (!jpegOnly || file.type === 'image/jpeg') && await matchesUploadFormat(file)) return file;
     for (const [longEdge, quality] of attempts) {
       const scale = Math.min(1, longEdge / Math.max(width, height));
       const canvas = document.createElement('canvas');

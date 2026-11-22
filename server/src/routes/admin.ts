@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type { PasscodeGuards } from '../services/passcodes.ts';
-import { publishAsset, rejectAsset } from './pipeline.ts';
+import { publishAsset } from '../services/publish.ts';
+import { rejectAsset } from './pipeline.ts';
 import type { PendingReview, Store } from '../db/database.ts';
 
 interface ReviewBody {

@@ -8,6 +8,7 @@ import { createGunzip } from 'node:zlib';
 import type { Asset, Vector3 } from '@faresight/shared';
 import type { Config } from '../config.ts';
 import { MAX_SPLAT_BYTES, TerminalProviderError, type CommitFile } from './providerHttp.ts';
+import { upgradeSpz } from './spzUpgrade.ts';
 
 const maxVertices = 2_000_000;
 const run = promisify(execFile);
@@ -138,8 +139,11 @@ export async function convertSplat(
 
   try {
     let geometry: { count: number; bounds?: NonNullable<Asset['metadata']>['bounds']; width?: number };
+    let spzVersion: number | undefined;
     if (format === 'spz') {
-      geometry = { count: await readSpzCount(original) };
+      const { count, version } = await readSpzHeader(original);
+      geometry = { count };
+      spzVersion = version;
     } else {
       const payload = await readFile(original);
       geometry = inspectSplat(payload, kind === 'dish');
@@ -181,11 +185,27 @@ export async function convertSplat(
       metadata.conversion_status = 'compressed';
       return { path: sog, count: convertedCount, format: 'sog' as const, metadata };
     }
-    const fallback = format === 'spz' ? original : resolve(config.outputs, `${jobId}-normalized.ply`);
-    if (format === 'ply') await commit(normalized, fallback);
+    let fallback = original;
+    if (format === 'ply') {
+      fallback = resolve(config.outputs, `${jobId}-normalized.ply`);
+      await commit(normalized, fallback);
+    } else if (spzVersion === 2) {
+      let upgraded: Buffer | undefined;
+      try {
+        upgraded = upgradeSpz(await readFile(original));
+      } catch (error) {
+        throw new TerminalProviderError(error instanceof Error ? error.message : 'Could not upgrade SPZ');
+      }
+      if (upgraded) {
+        if (upgraded.length > MAX_SPLAT_BYTES) throw new TerminalProviderError('Upgraded SPZ exceeds the byte limit');
+        fallback = resolve(config.outputs, `${jobId}.spz`);
+        await writeFile(unique, upgraded, { flag: 'wx' });
+        await commit(unique, fallback);
+      }
+    }
     return { path: fallback, count: geometry.count, format, metadata };
   } finally {
-    await Promise.all([temporary, limited, ...(format === 'ply' ? [normalized] : [])].map((path) => rm(path, { force: true })));
+    await Promise.all([unique, temporary, limited, ...(format === 'ply' ? [normalized] : [])].map((path) => rm(path, { force: true })));
   }
 }
 
@@ -193,7 +213,7 @@ function displayCommand(args: string[]) {
   return args.map((value) => /^[a-zA-Z0-9_@./-]+$/.test(value) ? value : "'" + value.replaceAll("'", "'\\''") + "'").join(' ');
 }
 
-async function readSpzCount(path: string) {
+async function readSpzHeader(path: string) {
   const header = Buffer.alloc(16);
   const file = await open(path, 'r');
   let length: number;
@@ -232,7 +252,7 @@ async function readSpzCount(path: string) {
   }
   const count = validateHeader();
   if (total < header.length + count * 3) throw new TerminalProviderError('SPZ vertex payload is truncated');
-  return count;
+  return { count, version: header.readUInt32LE(4) };
 }
 
 export function measureScale(plateDiameter: number | null | undefined, width: number | undefined) {

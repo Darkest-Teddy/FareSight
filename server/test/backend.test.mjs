@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { crc32, gzipSync } from 'node:zlib';
+import { crc32, gunzipSync, gzipSync } from 'node:zlib';
 import { WebSocket } from 'ws';
 import { computeTotalCost, computeTripEstimate, demoAssets, demoPlaces, formatDishPrice, latLonToSculpture, STOPS } from '@faresight/shared';
 import { createApp } from '../dist/app.js';
@@ -43,7 +43,7 @@ async function setup(t, overrides = {}) {
   const config = {
     ...getConfig(), database: join(dir, 'faresight.db'), uploads: join(dir, 'uploads'), outputs: join(dir, 'outputs'),
     host: '127.0.0.1', port: 0, mode: 'auto', adminPasscode: 'test-passcode', geminiKey: undefined,
-    atlasKey: undefined, replicateKey: undefined, ...overrides,
+    atlasKey: undefined, replicateKey: undefined, captures: undefined, autoPublish: false, ...overrides,
   };
   let app;
   let origin;
@@ -498,9 +498,9 @@ test('Atlas Draft request contract resumes from saved pose, splat and download c
   await server.start();
   const originalFetch = globalThis.fetch;
   const count = 5;
-  const raw = Buffer.alloc(16 + count * 20);
+  const raw = Buffer.alloc(16 + count * 19);
   raw.write('NGSP');
-  raw.writeUInt32LE(3, 4);
+  raw.writeUInt32LE(2, 4);
   raw.writeUInt32LE(count, 8);
   raw[13] = 12;
   const spz = gzipSync(raw);
@@ -627,6 +627,11 @@ test('Atlas Draft request contract resumes from saved pose, splat and download c
   const served = await fetch(server.origin() + asset.original_spz_url, { headers: { 'X-Admin-Passcode': server.config.adminPasscode } });
   assert.equal(served.status, 200);
   assert.deepEqual(Buffer.from(await served.arrayBuffer()), spz);
+  if (asset.format === 'spz') {
+    const viewer = await fetch(server.origin() + asset.url, { headers: { 'X-Admin-Passcode': server.config.adminPasscode } });
+    assert.equal(viewer.status, 200);
+    assert.equal(gunzipSync(Buffer.from(await viewer.arrayBuffer())).readUInt32LE(4), 3);
+  }
   assert.deepEqual(calls, [
     '/assets', '/assets', '/tasks:images2PosedRGBD', '/operations/pose-01', '/operations/pose-01',
     '/tasks:posedImages2Splats', '/tasks:posedImages2Splats', '/operations/splat-01', '/operations/splat-01',
@@ -929,8 +934,18 @@ test('worker lease generation fences a paused owner and survives release', () =>
     store.sqlite.exec('UPDATE worker_lease SET expires = 0');
     const next = store.claimWorker('second');
     assert.equal(next.generation, initial.generation + 1);
-    store.updateJob(job, { status: 'needs_review' }, next);
-    assert.throws(() => store.updateJob(job, { status: 'failed' }, initial), WorkerLeaseLost);
+    const mirrored = [];
+    store.onJobUpdate = ({ status }) => mirrored.push(status);
+    store.transaction(() => {
+      store.updateJob(job, { status: 'needs_review' }, next);
+      assert.deepEqual(mirrored, []);
+    });
+    assert.deepEqual(mirrored, ['needs_review']);
+    assert.throws(() => store.transaction(() => {
+      store.updateJob(job, { status: 'ready' }, next);
+      store.updateJob(job, { status: 'failed' }, initial);
+    }), WorkerLeaseLost);
+    assert.deepEqual(mirrored, ['needs_review']);
     assert.equal(store.get('jobs', job.id).status, 'needs_review');
     store.releaseWorker('second');
     assert.equal(store.claimWorker('second').generation, next.generation + 1);

@@ -6,9 +6,12 @@ import type { Asset, Vector3 } from '@faresight/shared';
 import type { Config } from '../config.ts';
 import { WorkerLeaseLost, type JobRecord, type Store, type Upload, type WorkerLease } from '../db/database.ts';
 import { downloadAtlasSplat, pollAtlasPose, pollAtlasSplats, submitAtlasPose, submitAtlasSplats, uploadAtlasImage } from '../services/atlasClient.ts';
+import { publishSplats } from '../services/captures.ts';
+import type { Captures } from '../services/captures.ts';
 import { findDemoAsset } from '../services/demoAssets.ts';
 import { MAX_IMAGE_BYTES } from '../services/imagePrep.ts';
 import { downloadFile, ProviderHttpError, TerminalProviderError, type CommitFile } from '../services/providerHttp.ts';
+import { publishAsset } from '../services/publish.ts';
 import { convertSplat, measureScale } from '../services/splatProcessor.ts';
 import { pollTrellis, submitTrellis } from '../services/trellisClient.ts';
 
@@ -44,7 +47,7 @@ async function copyAtomically(source: string, destination: string, commit: Commi
   }
 }
 
-async function advance(store: Store, config: Config, initialJob: JobRecord, lease: WorkerLease) {
+async function advance(store: Store, config: Config, initialJob: JobRecord, lease: WorkerLease, captures?: Captures) {
   let job = initialJob;
   const assertCurrent = () => store.assertWorker(lease);
   const commit: CommitFile = (temporary, destination) => store.transaction(() => {
@@ -165,14 +168,22 @@ async function advance(store: Store, config: Config, initialJob: JobRecord, leas
       const converted = await convertSplat(config, job.id, job.kind, original, commit);
       const scale = measureScale(job.plate_diameter_m, converted.metadata.measured_width);
       const spawn_point: Vector3 | null = job.kind === 'room' ? [0, 1.55, 2] : null;
+      // A capture's splat is served from the splat bucket. Other jobs keep serving it from this server's disk.
+      assertCurrent();
+      const hosted = captures && job.capture_id ? await publishSplats(captures, job.capture_id, job.id, [
+        { path: converted.path, format: converted.format, count: converted.count },
+        ...(job.original_spz_path && converted.format !== 'spz' ? [{ path: job.original_spz_path, format: 'spz' as const }] : []),
+      ], assertCurrent) : undefined;
       const asset: Asset = {
         id: job.id, kind: job.kind, backend: job.provider === 'atlas-v2' ? job.model_tier ?? 'atlas-draft' : job.provider,
         provenance: job.provider === 'demo-sim' ? 'demo_splat' : job.kind === 'room' ? 'ai_spatial_preview' : 'trellis_dish_splat',
         provenance_label: job.provider === 'demo-sim' ? 'Demo simulation using a prebuilt splat'
           : job.kind === 'room' ? 'AI spatial preview from restaurant photos' : 'TRELLIS Gaussian splat from a dish photo',
-        ...scale, gaussian_count: converted.count, format: converted.format, url: outputUrl(converted.path),
+        ...scale, gaussian_count: converted.count, format: converted.format,
+        url: hosted?.[converted.format] ?? outputUrl(converted.path),
         ...(job.original_ply_path ? { original_ply_url: outputUrl(job.original_ply_path) } : {}),
-        ...(job.original_spz_path ? { original_spz_url: outputUrl(job.original_spz_path) } : {}),
+        ...(job.original_spz_path ? { original_spz_url: (converted.format !== 'spz' || converted.path === job.original_spz_path ? hosted?.spz : undefined)
+          ?? outputUrl(job.original_spz_path) } : {}),
         preview_url: job.preview_image_path ? outputUrl(job.preview_image_path) : null,
         thumbnail_url: job.preview_image_path ? outputUrl(job.preview_image_path) : null,
         spawn_point, transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: scale.scale_factor },
@@ -180,8 +191,12 @@ async function advance(store: Store, config: Config, initialJob: JobRecord, leas
         status: 'needs_review', metadata: converted.metadata,
       };
       store.transaction(() => {
-        store.put('assets', asset);
-        next('needs_review', 'Ready to review', { asset_id: asset.id, converted_asset_path: converted.path });
+        const reviewed = store.updateJob(job, {
+          status: 'needs_review', progress: progress.needs_review, status_message: description(job, 'Ready to review'),
+          error: null, asset_id: asset.id, converted_asset_path: converted.path,
+        }, lease);
+        if (config.autoPublish) publishAsset(store, asset, reviewed, {}, lease);
+        else store.put('assets', asset);
       });
     }
   } catch (error) {
@@ -240,7 +255,7 @@ async function advance(store: Store, config: Config, initialJob: JobRecord, leas
   }
 }
 
-export function startJobWorker(store: Store, config: Config, onError: (error: unknown) => void = console.error) {
+export function startJobWorker(store: Store, config: Config, onError: (error: unknown) => void = console.error, captures?: Captures) {
   mkdirSync(config.uploads, { recursive: true });
   mkdirSync(config.outputs, { recursive: true });
   const owner = randomUUID();
@@ -251,7 +266,7 @@ export function startJobWorker(store: Store, config: Config, onError: (error: un
       if (!lease || running) return;
       const job = store.nextJob();
       if (job) {
-        running = advance(store, config, job, lease).catch(onError).finally(() => { running = undefined; });
+        running = advance(store, config, job, lease, captures).catch(onError).finally(() => { running = undefined; });
       }
     } catch (error) {
       onError(error);

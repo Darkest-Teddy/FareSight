@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -7,6 +8,33 @@ for (const name of ['.env.local', '.env']) {
   const path = resolve(projectRoot, name);
   if (existsSync(path)) process.loadEnvFile(path);
 }
+
+/** Capture storage: Postgres (Tiger Data) for records and S3-compatible buckets (Vultr) for files. Off unless both are set. */
+function captureConfig() {
+  const env = process.env;
+  const databaseUrl = env.DATABASE_URL;
+  const endpoint = env.VULTR_S3_ENDPOINT?.replace(/\/+$/, '');
+  const accessKey = env.VULTR_S3_ACCESS_KEY;
+  const secretKey = env.VULTR_S3_SECRET_KEY;
+  if (!databaseUrl || !endpoint || !accessKey || !secretKey) return undefined;
+  const splatBucket = env.SPLAT_BUCKET || 'faresight-splats';
+  return {
+    databaseUrl,
+    // LISTEN and job claiming need a session, which a transaction-mode pooler does not give.
+    databaseUrlDirect: env.DATABASE_URL_DIRECT || databaseUrl,
+    endpoint, accessKey, secretKey,
+    region: env.VULTR_S3_REGION || 'us-east-1',
+    rawBucket: env.RAW_BUCKET || 'faresight-raw',
+    splatBucket,
+    cdnBaseUrl: (env.CDN_BASE_URL || `${endpoint}/${splatBucket}`).replace(/\/+$/, ''),
+    appOrigins: (env.APP_ORIGINS || '*').split(',').map((origin) => origin.trim()).filter(Boolean),
+    // Stable across restarts, so a restarted worker keeps the heartbeat on the jobs it already holds.
+    workerId: env.WORKER_ID || hostname(),
+    minFrames: Math.max(2, Number(env.MIN_FRAMES) || 2),
+  };
+}
+
+export type CaptureConfig = NonNullable<ReturnType<typeof captureConfig>>;
 
 export function getConfig() {
   const port = Number(process.env.PORT ?? 3001);
@@ -39,7 +67,18 @@ export function getConfig() {
     replicateKey: process.env.REPLICATE_API_TOKEN,
     mbtaKey: process.env.MBTA_API_KEY,
     mode,
+    // Finished builds go live at once. Set AUTO_PUBLISH=false to hold them at "needs review" for an admin.
+    autoPublish: process.env.AUTO_PUBLISH !== 'false',
+    captures: captureConfig(),
   } as const;
 }
 
 export type Config = ReturnType<typeof getConfig>;
+
+/** Which backend builds a job, and whether live mode is missing the key for it. */
+export function pipelineProvider(config: Config, kind: 'room' | 'dish') {
+  const key = kind === 'room' ? config.atlasKey : config.replicateKey;
+  const live = kind === 'room' ? 'atlas-v2' as const : 'trellis-replicate' as const;
+  const provider = config.mode === 'demo' || (config.mode === 'auto' && !key) ? 'demo-sim' as const : live;
+  return { provider, missingKey: config.mode === 'live' && !key };
+}

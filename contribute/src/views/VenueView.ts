@@ -1,5 +1,6 @@
 import { MAX_ROOM_PHOTOS, type Place, type RoomModelTier, type Stop } from '@faresight/shared';
-import { api, ApiError, type JobRequest } from '../api';
+import { api, ApiError, type ContributorJob, type JobRequest } from '../api';
+import { sendCapture, type CaptureUpload } from '../captureUpload';
 import { categoryLabel, coverage, servesDishes } from '../data';
 import { button, el, errorText, haptic, icon, iconButton, motion, replay, svg, wait, type IconName } from '../dom';
 import { prepareImage } from '../photos';
@@ -69,6 +70,7 @@ export class VenueView {
   private busy = false;
   private finished = false;
   private alive = true;
+  private capture?: CaptureUpload;
 
   constructor(
     private readonly place: Place,
@@ -131,7 +133,7 @@ export class VenueView {
 
   private get current() { return this.shots[this.kind]; }
 
-  private get locked() { return this.loading || this.busy || this.finished || Boolean(this.pending[this.kind]); }
+  private get locked() { return this.loading || this.busy || this.finished || Boolean(this.pending[this.kind] || (this.kind === 'room' && this.capture?.completed)); }
 
   private async restoreDrafts() {
     try {
@@ -147,14 +149,20 @@ export class VenueView {
           const file = new File([photo.file], photo.name, { type: photo.file.type, lastModified: photo.lastModified });
           this.shots[kind].push(this.shot(file, kind, photo.uploadId));
         }
-        if (kind === 'room') this.tier = draft.tier ?? this.tier;
-        else {
+        if (kind === 'room') {
+          this.tier = draft.tier ?? this.tier;
+          this.capture = draft.capture;
+          for (const seq of this.capture?.sent ?? []) {
+            const shot = this.shots.room[seq];
+            if (shot) shot.node.dataset.state = 'sent';
+          }
+        } else {
           this.dishId = draft.dishId ?? this.dishId;
           this.dishName.value = draft.dishName ?? '';
           this.diameter.value = draft.diameter ?? '';
         }
       }
-      this.kind = this.kinds.find((kind) => this.pending[kind])
+      this.kind = this.kinds.find((kind) => this.pending[kind] || (kind === 'room' && this.capture?.completed))
         ?? (this.current.length ? this.kind : this.kinds.find((kind) => this.shots[kind].length) ?? this.kind);
     } catch {
       this.feedback.textContent = 'Could not open the saved photo drafts on this device.';
@@ -170,7 +178,7 @@ export class VenueView {
       photos: this.shots[kind].map(({ file, uploadId }) => ({
         file, name: file.name, lastModified: file.lastModified, uploadId,
       })),
-      ...(kind === 'room' ? { tier: this.tier } : {
+      ...(kind === 'room' ? { tier: this.tier, capture: this.capture } : {
         dishId: this.dishId, dishName: this.dishName.value, diameter: this.diameter.value,
       }),
       pending,
@@ -393,6 +401,7 @@ export class VenueView {
         if (kind === 'dish') {
           for (const shot of shots.splice(0)) URL.revokeObjectURL(shot.url);
         }
+        if (kind === 'room') this.resetCapture();
         shots.push(this.shot(prepared, kind));
         accepted++;
         await this.saveDraft(kind).catch((error) => this.reportDraftError(error));
@@ -424,6 +433,7 @@ export class VenueView {
     const remove = iconButton('close', 'Remove this photo', () => {
       if (this.locked) return;
       const shots = this.shots[kind];
+      if (kind === 'room') this.resetCapture();
       shots.splice(shots.indexOf(shot), 1);
       URL.revokeObjectURL(url);
       this.renderGrid();
@@ -470,6 +480,56 @@ export class VenueView {
     return pending;
   }
 
+  private resetCapture() {
+    if (!this.capture) return;
+    this.capture = undefined;
+    for (const shot of this.shots.room) {
+      if (!shot.uploadId) delete shot.node.dataset.state;
+    }
+  }
+
+  private async sendRoom(shots: Shot[]) {
+    await this.saveDraft('room');
+    const label = (sent: number) => this.renderFooter({ label: `Sending photo ${Math.min(shots.length, sent + 1)} of ${shots.length}…`, fraction: sent / (shots.length + 1) });
+    label(this.capture?.sent.size ?? 0);
+    return sendCapture({
+      placeId: this.place.id, files: shots.map((shot) => shot.file), tier: this.tier, capture: this.capture,
+      onCheckpoint: async (upload) => {
+        this.capture = upload;
+        await this.saveDraft('room');
+      },
+      onFrame: (seq, state, sent) => {
+        shots[seq].node.dataset.state = state;
+        label(sent);
+        if (sent === shots.length) this.renderFooter({ label: 'Starting the 3D build…', fraction: shots.length / (shots.length + 1) });
+      },
+    });
+  }
+
+  private async finish(kind: Kind, photoCount: number, label: string, { job, captureId }: { job: ContributorJob; captureId?: string }) {
+    scans.add({
+      id: job.id, placeId: this.place.id, placeName: this.place.name, stopId: this.stop.stop_id, kind,
+      label, photoCount, createdAt: job.created_at, captureId,
+    }, job);
+    this.finished = true;
+    const pending = this.pending[kind];
+    if (captureId || pending) {
+      try {
+        if (captureId) await drafts.finishCapture(this.place.id, captureId);
+        else if (pending) await drafts.finish(this.place.id, kind, pending.idempotencyKey);
+        delete this.pending[kind];
+      } catch (error) {
+        this.reportDraftError(error);
+      }
+    }
+    this.send.classList.add('is-done');
+    this.send.prepend(icon('check'));
+    this.renderFooter({ label: 'Scan started', fraction: 1 });
+    haptic([10, 50, 18]);
+    await wait(motion(850));
+    if (this.alive) this.actions.done(job.id);
+  }
+
   private async submit() {
     if (this.busy || this.finished || this.problem()) return;
     const kind = this.kind;
@@ -478,25 +538,17 @@ export class VenueView {
     this.root.classList.add('is-sending');
     this.renderGrid();
     try {
+      const shots = this.shots[kind];
+      if (kind === 'room' && !this.pending.room
+        && (this.capture || (!shots.some((shot) => shot.uploadId) && await api.captureStorage()))) {
+        return await this.finish(kind, shots.length, 'The space', await this.sendRoom(shots));
+      }
       const pending = this.pending[kind] ?? await this.prepareSubmission(kind);
       const photoCount = pending.job.upload_ids.length;
       this.renderFooter({ label: 'Starting the 3D build…', fraction: photoCount / (photoCount + 1) });
       const job = await withCode((code) => api.generate(pending.job, code, pending.idempotencyKey));
       const dish = job.dish_name ?? pending.job.dish_name ?? this.place.dishes.find((entry) => entry.id === pending.job.dish_id)?.name;
-      scans.add({
-        id: job.id, placeId: this.place.id, placeName: this.place.name, stopId: this.stop.stop_id, kind,
-        label: kind === 'room' ? 'The space' : dish ?? 'A dish', photoCount, createdAt: job.created_at,
-      }, job);
-      this.finished = true;
-      await drafts.finish(this.place.id, kind, pending.idempotencyKey).then(() => {
-        delete this.pending[kind];
-      }, (error) => this.reportDraftError(error));
-      this.send.classList.add('is-done');
-      this.send.prepend(icon('check'));
-      this.renderFooter({ label: 'Scan started', fraction: 1 });
-      haptic([10, 50, 18]);
-      await wait(motion(850));
-      if (this.alive) this.actions.done(job.id);
+      await this.finish(kind, photoCount, kind === 'room' ? 'The space' : dish ?? 'A dish', { job });
     } catch (error) {
       const pending = this.pending[kind];
       if (pending && error instanceof ApiError && [400, 404, 422].includes(error.status)) {
