@@ -321,32 +321,41 @@ function landmarks(surface, accent) {
 }
 
 /**
- * A station marker, painted into the surface of the line rather than parked on top of it.
+ * A station marker: a disc set into the line, wider than it, so it reads as the line swelling at
+ * a stop rather than as something stacked on top.
  *
- * Earlier this was a raised puck with walls, which read as a separate object dropped onto the
- * track and stood proud enough that passing trains clipped through it. These are flat discs lying
- * in the plate's own top face: a white ring with the route colour inside it, so a stop looks like
- * part of the line.
+ * It occupies exactly the plate's own thickness -- same top face, same underside -- so nothing
+ * stands proud for a train to clip through. Because it is wider than the plate, its rim is what
+ * shows, and that rim is a real wall with a lit top edge and a shaded side, which is what gives
+ * every stop a visible 3D edge from an angled or side-on camera.
  *
- * They still sit a hair above the plate -- far too little to see, but enough to keep the depth
- * buffer from tearing between two coplanar surfaces.
+ * Earlier takes got one half of this or the other: a raised puck that trains drove through, then a
+ * flat decal with no edge at all.
  */
 const dotOuter = 0.0062;
 const dotInner = 0.0036;
-const dotLift = 0.00012;
 
 function stationDot(white, colour, [x, , z], deck, tint) {
-  const ringY = deck + dotLift;
-  const coreY = deck + dotLift * 2;
-  const outer = circle(x, ringY, z, dotOuter, 24);
-  const inner = circle(x, ringY, z, dotInner, 24);
-  // White ring: the annulus between the two radii, no sides.
+  // A hair above the plate's own top face. Drawn exactly level with it the two surfaces are
+  // coplanar and z-fight, which speckles the ring; this is far too small to read as a step.
+  const top = deck + 0.00006;
+  const bottom = deck - trackThickness;
+  // The rim. Capped underneath so the disc is solid when the camera drops below the line.
+  loft(
+    white,
+    [circle(x, bottom, z, dotOuter, 24), circle(x, top, z, dotOuter, 24)],
+    '#e8edf3',
+    { top: false },
+  );
+  // White ring on the top face, left showing around the coloured centre.
+  const outer = circle(x, top, z, dotOuter, 24);
+  const inner = circle(x, top, z, dotInner, 24);
   for (let j = 0; j < 24; j++) {
     const k = (j + 1) % 24;
     face(white, [outer[j], inner[j], inner[k], outer[k]], '#f4f6fa');
   }
-  // Route colour filling the middle.
-  face(colour, circle(x, coreY, z, dotInner, 24), tint);
+  // Route colour filling the middle, a hair proud so it never z-fights the ring.
+  face(colour, circle(x, top + 0.00006, z, dotInner, 24), tint);
 }
 
 // Center and half-width of the Charles, from the Allston bend to the harbor mouth.
