@@ -141,6 +141,10 @@ export class SplatLoader {
     const scale = sized && Number.isFinite(data.scale_factor) && data.scale_factor > 0
       ? data.scale_factor : 1;
     entity.setLocalScale(scale, scale, scale);
+    // A dish stands on its parent: built dishes come centred on their middle, which would sink them halfway
+    // into the table and leave the body that collides for them sitting above the model.
+    const base = slot === 'room' ? undefined : resource.aabb?.getMin().y;
+    if (base !== undefined && Number.isFinite(base)) entity.setLocalPosition(0, -base * scale, 0);
     parent.addChild(entity);
     placement.entity = entity;
     placement.count = count;
