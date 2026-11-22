@@ -6,3 +6,4 @@ export * from './sampleReviews.js';
 export * from './placeFacts.js';
 export * from './demoCatalog.js';
 export * from './dishPrice.js';
+export * from './discover.js';

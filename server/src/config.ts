@@ -36,6 +36,37 @@ function captureConfig() {
 
 export type CaptureConfig = NonNullable<ReturnType<typeof captureConfig>>;
 
+/**
+ * Accounts and the Discover catalogue need Postgres but not object storage, so they are configured
+ * separately from captures: a demo can run with DATABASE_URL alone and no buckets.
+ */
+function accountsConfig() {
+  const env = process.env;
+  const databaseUrl = env.DATABASE_URL;
+  if (!databaseUrl) return undefined;
+  return {
+    databaseUrl,
+    // LISTEN needs a session, which a transaction-mode pooler does not give.
+    databaseUrlDirect: env.DATABASE_URL_DIRECT || databaseUrl,
+    // Sent to the browser and the Expo app so they can show the Google button only when it works.
+    googleClientId: env.GOOGLE_CLIENT_ID,
+    // Extra client ids accepted when verifying an ID token: iOS and Android use their own.
+    googleAudiences: (env.GOOGLE_CLIENT_IDS || env.GOOGLE_CLIENT_ID || '')
+      .split(',').map((id) => id.trim()).filter(Boolean),
+    googlePlacesKey: env.GOOGLE_PLACES_API_KEY,
+    sessionDays: Math.max(1, Number(env.SESSION_DAYS) || 30),
+    // Three distinct sessions reporting one place hides it pending review.
+    reportsToHide: Math.max(1, Number(env.REPORTS_TO_HIDE) || 3),
+    // New accounts per hour from one address. Raise it to run the end-to-end suite repeatedly,
+    // which otherwise exhausts the allowance and fails every check after registration.
+    registrationsPerHour: Math.max(1, Number(env.REGISTRATIONS_PER_HOUR) || 5),
+    // Places added per hour by one address.
+    placesPerHour: Math.max(1, Number(env.PLACES_PER_HOUR) || 10),
+  };
+}
+
+export type AccountsConfig = NonNullable<ReturnType<typeof accountsConfig>>;
+
 export function getConfig() {
   const port = Number(process.env.PORT ?? 3001);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be an integer from 1 to 65535');
@@ -70,6 +101,7 @@ export function getConfig() {
     // Finished builds go live at once. Set AUTO_PUBLISH=false to hold them at "needs review" for an admin.
     autoPublish: process.env.AUTO_PUBLISH !== 'false',
     captures: captureConfig(),
+    accounts: accountsConfig(),
   } as const;
 }
 

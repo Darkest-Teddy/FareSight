@@ -9,16 +9,22 @@ import { getConfig } from './config.ts';
 import type { Config } from './config.ts';
 import { Store } from './db/database.ts';
 import { registerAdminAndCommunity } from './routes/admin.ts';
+import { createAuthGuards, registerAuth } from './routes/auth.ts';
 import { registerCaptures } from './routes/captures.ts';
 import { registerCatalog } from './routes/catalog.ts';
+import { registerDiscover } from './routes/discover.ts';
 import { registerLive } from './routes/live.ts';
 import { registerMbta } from './routes/mbta.ts';
 import { registerPairing } from './routes/pairing.ts';
 import { registerPipeline } from './routes/pipeline.ts';
 import { registerRealtime } from './routes/realtime.ts';
+import { openAccounts } from './services/accounts.ts';
 import { createCaptureEvents } from './services/captureEvents.ts';
 import { mirrorJobs, openCaptures } from './services/captures.ts';
 import { findDemoAsset, findReadableAsset } from './services/demoAssets.ts';
+import { createDiscover } from './services/discover.ts';
+import { createDiscoverEvents } from './services/discoverEvents.ts';
+import { createGooglePlaces } from './services/googlePlaces.ts';
 import { createPasscodeGuards } from './services/passcodes.ts';
 import { MAX_IMAGE_BYTES } from './services/imagePrep.ts';
 import { startCaptureBridge } from './worker/captureBridge.ts';
@@ -41,6 +47,14 @@ export async function createApp(config: Config = getConfig(), options: { logger?
   const captureEvents = captures && createCaptureEvents(captures, logError);
   const stopMirror = captures && mirrorJobs(store, captures, logError);
 
+  // Accounts and Discover need Postgres but not object storage, so they open their own pool and
+  // work in a demo configured with DATABASE_URL alone.
+  const accounts = await openAccounts(config);
+  const auth = createAuthGuards(accounts);
+  const discover = accounts && createDiscover(accounts, store);
+  const discoverEvents = accounts && createDiscoverEvents(accounts, logError);
+  const googlePlaces = accounts && createGooglePlaces(accounts, logError);
+
   let stopWorker: (() => Promise<void>) | undefined;
   let stopBridge: (() => Promise<void>) | undefined;
   app.addHook('onClose', async () => {
@@ -50,6 +64,8 @@ export async function createApp(config: Config = getConfig(), options: { logger?
       await stopMirror?.();
       await captureEvents?.close();
       await captures?.close();
+      await discoverEvents?.close();
+      await accounts?.close();
     } finally {
       store.sqlite.close();
     }
@@ -84,8 +100,12 @@ export async function createApp(config: Config = getConfig(), options: { logger?
     return reply.sendFile(basename(path), dirname(path));
   });
   app.get('/api/health', async () => ({
-    status: 'ok', database: 'sqlite', pipeline_mode: config.mode, ...(captures ? { captures: true } : {}),
+    status: 'ok', database: 'sqlite', pipeline_mode: config.mode,
+    ...(captures ? { captures: true } : {}),
+    ...(accounts ? { accounts: true, discover: true, places: googlePlaces?.enabled ?? false } : {}),
   }));
+  registerAuth(app, config, accounts, auth);
+  registerDiscover(app, store, config, auth, accounts, discover, discoverEvents, googlePlaces);
   registerCatalog(app, store, config);
   registerAdminAndCommunity(app, store, guards);
   registerPipeline(app, store, config, guards);
