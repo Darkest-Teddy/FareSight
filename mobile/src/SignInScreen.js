@@ -26,8 +26,17 @@ export default function SignInScreen({ onSignedIn, googleClientIds }) {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
+  /*
+   * Every id the app actually supplies counts, not just the per-platform ones.
+   *
+   * App.js passes `clientId` and `webClientId` from the server's GOOGLE_CLIENT_ID, and leaves
+   * `iosClientId` and `androidClientId` null until a standalone build defines them in app.json.
+   * Checking only the per-platform ids therefore hid the Google button in exactly the common
+   * case: Google configured on the server, running in Expo Go.
+   */
   const configured = Boolean(
-    googleClientIds?.expoClientId || googleClientIds?.iosClientId || googleClientIds?.androidClientId,
+    googleClientIds?.clientId || googleClientIds?.webClientId
+    || googleClientIds?.expoClientId || googleClientIds?.iosClientId || googleClientIds?.androidClientId,
   );
 
   // The hook must be called unconditionally, so it is given empty ids when Google is unconfigured
