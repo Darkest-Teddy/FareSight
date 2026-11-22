@@ -1,0 +1,11 @@
+30 posed frames on (528, 704), refine=True
+posedImages2Splats: operation 14315c3dc491402a8d9ea361941a0a47
+{
+  "draftSplat": null,
+  "refinedSplats": {
+    "2000000": {
+      "assetId": "asset_9687b3576f3574c18a97b87164464129",
+      "path": "refinedSplats_2000000.spz"
+    }
+  }
+}

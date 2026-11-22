@@ -8,6 +8,24 @@
 
 Replicate inference cost an estimated **$0.20032995** for **205.467 active seconds**. That includes 12 successful reconstructions and one billed input-transport failure. All 12 model archives, SOGs, and review sheets are saved locally. [Billable attempt ledger](results.json)
 
+## Re-check: opacity, density and field of view
+
+An outside review raised three possible confounds. Each was checked locally against the saved model output, with no new inference. The script is `opacity_check.py`, and the sheets are in `outputs/opacity-check/<config>/comparison.png`.
+
+**What was checked:** the three 2-photo/518 px rooms, plus Café Central at 3 photos/952 px (1.27 M Gaussians).
+
+| Question | Finding | Effect on the verdict |
+|---|---|---|
+| Is opacity encoded wrong? | **Yes.** All 12 raw PLYs store activated opacity (range 0.0025–1.0, scales in log space). SplatTransform reads that field as a logit, so every Gaussian rendered at 50–73% opacity. The scored renders and the shipped SOGs all carry this bug. | Fixing it makes renders crisper and removes some speckled floaters, such as on McSorley's floor. The holes and smears are unchanged. |
+| Did 100k decimation cause the failures? | **No.** Native density (up to 1.27 M), 250k and 100k look nearly the same at every pose. | Same verdict. 100k remains a fine Quest tier. |
+| Did the 62° field of view exaggerate the gaps? | **Partly.** At photo 1's own FOV (44–60°), the near views at 0.25–0.5 m lose most of their black frame edges. | Near-viewpoint viewing is better than the sheets showed. At about 1.5 m, every room still shows disocclusion holes behind columns and furniture. |
+
+**Conclusion:** 0 of 12 still pass the walkable-room bar. The failure is missing geometry from too few viewpoints, not conversion or compression.
+
+`evaluate.py` now writes `gaussians-opacity-fixed.ply` before decimating or converting. The SOGs already in `outputs/<config>/` predate that change and are left as scored.
+
+`apply_sky_mask` was left at its default of `true`, and that remains untested. A single controlled run with it set to `false` would cost about $0.013.
+
 ## Photo sets
 
 All nine photos came from Wikimedia Commons. I preserved the downloaded renditions and used orientation-corrected 1280 × 960 center crops in the ZIPs. Equal aspect ratios let WorldMirror stack the photos in one input tensor. In the two-photo condition, the ZIP contains the same first two images used by the three-photo condition. The [source manifest](sources/manifest.json) records capture dates, source pages, authors, licenses, and local copies. [WorldMirror image preprocessing](https://github.com/Tencent-Hunyuan/HY-World-2.0/blob/main/hyworld2/worldrecon/hyworldmirror/utils/inference_utils.py)

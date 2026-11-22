@@ -1,0 +1,131 @@
+splat-transform v3.12.0 (5d5be2b)
+▸ [2/2] Output /Users/liem/random/FareSight/web/public/assets-demo/room-eljefes-atlas.sog
+  · 345K gaussians · 0 SH bands
+  ▸ Writing
+    · room-eljefes-atlas.sog (4.2MB)
+done in 0.840s  [peak cpu=377.5MB]
+splat-transform v3.12.0 (5d5be2b)
+▸ [2/2] Output /Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/atlas/eljefes-kenmore/app-spawn-check.webp
+  · 345K gaussians · 0 SH bands
+  ▸ Render
+    · 528x704 fov 90°
+    · scene resident on GPU (42.1MB)
+    ▸ Encoding
+    · app-spawn-check.webp (328.2KB)
+done in 0.655s  [peak cpu=251.6MB gpu=58.6MB]
+splat-transform v3.12.0 (5d5be2b)
+▸ [2/2] Output /Users/liem/random/FareSight/web/public/assets-demo/room-shudaxia-atlas.sog
+  · 349K gaussians · 0 SH bands
+  ▸ Writing
+    · room-shudaxia-atlas.sog (4.3MB)
+done in 0.870s  [peak cpu=363.5MB]
+splat-transform v3.12.0 (5d5be2b)
+▸ [2/2] Output /Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/atlas/shudaxia-hotpot/app-spawn-check.webp
+  · 349K gaussians · 0 SH bands
+  ▸ Render
+    · 528x704 fov 90°
+    · scene resident on GPU (42.6MB)
+    ▸ Encoding
+    · app-spawn-check.webp (316.1KB)
+done in 0.602s  [peak cpu=251.1MB gpu=60.4MB]
+splat-transform v3.12.0 (5d5be2b)
+▸ [2/2] Output /Users/liem/random/FareSight/web/public/assets-demo/room-starbucks-atlas.sog
+  · 350K gaussians · 0 SH bands
+  ▸ Writing
+    · room-starbucks-atlas.sog (4.2MB)
+done in 0.884s  [peak cpu=407.0MB]
+splat-transform v3.12.0 (5d5be2b)
+▸ [2/2] Output /Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/atlas/starbucks-warren/app-spawn-check.webp
+  · 350K gaussians · 0 SH bands
+  ▸ Render
+    · 528x704 fov 90°
+    · scene resident on GPU (42.7MB)
+    ▸ Encoding
+    · app-spawn-check.webp (248.8KB)
+done in 0.581s  [peak cpu=246.0MB gpu=57.6MB]
+[
+  {
+    "file": "room-eljefes-atlas.sog",
+    "kind": "room",
+    "splats": 344961,
+    "bytes": 4428673,
+    "spawn_point": [
+      0.0,
+      1.55,
+      2.0
+    ],
+    "start_photo": "IMG_5087",
+    "scale_applied": 1.0,
+    "photo_camera_height_m": 1.71,
+    "yaw_deg": 137.5,
+    "bounds_m": {
+      "min": [
+        -13.07,
+        -0.5,
+        -16.24
+      ],
+      "max": [
+        16.88,
+        6.0,
+        21.89
+      ]
+    },
+    "spawn_check_render": "atlas/eljefes-kenmore/app-spawn-check.webp"
+  },
+  {
+    "file": "room-shudaxia-atlas.sog",
+    "kind": "room",
+    "splats": 349370,
+    "bytes": 4532101,
+    "spawn_point": [
+      0.0,
+      1.55,
+      2.0
+    ],
+    "start_photo": "IMG_5099",
+    "scale_applied": 1.0,
+    "photo_camera_height_m": 1.48,
+    "yaw_deg": -156.1,
+    "bounds_m": {
+      "min": [
+        -13.85,
+        -0.5,
+        -9.98
+      ],
+      "max": [
+        16.91,
+        4.41,
+        11.59
+      ]
+    },
+    "spawn_check_render": "atlas/shudaxia-hotpot/app-spawn-check.webp"
+  },
+  {
+    "file": "room-starbucks-atlas.sog",
+    "kind": "room",
+    "splats": 349990,
+    "bytes": 4449483,
+    "spawn_point": [
+      0.0,
+      1.55,
+      2.0
+    ],
+    "start_photo": "IMG_5137",
+    "scale_applied": 0.6,
+    "photo_camera_height_m": 1.51,
+    "yaw_deg": 131.2,
+    "bounds_m": {
+      "min": [
+        -9.64,
+        -0.47,
+        -3.96
+      ],
+      "max": [
+        13.62,
+        3.77,
+        9.07
+      ]
+    },
+    "spawn_check_render": "atlas/starbucks-warren/app-spawn-check.webp"
+  }
+]

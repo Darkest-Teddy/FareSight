@@ -1,0 +1,90 @@
+submitted shudaxia-pork-ribs idol 01a200e6-e2b7-76a0-8b01-c08500e86db5
+succeeded shudaxia-pork-ribs idol 5.68434833699996 0.1
+shudaxia-pork-ribs idol {'30k': {'count': 30000, 'bytes': 389600, 'version': 3, 'decoded_y_range_m': [-0.0020692937541753054, 0.11467790603637695], 'decoded_robust_width_m': 0.18198611587285995, 'decoded_full_width_m': 0.24197041988372803}, '60k': {'count': 60000, 'bytes': 756852, 'version': 3, 'decoded_y_range_m': [-0.0020803387742489576, 0.11469216644763947], 'decoded_robust_width_m': 0.1821853183209896, 'decoded_full_width_m': 0.2420174777507782}}
+submitted shudaxia-beef-tripe idol 01a200e7-79f0-7611-8dd7-d8ff8c9e9b00
+succeeded shudaxia-beef-tripe idol 5.679320156000017 0.1
+shudaxia-beef-tripe idol {'30k': {'count': 30000, 'bytes': 384268, 'version': 3, 'decoded_y_range_m': [-8.758710464462638e-05, 0.0710909441113472], 'decoded_robust_width_m': 0.21303071193397044, 'decoded_full_width_m': 0.24141350388526917}, '60k': {'count': 60000, 'bytes': 752295, 'version': 3, 'decoded_y_range_m': [-8.758710464462638e-05, 0.07134155184030533], 'decoded_robust_width_m': 0.21283733695745466, 'decoded_full_width_m': 0.2415100336074829}}
+submitted shudaxia-beef-skewers idol 01a200e8-0ce7-7e10-88ce-cff27bf27f00
+succeeded shudaxia-beef-skewers idol 5.66475350799999 0.1
+shudaxia-beef-skewers idol {'30k': {'count': 30000, 'bytes': 395972, 'version': 3, 'decoded_y_range_m': [-0.00014281987387221307, 0.10663636028766632], 'decoded_robust_width_m': 0.09910767693072556, 'decoded_full_width_m': 0.1204862967133522}, '60k': {'count': 60000, 'bytes': 767865, 'version': 3, 'decoded_y_range_m': [-0.00016301021969411522, 0.1067580059170723], 'decoded_robust_width_m': 0.09947906881570812, 'decoded_full_width_m': 0.1205509603023529}}
+submitted shudaxia-beef-tongue idol 01a200e8-9cac-7f63-94b6-0343bb3669a2
+succeeded shudaxia-beef-tongue idol 5.662920726999914 0.1
+shudaxia-beef-tongue idol {'30k': {'count': 30000, 'bytes': 389043, 'version': 3, 'decoded_y_range_m': [-0.0008555625099688768, 0.08047576248645782], 'decoded_robust_width_m': 0.20894209742546083, 'decoded_full_width_m': 0.26311373710632324}, '60k': {'count': 60000, 'bytes': 761603, 'version': 3, 'decoded_y_range_m': [-0.0008555625099688768, 0.08053062856197357], 'decoded_robust_width_m': 0.20884890668094158, 'decoded_full_width_m': 0.2631864547729492}}
+submitted shudaxia-ribeye idol 01a200e9-32b0-7810-a1a8-30ef5e840730
+succeeded shudaxia-ribeye idol 5.658925739999859 0.1
+shudaxia-ribeye idol {'30k': {'count': 30000, 'bytes': 384903, 'version': 3, 'decoded_y_range_m': [-0.0005694974679499865, 0.03468126431107521], 'decoded_robust_width_m': 0.2131480272859335, 'decoded_full_width_m': 0.2623710036277771}, '60k': {'count': 60000, 'bytes': 756410, 'version': 3, 'decoded_y_range_m': [-0.0005694974679499865, 0.03468126431107521], 'decoded_robust_width_m': 0.21243083253502842, 'decoded_full_width_m': 0.26246732473373413}}
+submitted shudaxia-lamb idol 01a200e9-c0b8-74e1-9ef4-06b59f86d129
+succeeded shudaxia-lamb idol 5.669869105000089 0.1
+shudaxia-lamb idol {'30k': {'count': 30000, 'bytes': 384639, 'version': 3, 'decoded_y_range_m': [-0.0010773190297186375, 0.12153878808021545], 'decoded_robust_width_m': 0.2579383797943592, 'decoded_full_width_m': 0.28054505586624146}, '60k': {'count': 60000, 'bytes': 753833, 'version': 3, 'decoded_y_range_m': [-0.0011113258078694344, 0.12153878808021545], 'decoded_robust_width_m': 0.2581106379628181, 'decoded_full_width_m': 0.2805960476398468}}
+submitted shudaxia-beef-duo idol 01a200ea-4dee-76e0-b83d-697e3e0d1a85
+succeeded shudaxia-beef-duo idol 5.718488385000001 0.1
+shudaxia-beef-duo idol {'30k': {'count': 30000, 'bytes': 395583, 'version': 3, 'decoded_y_range_m': [-0.0001249233609996736, 0.04807266965508461], 'decoded_robust_width_m': 0.24681664779782295, 'decoded_full_width_m': 0.30301931500434875}, '60k': {'count': 60000, 'bytes': 770069, 'version': 3, 'decoded_y_range_m': [-0.00018454354722052813, 0.04815904051065445], 'decoded_robust_width_m': 0.24609583020210263, 'decoded_full_width_m': 0.30382227897644043}}
+submitted shudaxia-short-rib idol 01a200ec-d0fa-7fc2-a259-b17e171f6c2a
+succeeded shudaxia-short-rib idol 5.702933669999993 0.1
+shudaxia-short-rib idol {'30k': {'count': 30000, 'bytes': 393845, 'version': 3, 'decoded_y_range_m': [-0.001017323462292552, 0.06881256401538849], 'decoded_robust_width_m': 0.23094076216220855, 'decoded_full_width_m': 0.2823939323425293}, '60k': {'count': 60000, 'bytes': 769741, 'version': 3, 'decoded_y_range_m': [-0.0010895523009821773, 0.06881731748580933], 'decoded_robust_width_m': 0.23018950559198856, 'decoded_full_width_m': 0.2825332283973694}}
+submitted shudaxia-marinated-beef idol 01a200ed-6bf8-7862-83f9-f7d7ec1c222c
+succeeded shudaxia-marinated-beef idol 5.684745833000022 0.1
+shudaxia-marinated-beef idol {'30k': {'count': 30000, 'bytes': 387459, 'version': 3, 'decoded_y_range_m': [-0.0004844895738642663, 0.03645002469420433], 'decoded_robust_width_m': 0.22393284402787683, 'decoded_full_width_m': 0.2608427405357361}, '60k': {'count': 60000, 'bytes': 757358, 'version': 3, 'decoded_y_range_m': [-0.000546492577996105, 0.03653119504451752], 'decoded_robust_width_m': 0.22359469197690485, 'decoded_full_width_m': 0.26093441247940063}}
+submitted shudaxia-shrimp idol 01a200ee-e976-7e82-8093-9a2e7aff4b5b
+succeeded shudaxia-shrimp idol 8.603138334999983 0.1
+shudaxia-shrimp idol {'30k': {'count': 30000, 'bytes': 393099, 'version': 3, 'decoded_y_range_m': [-0.0010764016769826412, 0.1422247737646103], 'decoded_robust_width_m': 0.21700545400381088, 'decoded_full_width_m': 0.26422619819641113}, '60k': {'count': 60000, 'bytes': 755234, 'version': 3, 'decoded_y_range_m': [-0.0011138975387439132, 0.1422247737646103], 'decoded_robust_width_m': 0.21788805015385146, 'decoded_full_width_m': 0.2643434405326843}}
+submitted shudaxia-frog-leg idol 01a200ef-9595-7e93-8d0e-81d2311d2a78
+succeeded shudaxia-frog-leg idol 5.7098246179999705 0.1
+shudaxia-frog-leg idol {'30k': {'count': 30000, 'bytes': 387934, 'version': 3, 'decoded_y_range_m': [-0.0012707934947684407, 0.0806150808930397], 'decoded_robust_width_m': 0.20585703775286673, 'decoded_full_width_m': 0.2641850709915161}, '60k': {'count': 60000, 'bytes': 755279, 'version': 3, 'decoded_y_range_m': [-0.001331451814621687, 0.08074956387281418], 'decoded_robust_width_m': 0.20585058294236658, 'decoded_full_width_m': 0.2645726799964905}}
+submitted shudaxia-abalone idol 01a200f0-276e-7712-9cbc-51015e91fd99
+succeeded shudaxia-abalone idol 5.667780052000012 0.1
+shudaxia-abalone idol {'30k': {'count': 30000, 'bytes': 401036, 'version': 3, 'decoded_y_range_m': [-0.0006785381119698286, 0.055061038583517075], 'decoded_robust_width_m': 0.16029042676091193, 'decoded_full_width_m': 0.2037210762500763}, '60k': {'count': 60000, 'bytes': 766714, 'version': 3, 'decoded_y_range_m': [-0.0006785381119698286, 0.05508717522025108], 'decoded_robust_width_m': 0.1606049489229917, 'decoded_full_width_m': 0.20385053753852844}}
+submitted shudaxia-fish-fillets idol 01a200f0-c373-70e0-9439-90c8d70769ef
+succeeded shudaxia-fish-fillets idol 5.660583057999986 0.1
+shudaxia-fish-fillets idol {'30k': {'count': 30000, 'bytes': 383267, 'version': 3, 'decoded_y_range_m': [-0.0008355388999916613, 0.08268353343009949], 'decoded_robust_width_m': 0.21553684510290622, 'decoded_full_width_m': 0.26831674575805664}, '60k': {'count': 60000, 'bytes': 743390, 'version': 3, 'decoded_y_range_m': [-0.0008358561317436397, 0.0827704593539238], 'decoded_robust_width_m': 0.21527977548539634, 'decoded_full_width_m': 0.26860469579696655}}
+submitted shudaxia-shrimp-roll idol 01a200f1-bcf7-7622-9c25-3da5fbca35d3
+succeeded shudaxia-shrimp-roll idol 5.658859833999998 0.1
+shudaxia-shrimp-roll idol {'30k': {'count': 30000, 'bytes': 388602, 'version': 3, 'decoded_y_range_m': [-0.0004314006946515292, 0.032778117805719376], 'decoded_robust_width_m': 0.1689769085496664, 'decoded_full_width_m': 0.22551703453063965}, '60k': {'count': 60000, 'bytes': 760451, 'version': 3, 'decoded_y_range_m': [-0.0004314006946515292, 0.03284420445561409], 'decoded_robust_width_m': 0.17035871744155878, 'decoded_full_width_m': 0.2255956530570984}}
+submitted shudaxia-veg-platter idol 01a200f2-8f9a-7af1-b7d0-61a81b2504a9
+succeeded shudaxia-veg-platter idol 5.635259458000007 0.1
+shudaxia-veg-platter idol {'30k': {'count': 30000, 'bytes': 380722, 'version': 3, 'decoded_y_range_m': [-0.0001244268351001665, 0.1389317363500595], 'decoded_robust_width_m': 0.18254504092037677, 'decoded_full_width_m': 0.22103124856948853}, '60k': {'count': 60000, 'bytes': 739598, 'version': 3, 'decoded_y_range_m': [-0.0001244268351001665, 0.13900059461593628], 'decoded_robust_width_m': 0.18342175632715224, 'decoded_full_width_m': 0.2212749868631363}}
+submitted shudaxia-mushroom-platter idol 01a200f3-1d47-7d21-acf7-92e32b17730d
+succeeded shudaxia-mushroom-platter idol 5.67770003499993 0.1
+shudaxia-mushroom-platter idol {'30k': {'count': 30000, 'bytes': 388914, 'version': 3, 'decoded_y_range_m': [-0.0004363419720903039, 0.06948105245828629], 'decoded_robust_width_m': 0.20910638980567453, 'decoded_full_width_m': 0.26218050718307495}, '60k': {'count': 60000, 'bytes': 753928, 'version': 3, 'decoded_y_range_m': [-0.0004363419720903039, 0.06961994618177414], 'decoded_robust_width_m': 0.20903823673725125, 'decoded_full_width_m': 0.2623332738876343}}
+submitted shudaxia-crispy-pork idol 01a200f3-b15a-78f3-bac6-347528aa4fdd
+succeeded shudaxia-crispy-pork idol 5.671678888000088 0.1
+shudaxia-crispy-pork idol {'30k': {'count': 30000, 'bytes': 388201, 'version': 3, 'decoded_y_range_m': [-0.0003008648636750877, 0.06406864523887634], 'decoded_robust_width_m': 0.17295694649219512, 'decoded_full_width_m': 0.22163517773151398}, '60k': {'count': 60000, 'bytes': 772593, 'version': 3, 'decoded_y_range_m': [-0.0003008648636750877, 0.06414340436458588], 'decoded_robust_width_m': 0.17428504787385463, 'decoded_full_width_m': 0.2216365486383438}}
+submitted shudaxia-sticky-rice idol 01a200f4-6c39-7071-9bbb-656d81935b19
+succeeded shudaxia-sticky-rice idol 5.6492373629999975 0.1
+shudaxia-sticky-rice idol {'30k': {'count': 30000, 'bytes': 397041, 'version': 3, 'decoded_y_range_m': [-0.00016306184988934547, 0.047791339457035065], 'decoded_robust_width_m': 0.21137465350329876, 'decoded_full_width_m': 0.2409651130437851}, '60k': {'count': 60000, 'bytes': 772566, 'version': 3, 'decoded_y_range_m': [-0.00016619465895928442, 0.047797996550798416], 'decoded_robust_width_m': 0.2118775684386492, 'decoded_full_width_m': 0.24115684628486633}}
+submitted shudaxia-sichuan-fries idol 01a200f4-fbff-7e82-8e77-d9bdb8ed4491
+succeeded shudaxia-sichuan-fries idol 5.680483448000018 0.1
+shudaxia-sichuan-fries idol {'30k': {'count': 30000, 'bytes': 400684, 'version': 3, 'decoded_y_range_m': [-0.0004127995343878865, 0.06819619238376617], 'decoded_robust_width_m': 0.19097202867269514, 'decoded_full_width_m': 0.24531620740890503}, '60k': {'count': 60000, 'bytes': 784248, 'version': 3, 'decoded_y_range_m': [-0.0005472186021506786, 0.0683305636048317], 'decoded_robust_width_m': 0.19130497016012665, 'decoded_full_width_m': 0.24554583430290222}}
+submitted shudaxia-dumplings idol 01a200f5-9058-7973-a66b-b683b8f5e8a9
+succeeded shudaxia-dumplings idol 5.71183097100004 0.1
+shudaxia-dumplings idol {'30k': {'count': 30000, 'bytes': 388563, 'version': 3, 'decoded_y_range_m': [-0.0005208624061197042, 0.03680337592959404], 'decoded_robust_width_m': 0.17766606993973255, 'decoded_full_width_m': 0.2254418581724167}, '60k': {'count': 60000, 'bytes': 754366, 'version': 3, 'decoded_y_range_m': [-0.0005490234470926225, 0.03688107803463936], 'decoded_robust_width_m': 0.17704404480755329, 'decoded_full_width_m': 0.2254531979560852}}
+submitted shudaxia-beef-fried-rice idol 01a200f6-815b-73b2-8dc6-d13e8c185cd5
+succeeded shudaxia-beef-fried-rice idol 5.699279844999978 0.1
+shudaxia-beef-fried-rice idol {'30k': {'count': 30000, 'bytes': 393381, 'version': 3, 'decoded_y_range_m': [-0.0003216586192138493, 0.051422104239463806], 'decoded_robust_width_m': 0.20162546820938584, 'decoded_full_width_m': 0.2643321752548218}, '60k': {'count': 60000, 'bytes': 757269, 'version': 3, 'decoded_y_range_m': [-0.00042249338002875447, 0.05144869536161423], 'decoded_robust_width_m': 0.20257855169475075, 'decoded_full_width_m': 0.26462751626968384}}
+submitted shudaxia-noodles idol 01a200f7-4856-76e2-9850-e47df15faa30
+succeeded shudaxia-noodles idol 5.6914996639999345 0.1
+shudaxia-noodles idol {'30k': {'count': 30000, 'bytes': 391296, 'version': 3, 'decoded_y_range_m': [-0.0010499147465452552, 0.05347917601466179], 'decoded_robust_width_m': 0.17225544415414334, 'decoded_full_width_m': 0.22205689549446106}, '60k': {'count': 60000, 'bytes': 755909, 'version': 3, 'decoded_y_range_m': [-0.0010795500129461288, 0.053551096469163895], 'decoded_robust_width_m': 0.17120201364159582, 'decoded_full_width_m': 0.22211331129074097}}
+submitted shudaxia-malatang idol 01a200f7-e035-7703-b10d-b73aec448ebb
+succeeded shudaxia-malatang idol 5.728261266000004 0.1
+shudaxia-malatang idol {'30k': {'count': 30000, 'bytes': 396708, 'version': 3, 'decoded_y_range_m': [-0.0006233892636373639, 0.10086721181869507], 'decoded_robust_width_m': 0.20785136967897416, 'decoded_full_width_m': 0.24037347733974457}, '60k': {'count': 60000, 'bytes': 762344, 'version': 3, 'decoded_y_range_m': [-0.0009459755965508521, 0.10086721181869507], 'decoded_robust_width_m': 0.20909798629581927, 'decoded_full_width_m': 0.24041393399238586}}
+submitted shudaxia-ice-pudding idol 01a200f8-7662-7213-a689-866390d8b710
+succeeded shudaxia-ice-pudding idol 5.674312330000021 0.1
+shudaxia-ice-pudding idol {'30k': {'count': 30000, 'bytes': 398240, 'version': 3, 'decoded_y_range_m': [-0.0006262980168685317, 0.08853045850992203], 'decoded_robust_width_m': 0.1742032751441002, 'decoded_full_width_m': 0.20091427862644196}, '60k': {'count': 60000, 'bytes': 760623, 'version': 3, 'decoded_y_range_m': [-0.0006286345305852592, 0.08853045850992203], 'decoded_robust_width_m': 0.17471033334732056, 'decoded_full_width_m': 0.20096591114997864}}
+submitted shudaxia-tofu-pudding idol 01a200f9-0e92-7c71-8acb-291bb3d3322b
+succeeded shudaxia-tofu-pudding idol 5.655208951000077 0.1
+shudaxia-tofu-pudding idol {'30k': {'count': 30000, 'bytes': 390133, 'version': 3, 'decoded_y_range_m': [-0.00025297162937931716, 0.11954648047685623], 'decoded_robust_width_m': 0.07005443796515465, 'decoded_full_width_m': 0.08019889146089554}, '60k': {'count': 60000, 'bytes': 751519, 'version': 3, 'decoded_y_range_m': [-0.0003144283255096525, 0.11955531686544418], 'decoded_robust_width_m': 0.07054141666740178, 'decoded_full_width_m': 0.08022768795490265}}
+submitted shudaxia-crepe-cake idol 01a200f9-bc5a-7fb1-8e6b-a4a6970e8b76
+succeeded shudaxia-crepe-cake idol 5.700945454000021 0.1
+shudaxia-crepe-cake idol {'30k': {'count': 30000, 'bytes': 378296, 'version': 3, 'decoded_y_range_m': [-0.001182124251499772, 0.11875608563423157], 'decoded_robust_width_m': 0.18980698734521864, 'decoded_full_width_m': 0.22084060311317444}, '60k': {'count': 60000, 'bytes': 735675, 'version': 3, 'decoded_y_range_m': [-0.0013436684384942055, 0.11875608563423157], 'decoded_robust_width_m': 0.18952803872525692, 'decoded_full_width_m': 0.22088882327079773}}
+submitted shudaxia-cheesecake idol 01a200fa-4fa8-7a11-9218-9194db0ab4e7
+succeeded shudaxia-cheesecake idol 5.626866092 0.1
+shudaxia-cheesecake idol {'30k': {'count': 30000, 'bytes': 408498, 'version': 3, 'decoded_y_range_m': [-0.025059141218662262, 0.08121068775653839], 'decoded_robust_width_m': 0.1712110113352537, 'decoded_full_width_m': 0.19140923023223877}, '60k': {'count': 60000, 'bytes': 795749, 'version': 3, 'decoded_y_range_m': [-0.02970896102488041, 0.08133986592292786], 'decoded_robust_width_m': 0.17124037705361844, 'decoded_full_width_m': 0.19186434149742126}}
+submitted shudaxia-strawberry-matcha idol 01a200fa-ef91-7b40-be2d-6247d690bdb2
+succeeded shudaxia-strawberry-matcha idol 5.640668478999942 0.1
+shudaxia-strawberry-matcha idol {'30k': {'count': 30000, 'bytes': 410064, 'version': 3, 'decoded_y_range_m': [-0.00012664226233027875, 0.15550127625465393], 'decoded_robust_width_m': 0.0746377918869257, 'decoded_full_width_m': 0.09137051552534103}, '60k': {'count': 60000, 'bytes': 773133, 'version': 3, 'decoded_y_range_m': [-0.00013266829773783684, 0.15551713109016418], 'decoded_robust_width_m': 0.07456040009856224, 'decoded_full_width_m': 0.09140712767839432}}
+submitted shudaxia-mango-tea idol 01a200fb-8aaa-75d0-aadf-c8aa3d037bd1
+succeeded shudaxia-mango-tea idol 5.657379882999976 0.1
+shudaxia-mango-tea idol {'30k': {'count': 30000, 'bytes': 386669, 'version': 3, 'decoded_y_range_m': [-5.752769357059151e-05, 0.15650713443756104], 'decoded_robust_width_m': 0.07458710800856352, 'decoded_full_width_m': 0.09078222513198853}, '60k': {'count': 60000, 'bytes': 750972, 'version': 3, 'decoded_y_range_m': [-8.621034066891298e-05, 0.15653033554553986], 'decoded_robust_width_m': 0.07460987195372581, 'decoded_full_width_m': 0.09078222513198853}}
+submitted shudaxia-lime-tea idol 01a200fc-1fa9-7bc1-b2ee-8e024a482c7c
+succeeded shudaxia-lime-tea idol 5.649226059000057 0.1
+shudaxia-lime-tea idol {'30k': {'count': 30000, 'bytes': 388874, 'version': 3, 'decoded_y_range_m': [-0.002346141031011939, 0.1512482464313507], 'decoded_robust_width_m': 0.07404187526553868, 'decoded_full_width_m': 0.09110808372497559}, '60k': {'count': 60000, 'bytes': 756463, 'version': 3, 'decoded_y_range_m': [-0.0023676699493080378, 0.15125907957553864], 'decoded_robust_width_m': 0.07370536755770445, 'decoded_full_width_m': 0.09114044904708862}}
