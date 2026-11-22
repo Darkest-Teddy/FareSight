@@ -10,7 +10,6 @@ const canvas = document.querySelector<HTMLCanvasElement>('#stage')!;
 const veil = document.querySelector<HTMLElement>('.veil')!;
 const meter = document.querySelector<HTMLElement>('.meter')!;
 const status = document.querySelector<HTMLElement>('.status')!;
-const roomTag = document.querySelector<HTMLElement>('.room-tag')!;
 const phone = document.querySelector<HTMLElement>('.phone')!;
 const scan = document.querySelector<HTMLVideoElement>('.phone-scan')!;
 
@@ -218,7 +217,6 @@ frame(0);
 
 scene.init((roomReady) => {
   body.dataset.room = roomReady ? 'ready' : 'missing';
-  if (!roomReady) roomTag.textContent = '3D interior unavailable';
 }).then(() => {
   if (events.signal.aborted) return;
   cancelAnimationFrame(fallbackFrame);
@@ -234,7 +232,6 @@ scene.init((roomReady) => {
   scene.destroy();
   body.dataset.state = 'ready';
   body.dataset.stage = 'missing';
-  roomTag.textContent = '3D interior unavailable';
   springText(status, 'The 3D model could not load on this device. The app still works.');
   wake();
 });

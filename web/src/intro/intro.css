@@ -149,23 +149,6 @@ h2 { font-size: clamp(2.1rem, 4.5vw, 4.1rem); font-weight: 750; letter-spacing: 
   background: var(--sun); color: var(--ink);
   font-size: .78em; font-weight: 750; letter-spacing: .02em; line-height: 1.15; vertical-align: .08em;
 }
-/* Kickers are the app's map labels: a white card with a dot. Sunflower by default, a line's color for a stop. */
-.line {
-  display: inline-flex; align-items: center; gap: .4375rem;
-  min-height: 2rem; margin-bottom: 1rem; padding: .3125rem .75rem .3125rem .5625rem;
-  border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow-sm);
-  font-size: .8125rem; font-weight: 650; letter-spacing: -.01em; white-space: nowrap;
-}
-.line::before {
-  content: ''; width: .6875rem; height: .6875rem; flex: none; border-radius: 50%;
-  border: 1.5px solid var(--ink); background: var(--sun);
-}
-.line[data-line=green]::before { border-color: var(--live); background: var(--live); }
-.room-tag {
-  width: fit-content; margin: 1.25rem auto 0; padding: .3125rem .625rem;
-  border-radius: var(--radius-xs); background: var(--surface); box-shadow: var(--shadow-sm);
-  color: var(--ink); font-size: .75rem; font-weight: 550;
-}
 
 .beat-hero { align-items: end; justify-items: start; visibility: visible; }
 .beat-hero .copy { opacity: 1; }
@@ -180,7 +163,7 @@ h2 { font-size: clamp(2.1rem, 4.5vw, 4.1rem); font-weight: 750; letter-spacing: 
 /* Inside the room the copy is paper on the dark veil, and the action is a paper card. */
 .beat-inside .copy { color: var(--surface); text-shadow: 0 2px 15px rgb(20 14 8 / 86%); }
 .beat-inside .lead { margin-inline: auto; max-width: 42ch; color: rgb(255 253 248 / 90%); }
-.beat-inside .room-tag, .beat-inside .action { text-shadow: none; }
+.beat-inside .action { text-shadow: none; }
 .beat-inside .action { height: 3.25rem; margin-top: 1.25rem; padding: 0 1.75rem; font-size: .9375rem; }
 .beat-inside :focus-visible { outline-color: var(--surface); }
 
@@ -291,14 +274,12 @@ body[data-state=loading] .status::before {
   .map-label-count { display: none; }
   .beat, .beat-stops, .beat-inside { align-items: end; justify-items: start; text-align: left; }
   .beat-stops .lead, .beat-inside .lead { margin-inline: 0; }
-  .room-tag { margin-inline: 0; }
   .beat-place .copy, .beat-station .copy, .beat-phone .copy { width: 100%; max-width: 30rem; padding-bottom: 0; }
   .lead { max-width: 30ch; }
   /* The phone stands above its copy. */
   .phone { --w: min(23vh, 53vw); top: calc(var(--below-bar) + .375rem + var(--w) * 1.03); left: 50%; }
   .dusk { background: rgb(251 249 244 / 92%); }
   .beat-phone h2 { font-size: 1.8rem; }
-  .beat-phone .line { margin-bottom: .6rem; }
   .beat-phone .note { display: none; }
   .shade {
     background:
