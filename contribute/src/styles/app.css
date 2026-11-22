@@ -612,6 +612,8 @@ button:disabled { cursor: default; }
   transition: transform .14s var(--ease-out), background-color .2s;
 }
 .add-tile:active { transform: scale(.95); background: var(--panel); }
+.scan-tile { border-style: solid; border-color: var(--accent); background: rgb(79 227 255 / 12%); }
+.scan-tile:disabled { opacity: .45; }
 .is-sending .add-tile { opacity: .45; pointer-events: none; }
 .segmented { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: .25rem; padding: .25rem; border-radius: .9rem; background: var(--panel); }
 .segment { position: relative; display: grid; place-items: center; min-height: 2.6rem; border-radius: .7rem; color: var(--muted); font-size: .88rem; font-weight: 650; transition: background-color .25s, color .25s; }
@@ -701,6 +703,90 @@ button:disabled { cursor: default; }
 .sheet-note { color: var(--muted); font-size: .86rem; line-height: 1.45; }
 .code-input { background: var(--canvas); letter-spacing: .02em; }
 .sheet-actions { display: grid; gap: .2rem; }
+
+/* ---- Guided 360° scan ---- */
+.sweep-dialog { inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; overflow: hidden; background: #000; color: var(--text); }
+.sweep-dialog::backdrop { background: #000; }
+.sweep-video, .sweep-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.sweep-video { object-fit: cover; }
+.sweep-canvas { touch-action: none; }
+.sweep-top {
+  position: absolute;
+  inset: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  padding: max(.7rem, env(safe-area-inset-top)) max(.9rem, env(safe-area-inset-right)) 1.6rem max(.9rem, env(safe-area-inset-left));
+  background: linear-gradient(rgb(4 7 16 / 72%), transparent);
+  pointer-events: none;
+}
+.sweep-top > * { pointer-events: auto; }
+.sweep-close { background: rgb(11 16 32 / 70%); }
+.sweep-count { font-size: 1.15rem; font-weight: 760; letter-spacing: -.02em; }
+.sweep-dome {
+  position: absolute;
+  top: max(.7rem, env(safe-area-inset-top));
+  right: max(.9rem, env(safe-area-inset-right));
+  width: 6rem;
+  height: 6rem;
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: 50%;
+  background: rgb(11 16 32 / 66%);
+  pointer-events: none;
+}
+.sweep-hint {
+  position: absolute;
+  left: 50%;
+  bottom: calc(max(.9rem, env(safe-area-inset-bottom)) + 4.4rem);
+  translate: -50% 0;
+  padding: .5rem 1rem;
+  border-radius: 2rem;
+  background: rgb(11 16 32 / 76%);
+  font-size: .98rem;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.sweep-hint:empty { display: none; }
+.sweep-bar {
+  position: absolute;
+  inset: auto 0 0;
+  display: flex;
+  align-items: center;
+  gap: .9rem;
+  padding: 1.6rem max(.9rem, env(safe-area-inset-right)) max(.9rem, env(safe-area-inset-bottom)) max(.9rem, env(safe-area-inset-left));
+  background: linear-gradient(transparent, rgb(4 7 16 / 78%));
+}
+.sweep-progress { flex: 1; height: .45rem; overflow: hidden; border-radius: 1rem; background: rgb(255 255 255 / 20%); }
+.sweep-progress i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .35s var(--ease-out); }
+.sweep-dialog[data-card=true] .sweep-bar, .sweep-dialog[data-card=true] .sweep-hint { display: none; }
+.sweep-card {
+  position: absolute;
+  inset: auto 0 0;
+  display: grid;
+  gap: .85rem;
+  max-width: 540px;
+  margin-inline: auto;
+  padding: 1.3rem 1.15rem max(1.2rem, env(safe-area-inset-bottom));
+  border-radius: 1.4rem 1.4rem 0 0;
+  background: var(--panel);
+  animation: sheet-up .38s var(--ease-out);
+}
+.sweep-card h2 { font-size: 1.25rem; letter-spacing: -.03em; }
+.sweep-card .tips { background: var(--canvas); }
+.sweep-lines { display: grid; gap: .45rem; color: var(--muted); font-size: .88rem; line-height: 1.45; }
+/* Development only: the sensors and camera are replaced by a view that is dragged around. */
+.sweep-dialog[data-simulated=true]::before {
+  content: 'Simulated camera. Drag to look around.';
+  position: absolute;
+  z-index: 1;
+  top: calc(max(.7rem, env(safe-area-inset-top)) + 3.4rem);
+  left: max(.9rem, env(safe-area-inset-left));
+  color: var(--amber);
+  font-size: .72rem;
+  font-weight: 650;
+  pointer-events: none;
+}
 
 /* ---- Motion ---- */
 @keyframes fade-in { from { opacity: 0; } }

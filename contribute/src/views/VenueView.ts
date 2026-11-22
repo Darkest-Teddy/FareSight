@@ -5,6 +5,7 @@ import { button, el, errorText, haptic, icon, iconButton, motion, replay, svg, w
 import { prepareImage } from '../photos';
 import { scans } from '../store';
 import { withCode } from '../ui/CodeSheet';
+import { openGuidedScan } from '../ui/GuidedScan';
 
 type Kind = 'room' | 'dish';
 interface Shot {
@@ -18,8 +19,8 @@ const MIN_ROOM_PHOTOS = 2;
 const NEW_DISH = '';
 const tips: Record<Kind, string[]> = {
   room: [
-    'Walk a slow arc around the room and take a photo every few steps.',
-    'Let each photo overlap the one before it by about half.',
+    'Tap 360° scan and turn on the spot. The app takes each photo for you.',
+    'Adding your own instead? Let each photo overlap the one before it by about half.',
     'Keep the light steady and wait for people to move out of frame.',
   ],
   dish: [
@@ -180,10 +181,25 @@ export class VenueView {
     return tile;
   }
 
+  private scanTile() {
+    const tile = button('', () => void this.scan(), 'add-tile scan-tile');
+    tile.disabled = this.busy;
+    tile.append(icon('locate'), el('span', '', '360° scan'));
+    return tile;
+  }
+
+  /** Runs the guided 360° scan and adds the photos it took, like photos picked by hand. */
+  private async scan() {
+    if (this.busy) return;
+    const files = await openGuidedScan(MIN_ROOM_PHOTOS);
+    if (this.alive) this.add(files);
+  }
+
   private renderGrid() {
     const shots = this.current;
     const full = this.kind === 'room' && shots.length >= MAX_ROOM_PHOTOS;
     const tiles: HTMLElement[] = shots.map((shot) => shot.node);
+    if (!full && this.kind === 'room') tiles.push(this.scanTile());
     if (!full) tiles.push(this.picker('camera', shots.length && this.kind === 'dish' ? 'Retake' : 'Camera', true),
       this.picker('image', 'Library', false));
     this.grid.replaceChildren(...tiles);

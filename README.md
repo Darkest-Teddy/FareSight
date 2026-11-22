@@ -25,6 +25,7 @@
   - **Network map**: the sculpture seen from above (same tubes, river and station positions), with the five stops as tappable nodes showing how many places are already in 3D. Tapping a stop dives into its neighborhood.
   - **Station map**: the diorama's OSM footprints seen from above, with a brass pin per place and a swipeable card rail that stays in sync with the map.
   - **Add photos**: pick the space (2–32 overlapping photos) or a dish (1 photo), shoot with the camera or pick from the library, then upload and start the Atlas / TRELLIS job. HEIC and oversized photos are re-encoded on the phone first.
+  - **360° scan**: for a space, the app can take the photos itself. The contributor turns on the spot while dots mark the directions still to capture; aiming at a dot and holding still takes that photo and pops the dot, and a round map shows what is left behind them. It needs the camera and motion sensors, which phones only open on HTTPS: `pnpm --filter @faresight/contribute dev:https` serves the app on `https://<your-LAN-IP>:5181` with a self-signed certificate.
   - **My scans**: live progress of each job started on the phone, through to "In review". Publishing stays with an admin in the main app.
   - Uploads use the existing API. The contributor enters the `ADMIN_PASSCODE` once as an invite code and it is kept on the device.
   - `pnpm --filter @faresight/contribute data` rebuilds `contribute/src/data/` from `modeling/output/` and `modeling/osm-data.json`. Run it after regenerating the models.
