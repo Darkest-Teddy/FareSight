@@ -24,7 +24,7 @@ import { MAX_IMAGE_BYTES } from './services/imagePrep.ts';
 import { startCaptureBridge } from './worker/captureBridge.ts';
 import { startJobWorker } from './worker/jobWorker.ts';
 
-export async function createApp(config: Config = getConfig(), options: { logger?: boolean; worker?: boolean } = {}) {
+export async function createApp(config: Config = getConfig(), options: { logger?: boolean; worker?: boolean; webRoot?: string } = {}) {
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 1024 * 1024 });
   mkdirSync(config.uploads, { recursive: true });
   mkdirSync(config.outputs, { recursive: true });
@@ -59,6 +59,11 @@ export async function createApp(config: Config = getConfig(), options: { logger?
   await app.register(multipart, { limits: { fileSize: MAX_IMAGE_BYTES, files: 1, fields: 5, fieldSize: 2048 } });
   await app.register(websocket, { options: { maxPayload: 16 * 1024 } });
   await app.register(staticFiles, { root: config.outputs, serve: false });
+  if (options.webRoot) {
+    const { webRoot } = options;
+    await app.register(staticFiles, { root: webRoot, decorateReply: false });
+    app.get('/intro', async (_request, reply) => reply.sendFile('intro.html', webRoot));
+  }
 
   app.get<{ Params: { file: string } }>('/storage/uploads/:file', { onRequest: guards.uploadFile }, async ({ params }, reply) => {
     reply.header('Cache-Control', 'private, no-store');

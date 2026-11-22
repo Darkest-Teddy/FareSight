@@ -87,6 +87,24 @@ async function setup(t, overrides = {}) {
   return { config, dir, start, stop, request, stage, origin: () => origin };
 }
 
+test('the hosted web app and API share an origin', async (t) => {
+  const server = await setup(t);
+  const webRoot = join(server.dir, 'web');
+  await mkdir(webRoot);
+  await writeFile(join(webRoot, 'index.html'), '<h1>App</h1>');
+  await writeFile(join(webRoot, 'intro.html'), '<h1>Intro</h1>');
+  await server.start({ webRoot, worker: false });
+
+  for (const [path, html] of [['/', '<h1>App</h1>'], ['/intro', '<h1>Intro</h1>'], ['/intro.html', '<h1>Intro</h1>']]) {
+    const response = await fetch(server.origin() + path);
+    assert.equal(response.status, 200, path);
+    assert.equal(await response.text(), html);
+  }
+  assert.equal((await server.request('/api/health')).status, 'ok');
+  await server.request('/api/admin/moderation', { passcode: false, status: 401 });
+  await server.request('/api/missing', { status: 404 });
+});
+
 test('shared projection, all 100 ordered stop combinations, and fares', () => {
   assert.deepEqual(latLonToSculpture(42.354, -71.095), [0, 0]);
   const [east, north] = latLonToSculpture(42.364, -71.085);

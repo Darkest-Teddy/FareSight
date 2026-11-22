@@ -36,7 +36,7 @@ function captureConfig() {
 
 export type CaptureConfig = NonNullable<ReturnType<typeof captureConfig>>;
 
-export function getConfig() {
+export function getConfig(webRoot = resolve(projectRoot, 'web/public')) {
   const port = Number(process.env.PORT ?? 3001);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be an integer from 1 to 65535');
   const publicBaseUrl = process.env.PUBLIC_BASE_URL ?? `http://localhost:${port}`;
@@ -51,7 +51,7 @@ export function getConfig() {
     port, host: process.env.HOST ?? '0.0.0.0',
     database: process.env.FARESIGHT_DB_PATH ?? resolve(projectRoot, 'server/data/faresight.db'),
     uploads: resolve(storage, 'uploads'), outputs: resolve(storage, 'outputs'),
-    demoAssets: [resolve(projectRoot, 'web/public/assets-demo'), resolve(projectRoot, 'modeling/output')],
+    demoAssets: [resolve(webRoot, 'assets-demo'), resolve(projectRoot, 'modeling/output')],
     publicBaseUrl,
     adminPasscode: process.env.ADMIN_PASSCODE,
     contributorPasscode: process.env.CONTRIBUTOR_PASSCODE,

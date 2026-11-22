@@ -1,8 +1,12 @@
+import { accessSync, constants } from 'node:fs';
+import { resolve } from 'node:path';
 import { createApp } from './app.ts';
-import { getConfig } from './config.ts';
+import { getConfig, projectRoot } from './config.ts';
 
-const config = getConfig();
-const app = await createApp(config, { logger: true });
+const webRoot = process.argv.includes('--serve-web') ? resolve(projectRoot, 'web/dist') : undefined;
+if (webRoot) accessSync(resolve(webRoot, 'index.html'), constants.R_OK);
+const config = getConfig(webRoot);
+const app = await createApp(config, { logger: true, webRoot });
 let closing = false;
 async function shutdown() {
   if (closing) return;
