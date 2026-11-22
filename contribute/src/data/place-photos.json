@@ -27,8 +27,7 @@
     "license": "CC BY-SA 2.0",
     "license_url": "https://creativecommons.org/licenses/by-sa/2.0/",
     "page": "https://www.flickr.com/photos/92787319@N00/53110324970",
-    "provider": "Flickr",
-    "nearby": true
+    "provider": "Flickr"
   },
   "bu-beach-01": {
     "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/ed/BU_Beach.jpg/960px-BU_Beach.jpg",
@@ -41,24 +40,23 @@
     "provider": "Wikimedia Commons"
   },
   "bu-grill-01": {
-    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/68/830-845_Commonwealth_Avenue%2C_Boston.jpg/960px-830-845_Commonwealth_Avenue%2C_Boston.jpg",
-    "width": 960,
-    "height": 598,
-    "credit": "Beyond My Ken",
-    "license": "CC BY-SA 4.0",
-    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
-    "page": "https://commons.wikimedia.org/wiki/File:830-845_Commonwealth_Avenue,_Boston.jpg",
-    "provider": "Wikimedia Commons",
-    "nearby": true
-  },
-  "bu-starbucks-01": {
-    "url": "https://live.staticflickr.com/65535/49847146303_81ed2a931f_b.jpg",
+    "url": "https://live.staticflickr.com/65535/53455915144_009abda985_b.jpg",
     "width": 1024,
     "height": 768,
-    "credit": "tvanhoosear",
+    "credit": "clembore",
     "license": "CC BY-SA 2.0",
     "license_url": "https://creativecommons.org/licenses/by-sa/2.0/",
-    "page": "https://www.flickr.com/photos/92787319@N00/49847146303",
+    "page": "https://www.flickr.com/photos/92787319@N00/53455915144",
+    "provider": "Flickr"
+  },
+  "bu-starbucks-01": {
+    "url": "https://live.staticflickr.com/65535/49899146343_be60df3f6b_b.jpg",
+    "width": 1024,
+    "height": 768,
+    "credit": "clembore",
+    "license": "CC BY-SA 2.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/2.0/",
+    "page": "https://www.flickr.com/photos/92787319@N00/49899146343",
     "provider": "Flickr"
   },
   "allston-brownsugar-01": {
@@ -83,24 +81,24 @@
     "nearby": true
   },
   "allston-super88-01": {
-    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/cc/Packard%27s_Corner%2C_Allston%2C_MA%2C_2009_%2853813070962%29.jpg/960px-Packard%27s_Corner%2C_Allston%2C_MA%2C_2009_%2853813070962%29.jpg",
-    "width": 960,
-    "height": 644,
-    "credit": "Ethan Long",
+    "url": "https://live.staticflickr.com/65535/53814332349_7bcfcc65f3_b.jpg",
+    "width": 1024,
+    "height": 687,
+    "credit": "ethan.long",
     "license": "CC BY-SA 2.0",
-    "license_url": "https://creativecommons.org/licenses/by-sa/2.0",
-    "page": "https://commons.wikimedia.org/wiki/File:Packard%27s_Corner,_Allston,_MA,_2009_(53813070962).jpg",
-    "provider": "Wikimedia Commons",
-    "nearby": true
+    "license_url": "https://creativecommons.org/licenses/by-sa/2.0/",
+    "page": "https://www.flickr.com/photos/188360586@N03/53814332349",
+    "provider": "Flickr",
+    "tag": "Older photo"
   },
   "allston-shabuzen-01": {
-    "url": "https://live.staticflickr.com/1183/679186043_4ead957721_b.jpg",
+    "url": "https://live.staticflickr.com/65535/53111268516_def47e955a_b.jpg",
     "width": 1024,
     "height": 768,
-    "credit": "vaneea",
-    "license": "CC BY-NC-ND 2.0",
-    "license_url": "https://creativecommons.org/licenses/by-nc-nd/2.0/",
-    "page": "https://www.flickr.com/photos/50624037@N00/679186043",
+    "credit": "clembore",
+    "license": "CC BY-SA 2.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/2.0/",
+    "page": "https://www.flickr.com/photos/92787319@N00/53111268516",
     "provider": "Flickr"
   },
   "allston-clearflour-01": {
@@ -145,15 +143,15 @@
     "nearby": true
   },
   "kenmore-eastern-01": {
-    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/61/Kenmore_Square%2C_Boston_%2853829466848%29.jpg/960px-Kenmore_Square%2C_Boston_%2853829466848%29.jpg",
-    "width": 960,
-    "height": 638,
-    "credit": "Ethan Long",
-    "license": "CC BY-SA 2.0",
-    "license_url": "https://creativecommons.org/licenses/by-sa/2.0",
-    "page": "https://commons.wikimedia.org/wiki/File:Kenmore_Square,_Boston_(53829466848).jpg",
-    "provider": "Wikimedia Commons",
-    "nearby": true
+    "url": "https://live.staticflickr.com/4136/4738769440_f382f7d7d9_b.jpg",
+    "width": 1024,
+    "height": 682,
+    "credit": "NathanF",
+    "license": "CC BY 2.0",
+    "license_url": "https://creativecommons.org/licenses/by/2.0/",
+    "page": "https://www.flickr.com/photos/93851844@N00/4738769440",
+    "provider": "Flickr",
+    "tag": "Earlier location"
   },
   "kenmore-esplanade-01": {
     "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c5/Boston_%282019%29_-_159.jpg/960px-Boston_%282019%29_-_159.jpg",
@@ -166,21 +164,20 @@
     "provider": "Wikimedia Commons"
   },
   "kenmore-shudaxia-01": {
-    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/df/Kenmore_Square_Boston_banner.jpg/960px-Kenmore_Square_Boston_banner.jpg",
-    "width": 960,
-    "height": 137,
-    "credit": "kenji ross from boston, usa",
-    "license": "CC BY 2.0",
-    "license_url": "https://creativecommons.org/licenses/by/2.0",
-    "page": "https://commons.wikimedia.org/wiki/File:Kenmore_Square_Boston_banner.jpg",
-    "provider": "Wikimedia Commons",
-    "nearby": true
+    "url": "https://live.staticflickr.com/65535/53027825385_0177d38847_b.jpg",
+    "width": 1024,
+    "height": 768,
+    "credit": "clembore",
+    "license": "CC BY-SA 2.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/2.0/",
+    "page": "https://www.flickr.com/photos/92787319@N00/53027825385",
+    "provider": "Flickr"
   },
   "harvard-cafe-01": {
     "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/0b/Harvard_Square_in_Cambridge%2C_Massachusetts.jpg/960px-Harvard_Square_in_Cambridge%2C_Massachusetts.jpg",
     "width": 960,
     "height": 640,
-    "credit": "(User: Wgreaves )",
+    "credit": "Wgreaves",
     "license": "CC BY-SA 4.0",
     "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
     "page": "https://commons.wikimedia.org/wiki/File:Harvard_Square_in_Cambridge,_Massachusetts.jpg",
@@ -235,7 +232,8 @@
     "license": "CC BY-SA 2.0",
     "license_url": "https://creativecommons.org/licenses/by-sa/2.0/",
     "page": "https://www.flickr.com/photos/34635043@N04/8998703056",
-    "provider": "Flickr"
+    "provider": "Flickr",
+    "tag": "Earlier location"
   },
   "chinatown-winsor-01": {
     "url": "https://live.staticflickr.com/5276/14020668590_4fe823f500_b.jpg",
@@ -278,20 +276,20 @@
     "provider": "Flickr"
   },
   "chinatown-taiwan-01": {
-    "url": "https://live.staticflickr.com/4111/5037405611_3576bde84f_b.jpg",
+    "url": "https://live.staticflickr.com/559/18914151895_a13f9e6a34_b.jpg",
     "width": 1024,
-    "height": 768,
-    "credit": "liangjinjian",
-    "license": "CC BY-NC-ND 2.0",
-    "license_url": "https://creativecommons.org/licenses/by-nc-nd/2.0/",
-    "page": "https://www.flickr.com/photos/70944869@N00/5037405611",
+    "height": 769,
+    "credit": "cherrylet",
+    "license": "CC BY-NC-SA 2.0",
+    "license_url": "https://creativecommons.org/licenses/by-nc-sa/2.0/",
+    "page": "https://www.flickr.com/photos/85508296@N00/18914151895",
     "provider": "Flickr"
   },
   "haymarket-neptune-01": {
     "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/46/Neptune_Oyster_%284076035383%29.jpg/960px-Neptune_Oyster_%284076035383%29.jpg",
     "width": 960,
     "height": 640,
-    "credit": "Tim Sackton from Somerville, MA",
+    "credit": "Tim Sackton",
     "license": "CC BY-SA 2.0",
     "license_url": "https://creativecommons.org/licenses/by-sa/2.0",
     "page": "https://commons.wikimedia.org/wiki/File:Neptune_Oyster_(4076035383).jpg",
@@ -311,7 +309,7 @@
     "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a9/Boston_-_Boston_Public_Market_%2848718568138%29.jpg/960px-Boston_-_Boston_Public_Market_%2848718568138%29.jpg",
     "width": 960,
     "height": 600,
-    "credit": "Ajay Suresh from New York, NY, USA",
+    "credit": "Ajay Suresh",
     "license": "CC BY 2.0",
     "license_url": "https://creativecommons.org/licenses/by/2.0",
     "page": "https://commons.wikimedia.org/wiki/File:Boston_-_Boston_Public_Market_(48718568138).jpg",
@@ -348,13 +346,13 @@
     "provider": "Flickr"
   },
   "copley-levain-01": {
-    "url": "https://upload.wikimedia.org/wikipedia/commons/9/92/Newbury_Street_Back_Bay%2C_Boston_Photo_by_David_Adam_Kess._Newbury_Street%2C_Boston_Back_Bay%2C_USA.jpg",
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/83/Exeter_Street_Theatre_Kingsley_Montessori_School_%2854954547520%29.jpg/960px-Exeter_Street_Theatre_Kingsley_Montessori_School_%2854954547520%29.jpg",
     "width": 960,
-    "height": 719,
-    "credit": "David Adam Kess",
-    "license": "CC BY-SA 4.0",
-    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
-    "page": "https://commons.wikimedia.org/wiki/File:Newbury_Street_Back_Bay,_Boston_Photo_by_David_Adam_Kess._Newbury_Street,_Boston_Back_Bay,_USA.jpg",
+    "height": 640,
+    "credit": "ajay_suresh",
+    "license": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0",
+    "page": "https://commons.wikimedia.org/wiki/File:Exeter_Street_Theatre_Kingsley_Montessori_School_(54954547520).jpg",
     "provider": "Wikimedia Commons",
     "nearby": true
   },
@@ -370,26 +368,25 @@
     "nearby": true
   },
   "copley-lolita-01": {
-    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/2f/Copley_Square_with_Trinity_Church_and_Hancock_Tower.jpg/960px-Copley_Square_with_Trinity_Church_and_Hancock_Tower.jpg",
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/98/277_Dartmouth_Street%2C_Boston%2C_Massachusetts.jpg/960px-277_Dartmouth_Street%2C_Boston%2C_Massachusetts.jpg",
     "width": 960,
-    "height": 640,
-    "credit": "Gregg Squeglia",
+    "height": 715,
+    "credit": "Beyond My Ken",
     "license": "CC BY-SA 4.0",
     "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
-    "page": "https://commons.wikimedia.org/wiki/File:Copley_Square_with_Trinity_Church_and_Hancock_Tower.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:277_Dartmouth_Street,_Boston,_Massachusetts.jpg",
     "provider": "Wikimedia Commons",
     "nearby": true
   },
   "copley-newsfeed-01": {
-    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/35/Boston_Public_Library_1_2019-11-20.jpg/960px-Boston_Public_Library_1_2019-11-20.jpg",
-    "width": 960,
-    "height": 720,
-    "credit": "F ASTILY",
-    "license": "CC BY-SA 4.0",
-    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
-    "page": "https://commons.wikimedia.org/wiki/File:Boston_Public_Library_1_2019-11-20.jpg",
-    "provider": "Wikimedia Commons",
-    "nearby": true
+    "url": "https://live.staticflickr.com/4298/35154852073_d562625859_b.jpg",
+    "width": 1024,
+    "height": 768,
+    "credit": "clembore",
+    "license": "CC BY-SA 2.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/2.0/",
+    "page": "https://www.flickr.com/photos/92787319@N00/35154852073",
+    "provider": "Flickr"
   },
   "copley-oak-01": {
     "url": "https://live.staticflickr.com/8162/7676313068_be0c305113_b.jpg",
@@ -442,25 +439,24 @@
     "provider": "Flickr"
   },
   "aquarium-saltydog-01": {
-    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fd/Quincy_Market_2.JPG/960px-Quincy_Market_2.JPG",
-    "width": 960,
-    "height": 640,
-    "credit": "Chris Wood ( User:chris_j_wood ).",
-    "license": "CC BY-SA 4.0",
-    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
-    "page": "https://commons.wikimedia.org/wiki/File:Quincy_Market_2.JPG",
-    "provider": "Wikimedia Commons",
-    "nearby": true
+    "url": "https://live.staticflickr.com/65535/53813385024_c46d8232ee_b.jpg",
+    "width": 1024,
+    "height": 681,
+    "credit": "ethan.long",
+    "license": "CC BY-SA 2.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/2.0/",
+    "page": "https://www.flickr.com/photos/188360586@N03/53813385024",
+    "provider": "Flickr"
   },
   "aquarium-granary-01": {
-    "url": "https://live.staticflickr.com/8443/7879344020_a798fef015_b.jpg",
-    "width": 683,
-    "height": 1024,
-    "credit": "with wind",
-    "license": "CC BY-NC 2.0",
-    "license_url": "https://creativecommons.org/licenses/by-nc/2.0/",
-    "page": "https://www.flickr.com/photos/65299929@N00/7879344020",
-    "provider": "Flickr"
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/21/John_F_Fitzgerald_Surface_Rd%2C_Boston_%28493454%29_%2810773030575%29.jpg/960px-John_F_Fitzgerald_Surface_Rd%2C_Boston_%28493454%29_%2810773030575%29.jpg",
+    "width": 960,
+    "height": 540,
+    "credit": "Robert Linsdell",
+    "license": "CC BY 2.0",
+    "license_url": "https://creativecommons.org/licenses/by/2.0",
+    "page": "https://commons.wikimedia.org/wiki/File:John_F_Fitzgerald_Surface_Rd,_Boston_(493454)_(10773030575).jpg",
+    "provider": "Wikimedia Commons"
   },
   "aquarium-sailloft-01": {
     "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/d0/20180526_-_43_-_Boston%2C_MA_%28Waterfront%29.jpg/960px-20180526_-_43_-_Boston%2C_MA_%28Waterfront%29.jpg",
@@ -486,7 +482,7 @@
     "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/29/2005_Prospect_Street_in_Cambridge_Massachusetts_63126385.jpg/960px-2005_Prospect_Street_in_Cambridge_Massachusetts_63126385.jpg",
     "width": 960,
     "height": 638,
-    "credit": "Ethan O'Connor from Cambridge, MA",
+    "credit": "Ethan O'Connor",
     "license": "CC BY 2.0",
     "license_url": "https://creativecommons.org/licenses/by/2.0",
     "page": "https://commons.wikimedia.org/wiki/File:2005_Prospect_Street_in_Cambridge_Massachusetts_63126385.jpg",
@@ -504,24 +500,24 @@
     "provider": "Flickr"
   },
   "central-paikinkao-01": {
-    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f5/2017_Cambridge_Gas-Light_Company_Building%2C_Cambridge%2C_Massachusetts.jpg/960px-2017_Cambridge_Gas-Light_Company_Building%2C_Cambridge%2C_Massachusetts.jpg",
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/79/Bikeway_construction_on_River_Street%2C_Cambridge%2C_September_2026.jpg/960px-Bikeway_construction_on_River_Street%2C_Cambridge%2C_September_2026.jpg",
     "width": 960,
-    "height": 569,
-    "credit": "Beyond My Ken",
+    "height": 720,
+    "credit": "Pi.1415926535",
     "license": "CC BY-SA 4.0",
     "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
-    "page": "https://commons.wikimedia.org/wiki/File:2017_Cambridge_Gas-Light_Company_Building,_Cambridge,_Massachusetts.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Bikeway_construction_on_River_Street,_Cambridge,_September_2026.jpg",
     "provider": "Wikimedia Commons",
     "nearby": true
   },
   "central-lanner-01": {
-    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/af/2017_City_Hall_entrance%2C_Cambridge%2C_Massachusetts.jpg/960px-2017_City_Hall_entrance%2C_Cambridge%2C_Massachusetts.jpg",
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/9e/CambridgeMA_30_38_PearlStreet.jpg/960px-CambridgeMA_30_38_PearlStreet.jpg",
     "width": 960,
-    "height": 733,
-    "credit": "Beyond My Ken",
+    "height": 638,
+    "credit": "Magicpiano",
     "license": "CC BY-SA 4.0",
     "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
-    "page": "https://commons.wikimedia.org/wiki/File:2017_City_Hall_entrance,_Cambridge,_Massachusetts.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:CambridgeMA_30_38_PearlStreet.jpg",
     "provider": "Wikimedia Commons",
     "nearby": true
   },
@@ -529,7 +525,7 @@
     "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c1/Veggie_Galaxy_%286182496049%29.jpg/960px-Veggie_Galaxy_%286182496049%29.jpg",
     "width": 960,
     "height": 574,
-    "credit": "John Eckman from Salem, MA, United States",
+    "credit": "John Eckman",
     "license": "CC BY-SA 2.0",
     "license_url": "https://creativecommons.org/licenses/by-sa/2.0",
     "page": "https://commons.wikimedia.org/wiki/File:Veggie_Galaxy_(6182496049).jpg",
@@ -559,7 +555,7 @@
     "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/3e/BrooklineMA_ArcadeBuilding_interior.jpg/960px-BrooklineMA_ArcadeBuilding_interior.jpg",
     "width": 960,
     "height": 662,
-    "credit": "User:Magicpiano",
+    "credit": "Magicpiano",
     "license": "CC BY-SA 4.0",
     "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
     "page": "https://commons.wikimedia.org/wiki/File:BrooklineMA_ArcadeBuilding_interior.jpg",
@@ -578,13 +574,13 @@
     "nearby": true
   },
   "coolidge-los-amigos-01": {
-    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/3f/Coolidge_Corner_outbound_platform.jpg/960px-Coolidge_Corner_outbound_platform.jpg",
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e7/Outbound_platform%2C_Coolidge_Corner.jpg/960px-Outbound_platform%2C_Coolidge_Corner.jpg",
     "width": 960,
-    "height": 720,
-    "credit": "Pi.1415926535",
-    "license": "CC BY-SA 3.0",
-    "license_url": "https://creativecommons.org/licenses/by-sa/3.0",
-    "page": "https://commons.wikimedia.org/wiki/File:Coolidge_Corner_outbound_platform.jpg",
+    "height": 640,
+    "credit": "bdamon",
+    "license": "CC BY 2.0",
+    "license_url": "https://creativecommons.org/licenses/by/2.0",
+    "page": "https://commons.wikimedia.org/wiki/File:Outbound_platform,_Coolidge_Corner.jpg",
     "provider": "Wikimedia Commons",
     "nearby": true
   },

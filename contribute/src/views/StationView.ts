@@ -238,7 +238,8 @@ export class StationView {
       credit.rel = 'noopener';
       credit.setAttribute('aria-label', `Photo by ${photo.credit}, ${photo.license}, on ${photo.provider}`);
       media.append(image, credit);
-      if (photo.nearby) media.append(el('span', 'photo-tag', 'Area photo'));
+      const tag = photo.tag ?? (photo.nearby ? 'Area photo' : undefined);
+      if (tag) media.append(el('span', 'photo-tag', tag));
     } else media.classList.add('is-missing');
     media.append(el('span', 'card-number', String(place.pin_index + 1)),
       iconButton('close', 'Close the overview', () => this.clearSelection(), 'overview-close'));

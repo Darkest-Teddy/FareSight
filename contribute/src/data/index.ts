@@ -67,6 +67,8 @@ export interface PlacePhoto {
   provider: string;
   /** The photo shows the building, square or street the place is on, not the place itself. */
   nearby?: boolean;
+  /** Said on the photo when it shows the business but not as it stands today, e.g. "Earlier location". */
+  tag?: string;
 }
 
 const photos: Record<string, PlacePhoto | undefined> = placePhotos;

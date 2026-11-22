@@ -21,7 +21,6 @@ export interface ScanDraft {
   dishId?: string;
   dishName?: string;
   dishPrice?: string;
-  diameter?: string;
   pending?: PendingSubmission;
   capture?: CaptureUpload;
 }

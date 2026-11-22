@@ -1,4 +1,5 @@
-import { button, el, haptic, iconButton, motion } from '../dom';
+import { button, el, haptic, iconButton, motion, svg } from '../dom';
+import { createDishTargets, dishPlans, elevationOf, type DishPlan } from '../scan/dish';
 import {
   angleBetween, blend, createTargets, pitchOf, poseFromOrientation, poseFromYawPitch, project, rollOf, yawOf,
   type Pose, type Target, type Vec3,
@@ -35,12 +36,28 @@ const OVERLAY_FOV = 105;
 const RAD = Math.PI / 180;
 // Sunflower, the main app's highlight (--sun in web/src/styles/tokens.css).
 const ACCENT = '255 201 60';
+// The dish scan. The phone is carried round the dish by hand, which is less exact than turning on one
+// spot, so a stop takes a wider aim and a looser level than a spot in the room does.
+const DISH_AIM_DEGREES = 10;
+const DISH_LEVEL_DEGREES = 9;
+/** How far off the ring's height the phone may be, in degrees, before the hint asks for a change. */
+const DISH_TILT_SLACK = 7;
+/** Screen pixels the aiming ring slides per degree the phone is too low or too high. */
+const DISH_TILT_TRAVEL = 2.4;
+// Each shape as a small side view, for the card that asks what is being scanned.
+const dishGlyphs: Record<DishPlan['shape'], string> = {
+  plate: 'M4 15h24M7 15c1.5 3 5 4.5 9 4.5s7.5-1.5 9-4.5M9 12.5c2-1.7 4.5-2.5 7-2.5s5 .8 7 2.5',
+  bowl: 'M5 11h22c0 6.5-4.5 11-11 11S5 17.5 5 11zM11 25h10M12 7.5c1-1.5 1-2.5 0-4M17 7.5c1-1.5 1-2.5 0-4',
+  drink: 'M10 8h12l-1.5 18h-9L10 8zM9 8h14M16 8V3.5l4-1.5',
+};
 
 interface Card {
   title: string;
   lines: string[];
   steps?: boolean;
-  primary: [label: string, action: () => void];
+  /** Big buttons to pick one of, shown above the actions. */
+  choices?: { glyph: string; title: string; note: string; action: () => void }[];
+  primary?: [label: string, action: () => void];
   secondary?: [label: string, action: () => void];
 }
 
@@ -62,8 +79,14 @@ async function requestMotion() {
 }
 
 /**
- * Full-screen 360° scan. The person turns on the spot while dots mark the directions still to capture;
- * aiming at a dot and holding still takes that photo and pops the dot.
+ * Full-screen guided scan, in two kinds that share the camera, the sensors and the steady-hand rules.
+ *
+ * A room: the person turns on the spot while dots mark the directions still to capture; aiming at a
+ * dot and holding still takes that photo and pops the dot.
+ *
+ * A dish: the person carries the phone round the dish, keeping it inside an outline. The dots sit on a
+ * ring drawn round the dish and travel along it as the phone moves, toward an aiming ring at the
+ * near side. A dot arriving there, with the phone at the ring's height and still, takes the photo.
  */
 class GuidedScan {
   private readonly dialog = el('dialog', 'sweep-dialog');
@@ -101,9 +124,16 @@ class GuidedScan {
   private captureEpoch = 0;
   private last = 0;
   private raf = 0;
+  /** The shape picked for a dish scan. A room scan has none. */
+  private dish?: DishPlan;
+  /** How round the ring round the dish is drawn, eased so it does not jitter with the hand. */
+  private squash = 0.5;
 
-  constructor(private readonly minimum: number, private readonly resolve: (files: File[]) => void) {
-    this.dialog.setAttribute('aria-label', '360° scan');
+  constructor(
+    private readonly minimum: number, private readonly resolve: (files: File[]) => void,
+    subject: 'room' | 'dish' = 'room',
+  ) {
+    this.dialog.setAttribute('aria-label', subject === 'dish' ? 'Guided dish scan' : '360° scan');
     this.video.playsInline = true;
     this.video.muted = true;
     this.video.setAttribute('aria-hidden', 'true');
@@ -134,7 +164,8 @@ class GuidedScan {
     document.body.append(this.dialog);
     this.dialog.showModal();
     this.update();
-    this.show({
+    if (subject === 'dish') this.pickShape();
+    else this.show({
       title: 'Scan the space in 360°',
       lines: [
         'Stand in the middle of the room and stay on that spot.',
@@ -149,25 +180,68 @@ class GuidedScan {
 
   private get captured() { return this.targets.flatMap((target) => target.file ? [target.file] : []); }
 
+  /** A dish scan starts by asking what shape it is: that decides the heights the photos are taken from. */
+  private pickShape() {
+    this.show({
+      title: 'What are you scanning?',
+      lines: ['Pick the closest shape. It sets the angles the photos are taken from.'],
+      choices: dishPlans.map((plan) => ({
+        glyph: dishGlyphs[plan.shape], title: plan.name, note: plan.examples, action: () => this.introduceDish(plan),
+      })),
+      secondary: ['Not now', () => this.settle([])],
+    });
+  }
+
+  private introduceDish(plan: DishPlan) {
+    this.dish = plan;
+    const overhead = plan.rings.some(([elevation]) => elevation >= 90);
+    this.show({
+      title: 'Scan it in two photos',
+      lines: [
+        'Put it on a clear part of the table, with nothing in front of it.',
+        'Fit it inside the outline. A dot marks each photo: bring it to the circle and hold still until it pops.',
+        overhead ? 'The first photo is from where you are. The second is from straight above, with the phone held flat.'
+          : 'The first photo is from where you are. For the second, carry the phone round to the opposite side.',
+      ],
+      steps: true,
+      primary: ['Start scan', () => void this.start()],
+      secondary: ['Change shape', () => this.pickShape()],
+    });
+  }
+
   private show(card?: Card) {
     this.card.hidden = !card;
     this.dialog.dataset.card = String(Boolean(card));
     if (!card) return;
     const body = el(card.steps ? 'ol' : 'div', card.steps ? 'tips' : 'sweep-lines');
     body.append(...card.lines.map((line) => el(card.steps ? 'li' : 'p', '', line)));
-    const primary = button(card.primary[0], card.primary[1], 'primary');
+    const parts: HTMLElement[] = [el('h2', '', card.title), body];
+    if (card.choices) {
+      const list = el('div', 'sweep-choices');
+      for (const choice of card.choices) {
+        const option = button('', choice.action, 'sweep-choice');
+        const glyph = svg('svg', { viewBox: '0 0 32 32', 'aria-hidden': 'true' });
+        glyph.append(svg('path', { d: choice.glyph }));
+        const text = el('span');
+        text.append(el('strong', '', choice.title), el('small', '', choice.note));
+        option.append(glyph, text);
+        list.append(option);
+      }
+      parts.push(list);
+    }
+    const primary = card.primary && button(card.primary[0], card.primary[1], 'primary');
     const actions = el('div', 'sheet-actions');
-    actions.append(primary);
+    if (primary) actions.append(primary);
     if (card.secondary) actions.append(button(card.secondary[0], card.secondary[1], 'ghost'));
-    this.card.replaceChildren(el('h2', '', card.title), body, actions);
-    primary.focus();
+    this.card.replaceChildren(...parts, actions);
+    (primary ?? this.card.querySelector<HTMLButtonElement>('.sweep-choice'))?.focus();
   }
 
   private fail(reason: string) {
     this.release();
     this.hint.textContent = '';
     this.show({
-      title: 'The 360° scan is not available',
+      title: this.dish ? 'The guided scan is not available' : 'The 360° scan is not available',
       lines: [reason, 'You can still add photos with Camera or Library.'],
       primary: ['Back to photos', () => this.settle([])],
     });
@@ -209,7 +283,7 @@ class GuidedScan {
     // A phone pointing at the floor or ceiling has no heading of its own, so its top edge stands in.
     const pitch = pitchOf(pose.forward);
     const ahead = Math.abs(pitch) < 60 ? pose.forward : pose.up.map((value) => pitch < 0 ? value : -value) as Vec3;
-    this.targets = createTargets(yawOf(ahead));
+    this.targets = this.dish ? createDishTargets(yawOf(ahead), this.dish) : createTargets(yawOf(ahead));
     this.pose = pose;
     this.scanning = true;
     this.last = performance.now();
@@ -250,6 +324,8 @@ class GuidedScan {
     motion.turn = Math.max(turn, motion.turn + (turn - motion.turn) * 0.25);
     motion.shake = Math.max(shake, motion.shake + (shake - motion.shake) * 0.25);
 
+    // Round a dish the person is meant to move, so there is no spot to hold them to.
+    if (this.dish) return;
     const pull = event.accelerationIncludingGravity;
     if (pull?.x == null || pull.y == null || pull.z == null) return;
     // The two readings differ by gravity, which tells which way is down for the phone however it is held.
@@ -282,8 +358,20 @@ class GuidedScan {
   /** Whether the phone is upright, so the horizon runs straight across the photo. */
   private get level() {
     if (!this.pose) return false;
+    const steep = Math.abs(pitchOf(this.pose.forward));
+    // Looking well down at a dish the horizon is out of the photo, and the sideways tilt reads less and less surely.
+    if (this.dish) return steep > 55 || Math.abs(rollOf(this.pose)) <= DISH_LEVEL_DEGREES;
     // Aimed at the ceiling or the floor there is no horizon in the photo, and no sideways tilt to measure.
-    return Math.abs(pitchOf(this.pose.forward)) > 80 || Math.abs(rollOf(this.pose)) <= LEVEL_DEGREES;
+    return steep > 80 || Math.abs(rollOf(this.pose)) <= LEVEL_DEGREES;
+  }
+
+  /** How steeply the phone looks down right now, in degrees above the table. */
+  private get elevation() { return this.pose ? -pitchOf(this.pose.forward) : 0; }
+
+  /** How far round the dish a stop is from where the phone is now, in degrees: negative is to the person's right. */
+  private around(target: Target) {
+    const turn = yawOf(target.direction) - yawOf(this.pose!.forward);
+    return turn - Math.round(turn / 360) * 360;
   }
 
   /** Whether the phone is still enough for a sharp photo. */
@@ -460,7 +548,7 @@ class GuidedScan {
     const open = this.targets.filter((target) => !target.file);
     const upright = Boolean(this.simulated) || !this.landscape.matches || Math.abs(pitchOf(pose.forward)) > 80;
     let aimed: Target | undefined;
-    let nearest = AIM_DEGREES;
+    let nearest = this.dish ? DISH_AIM_DEGREES : AIM_DEGREES;
     if (upright) {
       for (const target of open) {
         const angle = angleBetween(pose.forward, target.direction);
@@ -499,12 +587,26 @@ class GuidedScan {
     if (!this.guide) return '';
     if (this.aimed) return !this.level ? 'Straighten the phone' : this.steady ? 'Hold still' : 'Steady the phone';
     if (this.speed > FAST_SPEED) return 'Slow down';
+    if (this.dish) return this.dishAdvice(this.guide);
     const spot = this.place(this.guide);
     if (spot.visible) return 'Aim at the glowing dot';
     if (Math.abs(this.guide.pitch) === 90) return this.guide.pitch > 0 ? 'Tilt up' : 'Tilt down';
     const [x, y] = spot.side;
     if (!spot.front || Math.abs(x) >= Math.abs(y)) return x >= 0 ? 'Turn right' : 'Turn left';
     return y > 0 ? 'Tilt up' : 'Tilt down';
+  }
+
+  /** What to do next round a dish: first get to the ring's height, then walk the dot in. */
+  private dishAdvice(guide: Target) {
+    const want = elevationOf(guide);
+    const off = want - this.elevation;
+    if (want >= 90) return off > DISH_TILT_SLACK ? 'Hold the phone flat, right above it' : 'Centre it in the outline';
+    if (off > DISH_TILT_SLACK) return 'Raise the phone and tilt it down';
+    if (off < -DISH_TILT_SLACK) return 'Lower the phone toward the table';
+    const turn = this.around(guide);
+    if (Math.abs(turn) < 8) return 'Almost there';
+    // Circling to the right turns the phone to the left, so a stop with a smaller heading is to the right.
+    return turn < 0 ? 'Move right around it' : 'Move left around it';
   }
 
   private place(target: Target) {
@@ -542,7 +644,7 @@ class GuidedScan {
     if (!blob || !this.scanning || this.settled || epoch !== this.captureEpoch
       || this.capturePaused(performance.now()) || target.file) return;
     const number = String(this.targets.indexOf(target) + 1).padStart(2, '0');
-    target.file = new File([blob], `scan-360-${number}.jpg`, { type: 'image/jpeg' });
+    target.file = new File([blob], `${this.dish ? 'dish-scan' : 'scan-360'}-${number}.jpg`, { type: 'image/jpeg' });
     target.capturedAt = performance.now();
     haptic(12);
     this.update();
@@ -598,7 +700,8 @@ class GuidedScan {
       title: left === 1 ? '1 spot left' : `${left} spots left`,
       lines: [
         `${coverage}: ${files.length} of ${total} photos.`,
-        'The 3D build works best when every dot is captured. The round map shows what is still missing.',
+        this.dish ? 'The 3D build is truer with both photos. The round map shows which one is still missing.'
+          : 'The 3D build works best when every dot is captured. The round map shows what is still missing.',
       ],
       primary: ['Keep scanning', () => this.resume()],
       secondary: [`Use ${files.length} photos`, () => this.settle(files)],
@@ -611,7 +714,7 @@ class GuidedScan {
     for (const [index, frequency] of [660, 830, 990].entries()) this.tone(frequency, index * 0.11);
     this.pause({
       title: 'Full coverage',
-      lines: [`All ${files.length} spots are captured. The space is ready to build.`],
+      lines: [`All ${files.length} spots are captured. The ${this.dish ? 'dish' : 'space'} is ready to build.`],
       primary: [`Use ${files.length} photos`, () => this.settle(files)],
     });
   }
@@ -662,6 +765,7 @@ class GuidedScan {
       context.fillStyle = sky;
       context.fillRect(0, 0, width, height);
     }
+    if (this.dish) return this.drawDish(context, width, height, now, lively);
 
     for (const target of this.targets) {
       const spot = this.place(target);
@@ -759,6 +863,162 @@ class GuidedScan {
     context.restore();
   }
 
+  /**
+   * The dish scan's view: an outline to fit the dish in, a ring round it lying on the table, the
+   * stops of the round being taken as dots on that ring, and an aiming ring at its near side.
+   * Carrying the phone round the dish slides the dots along the ring; raising or lowering the phone
+   * slides the aiming ring across it. A photo is taken where a dot and the aiming ring meet.
+   */
+  private drawDish(context: CanvasRenderingContext2D, width: number, height: number, now: number, lively: boolean) {
+    const plan = this.dish!;
+    const short = Math.min(width, height);
+    const cx = width / 2, cy = height / 2;
+    const [boxWidth, boxHeight] = [plan.outline[0] * short, plan.outline[1] * short];
+
+    // The outline. A plate and a bowl are round from wherever they are seen; a drink stands up straight.
+    context.beginPath();
+    if (plan.shape === 'drink') context.roundRect(cx - boxWidth / 2, cy - boxHeight / 2, boxWidth, boxHeight, boxWidth * 0.3);
+    else context.ellipse(cx, cy, boxWidth / 2, boxHeight / 2, 0, 0, Math.PI * 2);
+    context.setLineDash([9, 9]);
+    context.strokeStyle = 'rgb(255 255 255 / 72%)';
+    context.lineWidth = 2;
+    context.stroke();
+    context.setLineDash([]);
+    if (!this.targets.length) return;
+
+    // The round being taken: the lowest one with a stop still open.
+    const open = this.targets.filter((target) => !target.file);
+    const ring = open.length ? Math.min(...open.map((target) => target.ring)) : this.targets.at(-1)!.ring;
+    const stops = this.targets.filter((target) => target.ring === ring);
+    const want = elevationOf(stops[0]);
+    const above = want >= 90;
+
+    // The ring lies on the table, so it is a flat ellipse from low down and a circle from overhead.
+    const goal = Math.max(0.2, Math.sin(Math.max(0, Math.min(90, this.elevation)) * RAD));
+    this.squash += (goal - this.squash) * (lively ? 0.18 : 1);
+    const baseY = cy + boxHeight / 2 * plan.base;
+    const reachX = boxWidth / 2 + 30;
+    const reachY = reachX * this.squash;
+    context.beginPath();
+    context.ellipse(cx, baseY, reachX, reachY, 0, 0, Math.PI * 2);
+    context.strokeStyle = 'rgb(255 255 255 / 34%)';
+    context.lineWidth = 2;
+    context.stroke();
+
+    // Where a stop sits: on the ring, as far round it as the phone still has to travel. The near side is "here".
+    const spotOf = (target: Target) => {
+      if (above) return { x: cx, y: baseY, depth: 1 };
+      const angle = (90 + this.around(target)) * RAD;
+      return { x: cx + reachX * Math.cos(angle), y: baseY + reachY * Math.sin(angle), depth: (1 + Math.sin(angle)) / 2 };
+    };
+    for (const target of [...stops].sort((a, b) => spotOf(a).depth - spotOf(b).depth)) {
+      const spot = spotOf(target);
+      // Stops on the far side of the ring are drawn smaller and fainter.
+      const near = 0.6 + 0.4 * spot.depth;
+      context.beginPath();
+      if (target.file) {
+        const age = (now - (target.capturedAt ?? 0)) / POP_MS;
+        if (age < 1 && lively) {
+          context.arc(spot.x, spot.y, 14 + 34 * age, 0, Math.PI * 2);
+          context.strokeStyle = `rgb(${ACCENT} / ${1 - age})`;
+          context.lineWidth = 1 + 3 * (1 - age);
+          context.stroke();
+          context.beginPath();
+        }
+        context.arc(spot.x, spot.y, 4 * near, 0, Math.PI * 2);
+        context.fillStyle = 'rgb(255 255 255 / 42%)';
+        context.fill();
+        continue;
+      }
+      const leading = target === this.guide;
+      const radius = (leading ? 15 : 11) * near * (leading && lively ? 1 + 0.12 * Math.sin(now / 180) : 1);
+      context.arc(spot.x, spot.y, radius, 0, Math.PI * 2);
+      context.shadowColor = `rgb(${ACCENT})`;
+      context.shadowBlur = leading ? 20 : 0;
+      context.fillStyle = `rgb(${ACCENT} / ${leading ? 95 : 40 + 25 * spot.depth}%)`;
+      context.fill();
+      context.shadowBlur = 0;
+      context.strokeStyle = `rgb(255 255 255 / ${leading ? 95 : 60}%)`;
+      context.lineWidth = 2;
+      context.stroke();
+    }
+
+    // The aiming ring: where this phone is. It rests on the near side of the ring when the phone is at
+    // the round's height, drops below it when the phone is too low and rises inside it when too high.
+    const tilt = Math.max(-70, Math.min(70, (want - this.elevation) * DISH_TILT_TRAVEL));
+    const [aimX, aimY] = [cx, (above ? baseY : baseY + reachY) + tilt];
+    const blocked = this.scanning && Boolean(this.aimed) && !(this.steady && this.level);
+    if (this.scanning && Math.abs(tilt) > DISH_TILT_SLACK * DISH_TILT_TRAVEL) {
+      // A short tail back to where it belongs shows which way to move the phone.
+      context.beginPath();
+      context.moveTo(aimX, aimY - Math.sign(tilt) * 26);
+      context.lineTo(aimX, aimY - tilt + Math.sign(tilt) * 6);
+      context.setLineDash([3, 6]);
+      context.strokeStyle = 'rgb(255 255 255 / 70%)';
+      context.lineWidth = 2;
+      context.stroke();
+      context.setLineDash([]);
+    }
+    context.beginPath();
+    context.arc(aimX, aimY, 24, 0, Math.PI * 2);
+    context.strokeStyle = blocked ? `rgb(${AMBER})` : '#fff';
+    context.lineWidth = blocked ? 3.5 : 2.5;
+    context.stroke();
+    if (this.aimed && this.held > 0) {
+      context.beginPath();
+      context.arc(aimX, aimY, 24, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, this.held / HOLD_MS));
+      context.strokeStyle = `rgb(${ACCENT})`;
+      context.lineWidth = 5;
+      context.lineCap = 'round';
+      context.stroke();
+    }
+
+    // Which way round the next dot is, when it is on the far side and easy to miss.
+    if (!this.scanning || above || !this.guide || this.capturePaused(now)) return;
+    const turn = this.around(this.guide);
+    if (Math.abs(turn) < 50) return;
+    const side = turn < 0 ? 1 : -1;
+    const bob = lively ? 4 * Math.sin(now / 160) : 0;
+    context.save();
+    context.translate(cx + side * (reachX + 26 + bob), baseY);
+    context.scale(side, 1);
+    context.beginPath();
+    context.moveTo(-8, -13);
+    context.lineTo(7, 0);
+    context.lineTo(-8, 13);
+    context.strokeStyle = `rgb(${ACCENT})`;
+    context.lineWidth = 5;
+    context.lineCap = context.lineJoin = 'round';
+    context.stroke();
+    context.restore();
+  }
+
+  /** The dish seen from above, with every stop of every round: the phone is at the bottom, looking in. */
+  private drawDishMap(context: CanvasRenderingContext2D, size: number) {
+    const center = size / 2, reach = size / 2 - 7;
+    context.beginPath();
+    context.moveTo(center, center);
+    context.arc(center, center, reach, (90 - 22) * RAD, (90 + 22) * RAD);
+    context.closePath();
+    context.fillStyle = `rgb(${ACCENT} / 18%)`;
+    context.fill();
+    context.beginPath();
+    context.arc(center, center, reach * 0.2, 0, Math.PI * 2);
+    context.strokeStyle = 'rgb(255 255 255 / 55%)';
+    context.lineWidth = 1.5;
+    context.stroke();
+    for (const target of this.targets) {
+      const elevation = elevationOf(target);
+      // Low rounds sit at the rim and high ones near the dish; the photo from above is the dish itself.
+      const radius = elevation >= 90 ? 0 : reach * (1 - elevation / 110);
+      const angle = (90 + this.around(target)) * RAD;
+      context.beginPath();
+      context.arc(center + radius * Math.cos(angle), center + radius * Math.sin(angle), target.file ? 1.6 : target === this.guide ? 4 : 2.8, 0, Math.PI * 2);
+      context.fillStyle = target.file ? 'rgb(255 255 255 / 30%)' : `rgb(${ACCENT})`;
+      context.fill();
+    }
+  }
+
   /** Top-down map of every spot around the person: the direction they face points up. */
   private drawDome() {
     const context = this.dome.getContext('2d');
@@ -769,6 +1029,7 @@ class GuidedScan {
     const heading = yawOf(this.pose.forward);
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, size, size);
+    if (this.dish) return this.drawDishMap(context, size);
     context.beginPath();
     context.moveTo(center, center);
     context.arc(center, center, reach, (-90 - 22) * RAD, (-90 + 22) * RAD);
@@ -794,4 +1055,9 @@ class GuidedScan {
 /** Opens the guided 360° scan. Resolves with the photos it took, or with none when it is dismissed. */
 export function openGuidedScan(minimum: number): Promise<File[]> {
   return new Promise((resolve) => { new GuidedScan(minimum, resolve); });
+}
+
+/** Opens the guided scan of one dish or drink. Resolves with the photos it took, or with none when it is dismissed. */
+export function openDishScan(minimum = 1): Promise<File[]> {
+  return new Promise((resolve) => { new GuidedScan(minimum, resolve, 'dish'); });
 }

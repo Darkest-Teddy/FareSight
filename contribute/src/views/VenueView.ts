@@ -1,4 +1,4 @@
-import { MAX_ROOM_PHOTOS, type Place, type RoomModelTier, type Stop } from '@faresight/shared';
+import { MAX_DISH_PHOTOS, MAX_ROOM_PHOTOS, type Place, type RoomModelTier, type Stop } from '@faresight/shared';
 import { api, ApiError, type ContributorJob, type JobRequest } from '../api';
 import { sendCapture, type CaptureUpload } from '../captureUpload';
 import { catalog } from '../catalog';
@@ -7,7 +7,7 @@ import { button, el, errorText, haptic, icon, iconButton, motion, replay, svg, w
 import { prepareImage } from '../photos';
 import { drafts, scans, type PendingSubmission, type ScanDraft } from '../store';
 import { withCode } from '../ui/CodeSheet';
-import { openGuidedScan } from '../ui/GuidedScan';
+import { openDishScan, openGuidedScan } from '../ui/GuidedScan';
 
 type Kind = 'room' | 'dish';
 interface Shot {
@@ -63,7 +63,6 @@ export class VenueView {
   private readonly unsubscribe: () => void;
   private readonly dishName = el('input', 'text-input');
   private readonly dishPrice = el('input', 'text-input');
-  private readonly diameter = el('input', 'text-input');
   private kind: Kind;
   private tier: RoomModelTier = 'atlas-draft';
   private dishId: string;
@@ -117,13 +116,6 @@ export class VenueView {
     this.dishPrice.autocomplete = 'off';
     this.dishPrice.setAttribute('aria-label', 'Menu price of the dish in dollars');
     this.dishPrice.addEventListener('input', () => this.optionsChanged());
-    this.diameter.type = 'number';
-    this.diameter.inputMode = 'decimal';
-    this.diameter.min = '5';
-    this.diameter.max = '100';
-    this.diameter.step = 'any';
-    this.diameter.placeholder = 'Optional, for example 24';
-    this.diameter.addEventListener('input', () => this.optionsChanged());
 
     body.append(photos, this.options);
 
@@ -193,7 +185,6 @@ export class VenueView {
           this.dishId = draft.dishId ?? this.dishId;
           this.dishName.value = draft.dishName ?? '';
           this.dishPrice.value = draft.dishPrice ?? '';
-          this.diameter.value = draft.diameter ?? '';
         }
       }
       this.kind = this.kinds.find((kind) => this.pending[kind] || (kind === 'room' && this.capture?.completed))
@@ -214,7 +205,6 @@ export class VenueView {
       })),
       ...(kind === 'room' ? { tier: this.tier, capture: this.capture } : {
         dishId: this.dishId, dishName: this.dishName.value, dishPrice: this.dishPrice.value,
-        diameter: this.diameter.value,
       }),
       pending,
     };
@@ -236,7 +226,7 @@ export class VenueView {
     picker.append(el('legend', 'visually-hidden', 'What are you scanning?'));
     const choices: [Kind, IconName, string, string, string, boolean][] = [
       ['room', 'room', 'The space', `${MIN_ROOM_PHOTOS} to ${MAX_ROOM_PHOTOS} overlapping photos`, status.room ? 'In 3D' : 'Needs photos', status.room],
-      ['dish', 'dish', 'A dish', 'One photo of a single dish',
+      ['dish', 'dish', 'A dish', `1 to ${MAX_DISH_PHOTOS} photos of one dish or drink`,
         status.dishes ? `${status.dishesDone} of ${status.dishes} in 3D` : 'None yet',
         status.dishes > 0 && status.dishesDone === status.dishes],
     ];
@@ -287,7 +277,7 @@ export class VenueView {
     input.type = 'file';
     input.accept = 'image/*';
     if (capture) input.setAttribute('capture', 'environment');
-    else input.multiple = this.kind === 'room';
+    else input.multiple = true;
     input.disabled = this.locked;
     input.addEventListener('click', () => {
       this.hinted.add(this.kind);
@@ -305,24 +295,30 @@ export class VenueView {
   private scanTile() {
     const tile = button('', () => void this.scan(), 'add-tile scan-tile');
     tile.disabled = this.locked;
-    tile.append(icon('locate'), el('span', '', '360° scan'));
+    tile.append(icon('locate'), el('span', '', this.kind === 'room' ? '360° scan' : 'Guided scan'));
     return tile;
   }
 
-  /** Runs the guided 360° scan and adds the photos it took, like photos picked by hand. */
+  /** Runs the guided scan for what is being scanned and adds the photos it took, like photos picked by hand. */
   private async scan() {
     if (this.locked) return;
-    const files = await openGuidedScan(MIN_ROOM_PHOTOS);
-    if (this.alive && this.kind === 'room') await this.add(files);
+    const kind = this.kind;
+    const files = await (kind === 'room' ? openGuidedScan(MIN_ROOM_PHOTOS) : openDishScan());
+    if (!this.alive || this.kind !== kind || !files.length) return;
+    if (kind === 'dish') {
+      // A guided scan is one complete set round one dish, so it takes the place of photos added before it.
+      for (const shot of this.shots.dish.splice(0)) URL.revokeObjectURL(shot.url);
+    }
+    await this.add(files);
   }
 
   private renderGrid() {
     const shots = this.current;
-    const full = this.kind === 'room' && shots.length >= MAX_ROOM_PHOTOS;
+    const limit = this.kind === 'room' ? MAX_ROOM_PHOTOS : MAX_DISH_PHOTOS;
+    const full = shots.length >= limit;
     const tiles: HTMLElement[] = shots.map((shot) => shot.node);
-    if (!full && this.kind === 'room') tiles.push(this.scanTile());
-    if (!full) tiles.push(this.picker('camera', shots.length && this.kind === 'dish' ? 'Retake' : 'Camera', true),
-      this.picker('image', 'Library', false));
+    if (!full || this.kind === 'dish') tiles.push(this.scanTile());
+    if (!full) tiles.push(this.picker('camera', 'Camera', true), this.picker('image', 'Library', false));
     this.grid.replaceChildren(...tiles);
     this.hint.textContent = this.hinted.has(this.kind) ? hints[this.kind] : '';
     this.renderControls();
@@ -332,7 +328,8 @@ export class VenueView {
     const arc = svg('circle', { cx: 12, cy: 12, r: 9, pathLength: 1, class: 'count-arc' });
     arc.style.strokeDashoffset = String(1 - Math.min(1, shots.length / needed));
     ring.append(svg('circle', { cx: 12, cy: 12, r: 9, class: 'count-track' }), arc);
-    const text = this.kind === 'dish' ? (shots.length ? 'Photo added' : '1 photo needed')
+    const text = this.kind === 'dish'
+      ? (shots.length ? `${shots.length} ${shots.length === 1 ? 'photo' : 'photos'} · up to ${MAX_DISH_PHOTOS}` : '1 photo needed')
       : shots.length < needed ? `${shots.length} of ${needed} needed`
       : `${shots.length} added · up to ${MAX_ROOM_PHOTOS}`;
     this.count.classList.toggle('is-ready', shots.length >= needed);
@@ -386,9 +383,8 @@ export class VenueView {
     const price = el('label', 'field');
     price.append(el('span', 'field-label', 'Menu price in dollars'), this.dishPrice,
       el('span', 'field-hint', 'Required. Copy the price from the menu for this dish.'));
-    const size = el('label', 'field');
-    size.append(el('span', 'field-label', 'Plate width in cm'), this.diameter,
-      el('span', 'field-hint', 'Optional. It lets riders see the dish at its true size.'));
+    // Nobody types a size: the server measures the dish from these photos before it builds the 3D model.
+    const size = el('p', 'field-hint', 'The dish is measured from your photos, so riders see it at its true size.');
     this.options.append(head, chips, nameField, price, size);
   }
 
@@ -404,7 +400,6 @@ export class VenueView {
     if (this.dishId === NEW_DISH && !this.dishName.value.trim()) return 'Name the dish';
     if (!this.dishPrice.value.trim()) return 'Enter the menu price';
     if (!this.dishPrice.checkValidity()) return 'Menu price must be $0.25 to $500';
-    if (this.diameter.value && !this.diameter.checkValidity()) return 'Plate width must be 5 to 100 cm';
     return '';
   }
 
@@ -416,7 +411,8 @@ export class VenueView {
     this.send.style.setProperty('--progress', `${Math.round((progress?.fraction ?? 0) * 100)}%`);
     this.sendLabel.textContent = progress?.label ?? (problem
       || (this.pending[this.kind] ? 'Resume starting the build'
-        : this.kind === 'room' ? `Send ${count} photos and build the space` : 'Send photo and build the dish'));
+        : this.kind === 'room' ? `Send ${count} photos and build the space`
+          : count > 1 ? `Send ${count} photos and build the dish` : 'Send photo and build the dish'));
   }
 
   private async add(files: File[]) {
@@ -431,7 +427,7 @@ export class VenueView {
     try {
       for (const [index, file] of files.entries()) {
         const name = file.name || `Photo ${index + 1}`;
-        if (kind === 'room' ? shots.length >= MAX_ROOM_PHOTOS : accepted > 0) {
+        if (shots.length >= (kind === 'room' ? MAX_ROOM_PHOTOS : MAX_DISH_PHOTOS)) {
           this.photoFeedback.append(el('li', '', `${name} — Photo limit reached.`));
           continue;
         }
@@ -444,9 +440,6 @@ export class VenueView {
           continue;
         }
         if (!this.alive) break;
-        if (kind === 'dish') {
-          for (const shot of shots.splice(0)) URL.revokeObjectURL(shot.url);
-        }
         if (kind === 'room') this.resetCapture();
         shots.push(this.shot(prepared, kind));
         accepted++;
@@ -511,15 +504,13 @@ export class VenueView {
     if (kind === 'room' && uploadIds.length < MIN_ROOM_PHOTOS) {
       throw new Error('These photos are identical. Add a second angle of the room.');
     }
-    const width = this.diameter.valueAsNumber;
     const job: JobRequest = kind === 'room'
       ? { kind, place_id: this.place.id, upload_ids: uploadIds, model_tier: this.tier }
       : {
-        kind, place_id: this.place.id, upload_ids: uploadIds.slice(0, 1),
+        kind, place_id: this.place.id, upload_ids: uploadIds.slice(0, MAX_DISH_PHOTOS),
         dish_id: this.dishId || undefined,
         dish_name: this.dishId ? undefined : this.dishName.value.trim(),
         dish_price: Math.round(this.dishPrice.valueAsNumber * 100) / 100,
-        plate_diameter_m: Number.isFinite(width) ? width / 100 : undefined,
       };
     const pending = { job, idempotencyKey: crypto.randomUUID() };
     await this.saveDraft(kind, pending);
