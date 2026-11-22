@@ -1,4 +1,5 @@
 import * as pc from 'playcanvas';
+import { formatDishPrice } from '@faresight/shared';
 import { hasDishPreview } from '../data/preview3D';
 import type { XRDishData, XRPlaceData } from './bridgeTypes';
 import type { JarvisReveal } from './JarvisReveal';
@@ -511,8 +512,8 @@ export class PhysicalMenuBook {
         ctx.strokeRect(rowLeft + 5, top + 5, rowPixels - 10, height - 10);
       }
     }
-    const price = Number.isFinite(dish.price) ? `$${dish.price.toFixed(2)}` : 'Price n/a';
-    ctx.font = '400 31px "Courier New", monospace';
+    const price = formatDishPrice(dish.price, 'Not listed');
+    ctx.font = dish.price == null ? 'italic 26px Georgia, serif' : '400 31px "Courier New", monospace';
     const priceWidth = ctx.measureText(price).width;
     ctx.fillStyle = ink;
     ctx.textAlign = 'right';

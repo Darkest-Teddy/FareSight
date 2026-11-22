@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Config } from '../config.ts';
 import type { PendingReview, Store } from '../db/database.ts';
 import { findDemoAsset } from '../services/demoAssets.ts';
+import { fetchLiveReviews } from '../services/liveReviews.ts';
 
 export function registerCatalog(app: FastifyInstance, store: Store, config: Config) {
   const demoCounts = new Map<string, number>();
@@ -14,14 +15,14 @@ export function registerCatalog(app: FastifyInstance, store: Store, config: Conf
     if (asset?.status !== 'ready') return null;
     if (asset.backend !== 'prebuilt-demo') return asset;
     const file = findDemoAsset(config, asset.url.slice('/assets-demo/'.length));
-    if (!file) return asset;
+    if (!file?.endsWith('.ply')) return asset;
     let count = demoCounts.get(file);
     if (count === undefined) {
       const descriptor = openSync(file, 'r');
       try {
         const header = Buffer.alloc(4096);
         readSync(descriptor, header);
-        count = Number(header.toString('ascii').match(/^element vertex (\d+)\r?$/m)?.[1] ?? 0);
+        count = Number(header.toString('ascii').match(/^element vertex (\d+)\r?$/m)?.[1] ?? asset.gaussian_count);
         demoCounts.set(file, count);
       } finally {
         closeSync(descriptor);
@@ -58,6 +59,12 @@ export function registerCatalog(app: FastifyInstance, store: Store, config: Conf
     const place = store.get('places', params.id);
     if (!place) return reply.code(404).send({ error: 'Place not found' });
     return hydrate(place);
+  });
+  app.get<{ Params: { id: string } }>('/api/restaurants/:id/live-reviews', async ({ params }, reply) => {
+    const place = store.get('places', params.id);
+    if (!place) return reply.code(404).send({ error: 'Place not found' });
+    reply.header('Cache-Control', 'no-store');
+    return fetchLiveReviews(place, config);
   });
   app.get<{ Params: { id: string } }>('/api/restaurants/:id/manifest', async ({ params }, reply) => {
     const stored = store.get('places', params.id);

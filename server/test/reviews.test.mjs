@@ -14,7 +14,7 @@ test('the catalog seeds labeled reviews once and preserves moderated diner submi
   t.after(async () => { await app.close(); await rm(dir, { recursive: true, force: true }); });
   const placeUrl = '/api/restaurants/bu-ramen-01';
   const catalog = (await app.inject('/api/restaurants')).json();
-  assert.equal(catalog.length, 28);
+  assert.equal(catalog.length, 30);
   assert.ok(catalog.every(({ reviews }) => reviews.length === 2 && reviews.every(({ sample }) => sample === true)));
   const seeded = (await app.inject(placeUrl)).json().reviews;
   const submit = await app.inject({ method: 'POST', url: `${placeUrl}/reviews`,

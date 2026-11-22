@@ -14,3 +14,7 @@ experiments/**/outputs/
 experiments/*.tar.gz
 __pycache__/
 *.pyc
+experiments/**/vendor/
+experiments/**/venv/
+experiments/**/hf-cache/
+experiments/**/atlas/*-*/

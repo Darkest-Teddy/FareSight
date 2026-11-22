@@ -1,0 +1,19 @@
+eljefes-burrito idol {'30k': {'count': 30000, 'bytes': 388495, 'version': 3, 'decoded_y_range_m': [-0.002284984104335308, 0.16476844251155853], 'decoded_robust_width_m': 0.182872661203146, 'decoded_full_width_m': 0.22215130925178528}, '60k': {'count': 60000, 'bytes': 751077, 'version': 3, 'decoded_y_range_m': [-0.002284984104335308, 0.16491027176380157], 'decoded_robust_width_m': 0.18313912153244014, 'decoded_full_width_m': 0.22220370173454285}}
+submitted eljefes-bowl idol 01a200e6-fd99-7c62-89c5-9abd6932e9a4
+succeeded eljefes-bowl idol 5.747609719000025 0.1
+eljefes-bowl idol {'30k': {'count': 30000, 'bytes': 387928, 'version': 3, 'decoded_y_range_m': [-0.00032802033820189536, 0.07782063633203506], 'decoded_robust_width_m': 0.19621803015470501, 'decoded_full_width_m': 0.24103543162345886}, '60k': {'count': 60000, 'bytes': 755942, 'version': 3, 'decoded_y_range_m': [-0.00037422176683321595, 0.07782211154699326], 'decoded_robust_width_m': 0.1964358191937208, 'decoded_full_width_m': 0.2411615252494812}}
+submitted eljefes-chips-dips idol 01a200e7-93a2-7a11-9572-7d354b6cff7b
+succeeded eljefes-chips-dips idol 5.716645744000061 0.1
+eljefes-chips-dips idol {'30k': {'count': 30000, 'bytes': 378813, 'version': 3, 'decoded_y_range_m': [-0.0004049267736263573, 0.07447648793458939], 'decoded_robust_width_m': 0.2679486945271492, 'decoded_full_width_m': 0.3219571113586426}, '60k': {'count': 60000, 'bytes': 736368, 'version': 3, 'decoded_y_range_m': [-0.0004049267736263573, 0.07458954304456711], 'decoded_robust_width_m': 0.2691152401268482, 'decoded_full_width_m': 0.3224954605102539}}
+submitted eljefes-churros idol 01a200e8-2909-74c1-8d63-57a2996237a8
+succeeded eljefes-churros idol 5.644356815999913 0.1
+eljefes-churros idol {'30k': {'count': 30000, 'bytes': 381025, 'version': 3, 'decoded_y_range_m': [-0.0004950083093717694, 0.13398361206054688], 'decoded_robust_width_m': 0.24059438183903692, 'decoded_full_width_m': 0.281002402305603}, '60k': {'count': 60000, 'bytes': 744652, 'version': 3, 'decoded_y_range_m': [-0.0005954218795523047, 0.13403604924678802], 'decoded_robust_width_m': 0.2406309064477682, 'decoded_full_width_m': 0.28109338879585266}}
+submitted eljefes-quesadilla idol 01a200e8-bc2b-7200-b8cb-3c81aa7eccf2
+succeeded eljefes-quesadilla idol 5.724033156000019 0.1
+eljefes-quesadilla idol {'30k': {'count': 30000, 'bytes': 392933, 'version': 3, 'decoded_y_range_m': [-0.00029148778412491083, 0.0752672404050827], 'decoded_robust_width_m': 0.22287671864032743, 'decoded_full_width_m': 0.26229622960090637}, '60k': {'count': 60000, 'bytes': 767192, 'version': 3, 'decoded_y_range_m': [-0.00029148778412491083, 0.0753103643655777], 'decoded_robust_width_m': 0.22347015142440796, 'decoded_full_width_m': 0.26236027479171753}}
+submitted eljefes-taco-salad idol 01a200e9-4dd7-7371-a171-9a91cc931f4f
+succeeded eljefes-taco-salad idol 5.805609136000157 0.1
+eljefes-taco-salad idol {'30k': {'count': 30000, 'bytes': 386620, 'version': 3, 'decoded_y_range_m': [-0.0003906427591573447, 0.09757282584905624], 'decoded_robust_width_m': 0.17380803860723973, 'decoded_full_width_m': 0.24312248826026917}, '60k': {'count': 60000, 'bytes': 754904, 'version': 3, 'decoded_y_range_m': [-0.0003906427591573447, 0.09760989248752594], 'decoded_robust_width_m': 0.17473807297646998, 'decoded_full_width_m': 0.24320313334465027}}
+submitted eljefes-salsas idol 01a200e9-d97d-7553-adc1-d1efa841685f
+succeeded eljefes-salsas idol 5.713714946999971 0.1
+eljefes-salsas idol {'30k': {'count': 30000, 'bytes': 383691, 'version': 3, 'decoded_y_range_m': [-0.00011638841533567756, 0.09913920611143112], 'decoded_robust_width_m': 0.19268993027508258, 'decoded_full_width_m': 0.24096515774726868}, '60k': {'count': 60000, 'bytes': 744476, 'version': 3, 'decoded_y_range_m': [-0.00023856833286117762, 0.09928121417760849], 'decoded_robust_width_m': 0.19375404119491574, 'decoded_full_width_m': 0.24104657769203186}}

@@ -55,6 +55,8 @@ export class VenueSplatScene {
 
   get spawn(): XYZ { return this.manifest?.spawn_point ?? this.asset?.spawn_point ?? defaultSpawn; }
 
+  get hasRoom(): boolean { return this.currentRoomReady; }
+
   get targets(): HitTarget[] { return this.menu.targets; }
 
   private makePlaque(parent: pc.Entity, name: string, width: number, height: number, position?: XYZ): PhysicalPlaque {

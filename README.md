@@ -48,6 +48,30 @@ pnpm dev                  # Starts Fastify server (:3001) + Vite web app (:5173)
 - Without API keys (`PIPELINE_MODE=auto`), the Upload 3D studio runs a labeled demo simulation through all pipeline stages (`Queued -> Generating -> Downloading -> Converting -> Needs review -> Ready`) and publishes into the live manifest.
 - Default moderation passcode when `ADMIN_PASSCODE` is unset: `bostonhacks2026`.
 
+## Capture storage (Tiger Data + Vultr Object Storage)
+
+Optional. When `DATABASE_URL` and the `VULTR_S3_*` variables are set, room photos from the Contribute app stop passing through the API:
+
+1. The phone creates a capture (`POST /api/captures`) and gets short-lived presigned URLs (`POST /api/captures/:id/upload-urls`).
+2. It PUTs each photo and a `frames.json` manifest straight to the private raw bucket, registers the frames (`POST /api/captures/:id/frames`), then calls `POST /api/captures/:id/complete`.
+3. Tiger Data (Postgres) records the capture, its frames and a queued job. Postgres stores object keys only, never image or splat bytes.
+4. The worker claims the job, copies the photos from the bucket to its working folder and runs the usual Atlas room pipeline.
+5. The finished splat is uploaded to the public splat bucket and its URL becomes the asset's URL. Review and publishing work as before, so the published capture becomes the restaurant's room.
+6. Each change is sent with Postgres `NOTIFY`; the API relays it to the phone as server-sent events (`GET /api/captures/:id/events`). `GET /api/captures/:id` returns the same state for page loads.
+
+`GET /api/captures` lists captures and `DELETE /api/captures/:id` removes a capture's rows and every object under its prefixes. Writes need the admin passcode, like the rest of the pipeline. Dishes and the web app's Upload studio keep using `POST /api/uploads`. Without these variables nothing changes: photos and splats stay on the server's disk.
+
+```bash
+# Local stand-ins: Postgres on :54329 and MinIO on :9009
+docker compose up -d
+# Copy the commented capture values from .env.example into .env, then:
+pnpm --filter @faresight/server buckets    # Create both buckets, set CORS and public read on the splat bucket
+pnpm --filter @faresight/server migrate    # Optional: the server also applies pending migrations when it starts
+node scripts/capture_flow.mjs bu-ramen-01 photo1.jpg photo2.jpg   # One capture through a running server
+```
+
+For production, use the pooled Tiger Data URL as `DATABASE_URL` and the direct one as `DATABASE_URL_DIRECT` (`LISTEN` does not work through a transaction pooler). Point `VULTR_S3_ENDPOINT` at the bucket's region, for example `https://ewr1.vultrobjects.com`, run `buckets` once, and set `APP_ORIGINS` to the app origins that may upload. Put a CDN in front of the splat bucket by setting `CDN_BASE_URL`. `pnpm --filter @faresight/server migrate down` reverts the last migration.
+
 ## Build & Verify
 
 ```bash
@@ -58,6 +82,8 @@ pnpm --filter @faresight/server test
 node scripts/first_milestone_test.mjs --demo
 node scripts/verify_e2e.mjs
 ```
+
+The capture storage tests in `server/test/captures.test.mjs` need `docker compose up -d` and skip themselves without it.
 
 ## Credits & Attribution
 

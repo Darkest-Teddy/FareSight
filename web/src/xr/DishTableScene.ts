@@ -1,7 +1,9 @@
 import * as pc from 'playcanvas';
+import { formatDishPrice } from '@faresight/shared';
 import type { XRAssetData, XRDishData, XRManifestData, XRPlaceData } from './bridgeTypes';
 import { hasDishPreview, menuDishes } from '../data/preview3D';
 import { CanvasSurface, facePlane } from './CanvasPanel3D';
+import { collideDishes, DishBody, dishStep, tableRadius } from './DishPhysics';
 import { jarvisPoints, type JarvisReveal } from './JarvisReveal';
 import { PhysicalMenuBook } from './PhysicalMenuBook';
 import type { SplatLoader } from './SplatLoader';
@@ -12,13 +14,7 @@ export interface GrabbableDish {
   entity: pc.Entity;
   bounds: PickBounds;
   setHeld(held: boolean): void;
-  onRelease(surfaceY?: number): boolean;
-}
-
-interface DishPose {
-  position: pc.Vec3;
-  rotation: pc.Quat;
-  world: boolean;
+  onRelease(surfaceY?: number, velocity?: pc.Vec3, angularVelocity?: pc.Vec3): boolean;
 }
 
 interface DishSetting {
@@ -30,9 +26,11 @@ interface DishSetting {
   caption: CanvasSurface;
   center: number;
   grab?: GrabbableDish;
-  pose?: DishPose;
-  held: boolean;
-  settling: boolean;
+  body: DishBody;
+  restPosition: pc.Vec3;
+  restRotation: pc.Quat;
+  preview?: string;
+  dropPending: boolean;
 }
 
 export class DishTableScene {
@@ -58,6 +56,9 @@ export class DishTableScene {
   private turntableRotation = new pc.Quat();
   private dishRotation = new pc.Quat();
   private dishPosition = new pc.Vec3();
+  private previousPosition = new pc.Vec3();
+  private inverse = new pc.Mat4();
+  private accumulated = 0;
 
   constructor(
     parent: pc.Entity, private device: pc.GraphicsDevice, models: ModelLibrary, private splats: SplatLoader,
@@ -127,15 +128,16 @@ export class DishTableScene {
     facePlane(placard, 'Printed dish caption', caption, [0, 0, 0.0045], 0.254, 0.076);
     placard.enabled = false;
     root.enabled = false;
-    return { root, pivot, plate, ring, placard, caption, center: 0, held: false, settling: false };
+    return { root, pivot, plate, ring, placard, caption, center: 0, body: new DishBody(),
+      restPosition: new pc.Vec3(), restRotation: new pc.Quat(), dropPending: false };
   }
 
   private labelDish(setting: DishSetting, dish: XRDishData, venue: string, asset: XRAssetData | null): void {
     const diameter = asset?.plate_diameter_m ?? dish.plate_diameter_m;
     const portion = diameter && diameter > 0
-      ? `${asset?.scale_status === 'measured' ? '' : '≈'}${Math.round(diameter * 100)} cm`
+      ? `${asset?.scale_status === 'measured' ? '' : '≈'}${Number((diameter * 100).toFixed(1))} cm`
       : 'Size unlisted';
-    const scaleAndPrice = Number.isFinite(dish.price) ? `$${dish.price.toFixed(2)}  ·  ${portion}` : portion;
+    const scaleAndPrice = `${formatDishPrice(dish.price)}  ·  ${portion}`;
     setting.caption.draw(JSON.stringify([dish.name, venue, scaleAndPrice]), (ctx, w, h) => {
       ctx.fillStyle = '#f4ecdd';
       ctx.fillRect(0, 0, w, h);
@@ -157,6 +159,8 @@ export class DishTableScene {
     places: readonly XRPlaceData[],
   ): Promise<void> {
     const revision = ++this.revision;
+    const primaryPending = this.primary.dropPending;
+    const secondaryPending = this.secondary.dropPending;
     this.resetDishes();
     const dishes = menuDishes(place, manifest);
     this.menu.setMenu(place, dishes.length ? dishes : [dish], neighborhood, dish.id, compare?.id);
@@ -174,9 +178,11 @@ export class DishTableScene {
     this.primaryUrl = asset?.url;
     this.primary.root.enabled = true;
     this.primary.center = compare ? -0.19 : 0;
-    this.configure(this.primary, 'primary', dish, asset);
-    const primaryReady = this.splats.show('dish', asset, this.primary.pivot).then((ready) => {
-      if (revision === this.revision) this.primary.plate.enabled = !ready;
+    const newPrimary = this.configure(this.primary, 'primary', dish, asset) || primaryPending;
+    const primaryReady = backgroundReady.then(async () => {
+      if (revision !== this.revision) return;
+      const ready = await this.splats.show('dish', asset, this.primary.pivot);
+      if (revision === this.revision) this.finishPreview(this.primary, 'dish', ready, newPrimary);
     });
     if (compare) {
       const comparison = compare.place_id === place.id ? assetFor(compare) : compare.asset ?? null;
@@ -187,17 +193,17 @@ export class DishTableScene {
       this.secondary.root.enabled = true;
       this.secondary.center = 0.19;
       if (!wasComparing) {
-        this.secondary.root.setLocalPosition(0, 0, 0);
         this.reveal.refresh(this.secondary.root, 0.64, jarvisPoints.detail);
       }
-      this.configure(this.secondary, 'secondary', compare, comparison);
-      await Promise.all([primaryReady, backgroundReady]);
+      const newSecondary = this.configure(this.secondary, 'secondary', compare, comparison) || secondaryPending;
+      await primaryReady;
       if (revision !== this.revision) return;
       const ready = await this.splats.show('compare', comparison, this.secondary.pivot);
-      if (revision === this.revision) this.secondary.plate.enabled = !ready;
+      if (revision === this.revision) this.finishPreview(this.secondary, 'compare', ready, newSecondary);
     } else {
       this.primary.placard.enabled = false;
       this.secondary.grab = undefined;
+      this.secondary.preview = undefined;
       if (this.comparing) {
         if (this.reveal.isAnimating(this.top)) {
           this.reveal.finish(this.secondary.root, false);
@@ -210,60 +216,74 @@ export class DishTableScene {
     }
   }
 
-  private configure(setting: DishSetting, id: GrabbableDish['id'], dish: XRDishData, asset: XRAssetData | null): void {
+  private configure(setting: DishSetting, id: GrabbableDish['id'], dish: XRDishData, asset: XRAssetData | null): boolean {
     const diameter = asset?.plate_diameter_m ?? dish.plate_diameter_m ?? 0.24;
-    const size = Number.isFinite(diameter) && diameter > 0 ? diameter : 0.24;
+    const size = Number.isFinite(diameter) && diameter > 0 ? pc.math.clamp(diameter, 0.05, 0.65) : 0.24;
+    const preview = `${dish.id}:${asset?.url ?? ''}`;
+    const changed = setting.preview !== preview;
+    setting.preview = preview;
+    setting.root.setLocalPosition(setting.center, 0, 0);
     setting.plate.setLocalScale(size, 0.01, size);
     setting.ring.setLocalScale(size + 0.024, size + 0.024, size + 0.024);
     setting.plate.enabled = true;
-    const { pivot } = setting;
+    const { pivot, body } = setting;
+    body.radius = size * 0.5;
+    body.height = pc.math.clamp(size * 0.42, 0.035, 0.14);
     const grab: GrabbableDish = {
-      id, entity: pivot, bounds: pickBounds(pivot, [size + 0.06, 0.18, size + 0.06], [0, 0.075, 0]),
+      id, entity: pivot, bounds: pickBounds(pivot, [size + 0.06, Math.max(0.18, body.height + 0.04), size + 0.06], [0, 0.075, 0]),
       setHeld: (held) => {
-        if (setting.grab !== grab) return;
-        setting.held = held;
-        setting.settling = false;
-        setting.pose = held ? undefined : { position: pivot.getPosition().clone(), rotation: pivot.getRotation().clone(), world: true };
+        if (setting.grab !== grab || (!held && body.state !== 'held')) return;
+        setting.dropPending = false;
+        body.setFromPivot(pivot.getPosition(), pivot.getRotation());
+        if (held) body.reset('held');
+        else body.toss();
       },
-      onRelease: (surfaceY) => setting.grab === grab && this.settleDish(setting, surfaceY),
+      onRelease: (surfaceY, velocity, angularVelocity) => {
+        if (setting.grab !== grab) return false;
+        const position = pivot.getPosition();
+        body.setFromPivot(position, pivot.getRotation());
+        body.toss(velocity, angularVelocity, surfaceY);
+        const support = surfaceY ?? this.tabletopY(position);
+        if (support !== undefined) body.keepAbove(support);
+        return support !== undefined;
+      },
     };
     setting.grab = grab;
+    return changed;
+  }
+
+  private finishPreview(setting: DishSetting, slot: 'dish' | 'compare', ready: boolean, drop: boolean): void {
+    setting.plate.enabled = !ready;
+    const height = ready ? this.splats.height(slot) : undefined;
+    const body = setting.body;
+    if (height !== undefined && Number.isFinite(height) && body.state === 'seated') {
+      body.height = pc.math.clamp(height, 0.018, 0.5);
+      const bounds = setting.grab!.bounds;
+      bounds.halfExtents.y = Math.max(0.09, (body.height + 0.04) / 2);
+      bounds.center!.y = body.height / 2;
+    }
+    setting.dropPending = drop && body.state === 'seated';
   }
 
   tabletopY(position: pc.Vec3, baseOffset = 0): number | undefined {
     const table = this.top.getPosition();
-    if (Math.abs(position.y - table.y - baseOffset) <= 0.16 && Math.hypot(position.x - table.x, position.z - table.z) <= 0.45) {
+    if (Math.abs(position.y - table.y - baseOffset) <= 0.16 && Math.hypot(position.x - table.x, position.z - table.z) <= tableRadius) {
       return table.y;
     }
   }
 
-  private settleDish(setting: DishSetting, surfaceY?: number): boolean {
-    const position = setting.pivot.getPosition().clone();
-    const tabletop = this.tabletopY(position);
-    const onTable = tabletop !== undefined && (surfaceY === undefined || Math.abs(position.y - tabletop) <= Math.abs(position.y - surfaceY) + 0.01);
-    const height = onTable ? tabletop : surfaceY;
-    if (height === undefined) return false;
-
-    const rotation = new pc.Quat().setFromAxisAngle(pc.Vec3.UP, levelYaw(setting.pivot) * pc.math.RAD_TO_DEG);
-    position.y = height;
-    if (onTable) {
-      const center = setting.root.getPosition();
-      if (Math.hypot(position.x - center.x, position.z - center.z) < 0.14) position.set(0, 0, 0);
-      else new pc.Mat4().invert(setting.root.getWorldTransform()).transformPoint(position, position);
-      rotation.mul2(setting.root.getRotation().clone().invert(), rotation);
-      rotation.mul(this.turntableRotation.clone().invert());
-    }
-    setting.pose = { position, rotation, world: !onTable };
-    setting.settling = true;
-    return true;
+  private seat(setting: DishSetting): void {
+    setting.body.reset('seated');
+    setting.dropPending = false;
+    setting.restPosition.set(0, 0, 0);
+    setting.restRotation.copy(pc.Quat.IDENTITY);
+    setting.pivot.setLocalPosition(pc.Vec3.ZERO);
+    setting.pivot.setLocalRotation(this.turntableRotation);
   }
 
   resetDishes(): void {
-    for (const setting of [this.primary, this.secondary]) {
-      setting.held = false;
-      setting.pose = undefined;
-      setting.settling = true;
-    }
+    this.accumulated = 0;
+    for (const setting of [this.primary, this.secondary]) this.seat(setting);
   }
 
   setPresentation(virtualTable: boolean, showContents: boolean): void {
@@ -308,33 +328,65 @@ export class DishTableScene {
     } else this.angle += radians;
   }
 
-  update(dt: number, reducedMotion = false): void {
-    this.currentAngle = pc.math.lerp(this.currentAngle, this.angle, damp(dt, 24));
+  update(dt: number, reducedMotion = false, surfaceAt?: (point: pc.Vec3) => number | undefined): void {
+    this.currentAngle = pc.math.lerp(this.currentAngle, this.angle, reducedMotion ? 1 : damp(dt, 24));
     this.turntableRotation.setFromAxisAngle(pc.Vec3.UP, this.currentAngle * pc.math.RAD_TO_DEG);
-    const blend = damp(dt, 8);
-    for (const setting of [this.primary, this.secondary]) {
-      if (!setting.root.enabled) continue;
-      const x = pc.math.lerp(setting.root.getLocalPosition().x, setting.center, blend);
-      setting.root.setLocalPosition(x, 0, 0);
-      if (setting.held) continue;
-      const { pivot, pose } = setting;
-      const position = pose?.position ?? pc.Vec3.ZERO;
-      const rotation = pose ? (pose.world ? pose.rotation : this.dishRotation.mul2(this.turntableRotation, pose.rotation))
-        : this.turntableRotation;
-      const from = pose?.world ? pivot.getPosition() : pivot.getLocalPosition();
-      const fromRotation = pose?.world ? pivot.getRotation() : pivot.getLocalRotation();
-      if (setting.settling && (reducedMotion || (from.distanceSq(position) < 0.000001 && Math.abs(fromRotation.dot(rotation)) > 0.99999))) {
-        setting.settling = false;
+    if (!this.contentsVisible) return;
+    const settings = this.comparing ? [this.primary, this.secondary] : [this.primary];
+    const table = this.top.getPosition();
+    const floor = this.grounded || !this.tableVisible ? 0 : table.y - this.tableDepth;
+    for (const setting of settings) {
+      const { body, pivot } = setting;
+      if (body.state === 'seated') {
+        pivot.setLocalPosition(setting.restPosition);
+        pivot.setLocalRotation(this.dishRotation.mul2(this.turntableRotation, setting.restRotation));
+        body.setFromPivot(pivot.getPosition(), pivot.getRotation());
+        if (setting.dropPending) {
+          setting.dropPending = false;
+          if (!reducedMotion) {
+            body.position.y += 0.05;
+            body.toss();
+          }
+        }
+      } else if (body.state === 'held') {
+        this.previousPosition.copy(body.position);
+        body.setFromPivot(pivot.getPosition(), pivot.getRotation());
+        if (dt > 0) {
+          body.velocity.sub2(body.position, this.previousPosition).mulScalar(1 / dt);
+          body.clampMotion();
+        }
       }
-      const amount = damp(dt, 16);
-      const next = setting.settling ? this.dishPosition.lerp(from, position, amount) : position;
-      const nextRotation = setting.settling ? this.dishRotation.slerp(fromRotation, rotation, amount) : rotation;
-      if (pose?.world) {
-        pivot.setPosition(next);
-        pivot.setRotation(nextRotation);
-      } else {
-        pivot.setLocalPosition(next);
-        pivot.setLocalRotation(nextRotation);
+    }
+    this.accumulated += Math.min(Math.max(0, dt), 0.05);
+    while (this.accumulated >= dishStep) {
+      this.accumulated -= dishStep;
+      for (const { body } of settings) {
+        if (body.state === 'dynamic') body.step(dishStep, table, floor, surfaceAt);
+      }
+      if (this.comparing) collideDishes(this.primary.body, this.secondary.body);
+    }
+    for (const setting of settings) {
+      const { body, pivot } = setting;
+      if (body.state === 'held' || body.state === 'seated') continue;
+      if (body.position.distanceSq(table) > 3.5 ** 2 && body.support !== 'lost') body.sleep('lost');
+      if (body.state === 'sleeping' && body.support !== 'surface' && body.support !== 'table') {
+        body.idle += Math.min(dt, 0.05);
+        if (body.idle >= 2.5) {
+          this.seat(setting);
+          setting.dropPending = !reducedMotion;
+          continue;
+        }
+        if (body.support === 'lost') continue;
+      }
+      pivot.setPosition(body.pivot(this.dishPosition));
+      pivot.setRotation(body.rotation);
+      if (body.state === 'sleeping' && body.support === 'table') {
+        this.dishPosition.y = table.y;
+        this.inverse.copy(setting.root.getWorldTransform()).invert().transformPoint(this.dishPosition, setting.restPosition);
+        setting.restPosition.y = 0;
+        setting.restRotation.setFromAxisAngle(pc.Vec3.UP,
+          (levelYaw(pivot) - levelYaw(setting.root) - this.currentAngle) * pc.math.RAD_TO_DEG);
+        body.reset('seated');
       }
     }
   }
@@ -351,6 +403,8 @@ export class DishTableScene {
     this.splats.clear('compare');
     this.angle = 0;
     this.currentAngle = 0;
+    this.turntableRotation.copy(pc.Quat.IDENTITY);
+    this.resetDishes();
     this.primaryUrl = undefined;
     for (const setting of [this.primary, this.secondary]) {
       this.reveal.finish(setting.root, false);
@@ -358,9 +412,7 @@ export class DishTableScene {
       setting.pivot.setLocalPosition(pc.Vec3.ZERO);
       setting.pivot.setLocalRotation(pc.Quat.IDENTITY);
       setting.grab = undefined;
-      setting.pose = undefined;
-      setting.held = false;
-      setting.settling = false;
+      setting.preview = undefined;
     }
   }
 

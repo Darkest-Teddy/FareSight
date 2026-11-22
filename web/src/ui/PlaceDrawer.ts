@@ -1,11 +1,12 @@
 import {
-  buildMbtaTripPlannerUrl, MBTA_SUBWAY_FARE, ROUTE_COLORS,
+  buildMbtaTripPlannerUrl, formatDishPrice, MBTA_SUBWAY_FARE, ROUTE_COLORS,
   type Asset, type Dish, type MbtaSource, type Place, type RestaurantManifest, type Stop,
 } from '@faresight/shared';
 import { api, type Alert, type Prediction, type Trip } from '../api/client';
 import { has3DDish, has3DRoom, hasDishPreview, isSplat } from '../data/preview3D';
-import { bostonHours, formatHours, week } from '../data/reviewBriefing';
+import { bostonHours, formatHours, liveBriefingReview, loadLiveReviews, week } from '../data/reviewBriefing';
 import { button, element, errorText, field, link, message, money, option, previewBadge, section } from './dom';
+import { renderBriefingReview } from './ReviewBriefingModal';
 import { oneWayCost, type Filters } from './state';
 
 export type Seating = 'seated' | 'standing';
@@ -199,6 +200,7 @@ export class PlaceDrawer {
   private reviewsNode?: HTMLElement;
   private reviewsKey = '';
   private facts: HTMLElement[] = [];
+  private liveReviews = element('div');
   private detailsPlaceId?: string;
 
   constructor(private readonly actions: DrawerActions) {
@@ -394,11 +396,13 @@ export class PlaceDrawer {
         this.facts = venueFacts(place);
         this.reviewsNode = element('div');
         this.reviewsKey = '';
+        this.liveReviews = element('div');
+        void this.updateLiveReviews(place, this.liveReviews);
       }
       summary.append(this.venueActions);
       this.actionKey = '';
       this.content.replaceChildren(summary, this.modelDetails, this.tripDetails, this.costDetails,
-        ...this.facts, this.pairingDetails, this.reviewsNode);
+        ...this.facts, this.liveReviews, this.pairingDetails, this.reviewsNode);
       this.content.scrollTop = 0;
       this.modelKey = '';
     }
@@ -467,6 +471,27 @@ export class PlaceDrawer {
     });
   }
 
+  /** Live web ratings appear only when the lookup succeeds; a failed lookup leaves no placeholder behind. */
+  private async updateLiveReviews(place: Place, host: HTMLElement): Promise<void> {
+    host.replaceChildren();
+    const result = await loadLiveReviews(place.id).catch(() => undefined);
+    if (!host.isConnected || !result?.live) return;
+    const node = section('Live web reviews');
+    for (const { source, rating, count, url } of result.ratings) {
+      const row = element('p');
+      row.append(url ? link(source, url) : source,
+        ` · ${rating.toFixed(1)} / 5${count ? ` · ${ratingCount.format(count)} reviews` : ''}`);
+      node.append(row);
+    }
+    if (result.highlights.length) {
+      const highlights = element('ul', 'review-highlights');
+      highlights.append(...result.highlights.map((text) => element('li', '', text)));
+      node.append(highlights);
+    }
+    node.append(...result.reviews.slice(0, 3).map((review) => renderBriefingReview(liveBriefingReview(review))));
+    host.replaceChildren(node);
+  }
+
   private updateCost({ place, filters, trip, dish }: ViewData) {
     const node = section('Cost breakdown');
     const group = filters.groupSize;
@@ -481,7 +506,8 @@ export class PlaceDrawer {
     this.oneWay.toggleAttribute('data-loading', pending);
     this.oneWay.textContent = pending ? 'Calculating' : total;
     const rows: [string, string][] = [
-      [roomPrice ? 'Room hire' : dishPrice !== undefined || (!dish && place.category === 'restaurant') ? 'Food' : 'Typical venue spend',
+      [roomPrice ? 'Room hire' : dish && dishPrice === undefined ? 'Typical venue spend (estimate)'
+        : dishPrice !== undefined || place.category === 'restaurant' ? 'Food' : 'Typical venue spend',
         roomPrice ? `${money(roomPrice.price)} / hour` : money(price)],
       ['T fare, one way', money(fare)],
       ['T fare, round trip', money(roundTrip)],
@@ -543,31 +569,37 @@ export class PlaceDrawer {
     if (dataManifest) {
       const menu = dataManifest.menu_items;
       if (dish) {
+        if (dish.price != null) node.append(element('p', 'price', formatDishPrice(dish.price)));
         if (dish.portion_note) node.append(element('p', '', dish.portion_note));
 
         const compare = element('select');
         compare.dataset.control = 'compare';
         compare.append(option('', 'One dish'));
-        for (const entry of menu) {
-          if (entry.dish.id !== dish.id && isSplat(entry.dish_asset)) compare.append(option(entry.dish.id, entry.dish.name));
-        }
-        const others = element('optgroup');
-        others.label = 'Other Boston restaurants';
+        const addVenue = (venue: Place, dishes: readonly Dish[]) => {
+          if (!dishes.length) return;
+          const group = element('optgroup');
+          group.label = venue.name;
+          for (const entry of dishes) {
+            const choice = option(entry.id, entry.name);
+            choice.dataset.placeId = venue.id;
+            group.append(choice);
+          }
+          compare.append(group);
+        };
+        addVenue(place, menu.filter((entry) => entry.dish.id !== dish.id && isSplat(entry.dish_asset)).map((entry) => entry.dish));
         for (const venue of data.places) {
           if (venue.id === place.id) continue;
-          for (const entry of venue.dishes.filter(hasDishPreview)) {
-            const choice = option(entry.id, `${venue.name} — ${entry.name}`);
-            choice.dataset.placeId = venue.id;
-            others.append(choice);
-          }
+          addVenue(venue, venue.dishes.filter(hasDishPreview));
         }
-        if (others.children.length) compare.append(others);
         compare.value = comparison?.dish.id ?? '';
         compare.disabled = compare.options.length < 2;
         compare.addEventListener('change', () => this.actions.openDish(dish, compare.value, compare.selectedOptions[0]?.dataset.placeId));
         node.append(field('Compare side-by-side', compare));
         if (compare.disabled) node.append(message('No other published 3D dish previews are available.'));
-        if (comparison) node.append(element('p', '', `${comparison.dish.name} · ${comparison.place.name}`));
+        if (comparison) {
+          const listed = comparison.dish.price != null ? ` · ${formatDishPrice(comparison.dish.price)}` : '';
+          node.append(element('p', '', `${comparison.dish.name} · ${comparison.place.name}${listed}`));
+        }
         const slider = element('input');
         slider.type = 'range';
         slider.min = '0';
@@ -643,7 +675,7 @@ export class PlaceDrawer {
         if (hasPreview) name.append(previewBadge());
         const price = entry.dish.price;
         label.append(name);
-        if (Number.isFinite(price)) label.append(element('p', 'price', money(price)));
+        if (price != null) label.append(element('p', 'price', formatDishPrice(price)));
         row.append(label);
         if (hasPreview) {
           const view = button('View on table', () => this.actions.openDish(entry.dish), 'quiet menu-preview');

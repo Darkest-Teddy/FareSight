@@ -593,6 +593,9 @@ button.quiet:is(.menu-toggle, .sidebar-back, .sidebar-home):hover:not(:disabled)
 .pair-code { display: block; text-align: center; letter-spacing: .27em; background: var(--canvas); padding: .65rem; font-size: 2.4rem; font-weight: 700; color: var(--accent); border-radius: .35rem; }
 .moderation-row { display: grid; gap: .42rem; padding: .65rem; border: 1px solid var(--edge-soft); border-radius: .35rem; overflow-wrap: anywhere; }
 .credit-list { display: grid; gap: .45rem; margin: 0; padding-left: 1.15rem; }
+.dish-source-group { border-top: 1px solid var(--edge-soft); padding-block: .45rem; }
+.dish-source-group > summary { cursor: pointer; font-weight: 600; }
+.dish-source-group > :not(summary) { margin-top: .6rem; }
 .log-view { max-height: 35dvh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--canvas); border-radius: .35rem; padding: .7rem; margin: 0; color: var(--muted); }
 
 @keyframes surface-in { from { opacity: 0; transform: scale(.96); } }

@@ -292,7 +292,7 @@ export class PhysicalSurfaces {
     return best;
   }
 
-  snapAt(worldPos: pc.Vec3, baseOffset: number, verticalRange = 0.11, locked?: object):
+  snapAt(worldPos: pc.Vec3, baseOffset: number, verticalRange = 0.11, locked?: object, horizontalMargin = 0.10):
     { y: number; surface: SurfaceMatch } | undefined {
     const { x, y, z } = this.inverse.copy(this.rig.getWorldTransform()).invert().transformPoint(worldPos, this.local);
     let best: SurfaceMatch | undefined;
@@ -303,7 +303,7 @@ export class PhysicalSurfaces {
       if (vertical > (id === locked ? 0.12 : verticalRange)) continue;
       const [px, pz] = nearestPoint(geometry, x, z);
       const horizontal = Math.hypot(x - px, z - pz);
-      if (horizontal > 0.10) continue;
+      if (horizontal > horizontalMargin) continue;
       const candidate = vertical + horizontal + (id === locked ? -1 : 0);
       if (candidate >= score) continue;
       score = candidate;

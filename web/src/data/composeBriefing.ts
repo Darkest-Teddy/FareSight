@@ -1,7 +1,5 @@
 import { STOPS, type Place } from '@faresight/shared';
-import type { BriefingAction, BriefingCard, BriefingFact, BriefingReview, BriefingSection, PlaceDecision } from './reviewBriefing';
-
-type ReviewSnapshot = PlaceDecision['reviews'];
+import { catalogReviewSnapshots, type BriefingAction, type BriefingCard, type BriefingFact, type BriefingReview, type BriefingSection, type ReviewSnapshot } from './reviewBriefing';
 type Fields = Record<string, unknown>;
 
 function fields(value: unknown): Fields {
@@ -32,12 +30,10 @@ function facts(value: unknown, maximum: number): BriefingFact[] | undefined {
   });
 }
 
-export function composeBriefingCard(id: string, args: Fields, places: readonly Place[], snapshots: ReadonlyMap<string, ReviewSnapshot>): BriefingCard {
+export function composeBriefingCard(id: string, args: Fields, places: readonly Place[], snapshots: ReadonlyMap<string, ReviewSnapshot[]>): BriefingCard {
   const catalog = new Map(places.map((place) => [place.id, place]));
   const reviews = places.flatMap((place) => {
-    const published = snapshots.get(place.id) ?? place.reviews.map((review) => ({
-      id: review.id, author_label: review.author, text: review.text, sample: !!review.sample, created_at: review.created_at,
-    }));
+    const published = snapshots.get(place.id) ?? catalogReviewSnapshots(place);
     return published.map((review) => ({ ...review, placeId: place.id, placeName: place.name }));
   });
 
@@ -49,6 +45,7 @@ export function composeBriefingCard(id: string, args: Fields, places: readonly P
     const source = place ? reviews.filter((review) => review.placeId === place.id) : reviews;
     const fromCatalog = (review: typeof reviews[number], text = review.text): BriefingReview => ({
       placeId: review.placeId, placeName: review.placeName, author: review.author_label, text, sample: review.sample,
+      live: review.live, source: review.source, rating: review.rating, date_label: review.date_label, url: review.url, unverified: false,
     });
     const reviewId = optionalText(input.reviewId);
     if (reviewId) {
@@ -65,11 +62,12 @@ export function composeBriefingCard(id: string, args: Fields, places: readonly P
       const match = attributed.length === 1 ? attributed[0] : candidates.length === 1 ? candidates[0] : undefined;
       if (match) return [fromCatalog(match, excerpt)];
       if (!author || !placeName) throw new Error('Provide an author and venue for an excerpt, or use a catalog review ID.');
-      return [{ placeId, placeName, author, text: excerpt, unverified: true }];
+      const rating = typeof input.rating === 'number' && input.rating >= 0 && input.rating <= 5 ? input.rating : undefined;
+      return [{ placeId, placeName, author, text: excerpt, source: optionalText(input.source, 60), rating, unverified: true }];
     }
     if (!place) throw new Error('Choose a review ID, an attributed excerpt, or a venue.');
     if (!source.length) throw new Error(`${place.name} has no published reviews.`);
-    return [...source].sort((a, b) => Number(a.sample) - Number(b.sample) || b.created_at.localeCompare(a.created_at))
+    return [...source].sort((a, b) => Number(!!b.live) - Number(!!a.live) || Number(a.sample) - Number(b.sample) || b.created_at.localeCompare(a.created_at))
       .slice(0, 2).map((review) => fromCatalog(review));
   }
 

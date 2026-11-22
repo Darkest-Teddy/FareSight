@@ -14,6 +14,26 @@ export interface PlaceFacts {
  * Ratings are snapshots of third-party listings and drift over time. Demo venues have no entry.
  */
 export const PLACE_FACTS: Record<string, PlaceFacts> = {
+  'bu-starbucks-01': {
+    hours: {
+      mon: ['07:00', '20:00'], tue: ['07:00', '20:00'], wed: ['07:00', '20:00'],
+      thu: ['07:00', '20:00'], fri: ['07:00', '20:00'],
+      sat: ['09:00', '19:00'], sun: ['09:00', '19:00'],
+    },
+    details: {
+      checked_on: '2026-11-21', address: '700 Commonwealth Ave', website: null, phone: null,
+      hours_verified: false, hours_note: null, hours_source: null,
+      awards: [], ratings: [], review_highlights: [], review_sources: [],
+    },
+  },
+  'kenmore-shudaxia-01': {
+    hours: null,
+    details: {
+      checked_on: '2026-11-21', address: '580 Commonwealth Ave', website: null, phone: null,
+      hours_verified: false, hours_note: null, hours_source: null,
+      awards: [], ratings: [], review_highlights: [], review_sources: [],
+    },
+  },
   "bu-pavement-01": {
     "hours": {
       "mon": [

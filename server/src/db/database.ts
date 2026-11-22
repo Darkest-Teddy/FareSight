@@ -58,6 +58,8 @@ type RecordByTable = {
 
 export class Store {
   readonly sqlite: DatabaseSync;
+  /** Called after every job change. Capture storage uses it to mirror job progress into Postgres. */
+  onJobUpdate?: (job: JobRecord) => void;
 
   constructor(filename: string) {
     if (filename !== ':memory:') mkdirSync(dirname(filename), { recursive: true });
@@ -88,17 +90,39 @@ export class Store {
       CREATE TABLE IF NOT EXISTS worker_lease (id INTEGER PRIMARY KEY CHECK (id = 1), owner TEXT NOT NULL, expires INTEGER NOT NULL) STRICT;
     `);
     this.transaction(() => {
+      for (const asset of demoAssets) {
+        const stored = this.get('assets', asset.id);
+        if (!stored || stored.backend === 'prebuilt-demo') this.put('assets', asset);
+      }
+      const isSeedAsset = (id: string | null | undefined) => !id || this.get('assets', id)?.backend === 'prebuilt-demo';
       for (const place of places) {
-        this.sqlite.prepare('INSERT OR IGNORE INTO places VALUES (?, ?)').run(place.id, JSON.stringify(place));
-        // Seed-owned public facts and surveyed positions follow the seed; runtime fields (assets, dishes) stay as stored.
-        const stored = this.get('places', place.id)!;
+        const stored = this.get('places', place.id);
+        if (!stored) {
+          this.put('places', place);
+          continue;
+        }
         const { name, vibe, hours, details, lat, lon, walk_from_stop_m } = place;
-        this.put('places', { ...stored, name, vibe, hours, details, lat, lon, walk_from_stop_m });
+        const seedDishIds = new Set(place.dishes.map(({ id }) => id));
+        const dishes = new Map(stored.dishes
+          .filter(({ id, asset_id }) => seedDishIds.has(id) || !asset_id || !isSeedAsset(asset_id))
+          .map((dish) => [dish.id, dish]));
+        for (const dish of place.dishes) {
+          if (isSeedAsset(dishes.get(dish.id)?.asset_id)) dishes.set(dish.id, dish);
+        }
+        const seedRoom = isSeedAsset(stored.room_asset_id);
+        const hasUploadedPreview = !seedRoom || stored.dishes.some(({ asset_id }) => !isSeedAsset(asset_id));
+        this.put('places', {
+          ...stored, name, vibe, hours, details, lat, lon, walk_from_stop_m,
+          room_asset_id: seedRoom ? place.room_asset_id : stored.room_asset_id,
+          dishes: [...dishes.values()],
+          seed_status: hasUploadedPreview ? stored.seed_status : place.seed_status,
+          price_checked_on: hasUploadedPreview ? stored.price_checked_on : place.price_checked_on,
+        });
       }
       // Venues dropped from the catalog because they sit outside their station's model.
-      for (const id of ['allston-bostongoods-01', 'allston-coreanos-01', 'allston-brightonmusic-01'])
+      for (const id of ['allston-bostongoods-01', 'allston-coreanos-01', 'allston-brightonmusic-01']) {
         this.sqlite.prepare('DELETE FROM places WHERE id = ?').run(id);
-      for (const asset of demoAssets) this.sqlite.prepare('INSERT OR IGNORE INTO assets VALUES (?, ?)').run(asset.id, JSON.stringify(asset));
+      }
       const reviewed = new Set(this.all('reviews').map(({ place_id }) => place_id));
       for (const place of this.all('places')) {
         if (place.reviews.length || reviewed.has(place.id)) continue;
@@ -164,6 +188,7 @@ export class Store {
   updateJob(job: JobRecord, changes: Partial<JobRecord>): JobRecord {
     const updated = { ...job, ...changes, updated_at: new Date().toISOString() };
     this.put('jobs', updated);
+    this.onJobUpdate?.(updated);
     return updated;
   }
 

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" role="img" aria-labelledby="sightline-title">
+  <title id="sightline-title">FareSight — Sightline</title>
+  <g fill="none" stroke="#3ccb78" stroke-width="7" stroke-linejoin="round">
+    <path d="M6 48 25 29Q31 23 40 23H56Q65 23 71 29L90 48 71 67Q65 73 56 73H40Q31 73 25 67Z"/>
+    <path d="M6 48H35M61 48H90"/>
+    <circle cx="48" cy="48" r="13"/>
+  </g>
+</svg>
