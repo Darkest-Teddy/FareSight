@@ -1,3 +1,4 @@
+import { validateStationGeometry } from './validate_station_geometry.mjs';
 import assert from 'node:assert/strict';
 import { places } from '../server/src/db/seed.ts';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -68,6 +69,10 @@ const published = readdirSync(new URL('../web/public/assets-demo/', import.meta.
   .filter((n) => !/^(room-.+-atlas|dish-.+)\.sog$/.test(n))
   .sort();
 assert.deepEqual(published, generated, 'Run pnpm assets:sync to publish the generated assets');
+for (const file of expected) {
+  const shipped = readFileSync(new URL('../web/public/assets-demo/' + file, import.meta.url));
+  assert.ok(shipped.equals(readFileSync(dir + file)), 'Published asset differs from generator output: ' + file);
+}
 const load = (n) => JSON.parse(readFileSync(dir + n + '.json'));
 const stations = load('station-anchors'),
   segments = load('segment-anchors'),
@@ -215,6 +220,7 @@ function parseModel(name) {
     meshes.set(node.name, {
       positions,
       normals,
+      colors: arrays[a.COLOR_0],
       indices,
       uv,
       offset,
@@ -244,7 +250,7 @@ function parseModel(name) {
     draws + ' primitives',
     reportBounds(bounds),
   );
-  return { bounds, meshes, materials: j.materials ?? [] };
+  return { bounds, meshes, geometry: j.extras?.stationGeometry, materials: j.materials ?? [] };
 }
 for (const name of genModels) models[name] = parseModel(name);
 function exactBounds(b, lo, hi) {
@@ -469,6 +475,9 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
   assert.ok(!('lcdNode' in s) && !('dialNode' in s), id + ' stale hardware anchors');
   assert.ok(!meshes.has('LCD_Screen') && !meshes.has('Rotary_Dial'), id + ' stale hardware nodes');
   assert.equal(s.deckY, 0);
+  validateStationGeometry(id, model, areas[id], s.deckY);
+  const [postX, postY, postZ] = s.stationAnchor.base;
+  approx(postY, topAt(meshes, postX, postZ), 2e-7, id + ' station post foot');
   const islandParts = ['Island turf', 'Island earth and rock'].map((name) => meshes.get(name));
   let islandTris = 0;
   for (const part of islandParts) {
