@@ -114,6 +114,43 @@ export function inspectSplat(buffer: Buffer, centerDish = false) {
   return { count, bounds: { min, max }, width, layout };
 }
 
+/** Reads and writes one floating-point property of every vertex. Undefined when the file has no such property. */
+export function plyColumn(buffer: Buffer, layout: PlyLayout, name: string) {
+  const property = layout.properties.get(name);
+  if (!property) return undefined;
+  const double = property.type === 'double' || property.type === 'float64';
+  if (!double && property.type !== 'float' && property.type !== 'float32') return undefined;
+  const at = (index: number) => layout.offset + index * layout.stride + property.offset;
+  if (double) {
+    return layout.little
+      ? { get: (index: number) => buffer.readDoubleLE(at(index)), set: (index: number, value: number) => { buffer.writeDoubleLE(value, at(index)); } }
+      : { get: (index: number) => buffer.readDoubleBE(at(index)), set: (index: number, value: number) => { buffer.writeDoubleBE(value, at(index)); } };
+  }
+  return layout.little
+    ? { get: (index: number) => buffer.readFloatLE(at(index)), set: (index: number, value: number) => { buffer.writeFloatLE(value, at(index)); } }
+    : { get: (index: number) => buffer.readFloatBE(at(index)), set: (index: number, value: number) => { buffer.writeFloatBE(value, at(index)); } };
+}
+
+/**
+ * Turns a Gaussian PLY over in place, half a turn about x, so what pointed down points up.
+ * TRELLIS writes its splats with y pointing down, the way the first Gaussian splat viewers read them.
+ * This app draws y up, so without this every TRELLIS dish stands on its head.
+ */
+export function turnOverPly(buffer: Buffer, layout: PlyLayout): void {
+  const negated = ['y', 'z', 'ny', 'nz'].map((name) => plyColumn(buffer, layout, name));
+  const [w, x, y, z] = ['rot_0', 'rot_1', 'rot_2', 'rot_3'].map((name) => plyColumn(buffer, layout, name));
+  for (let index = 0; index < layout.count; index++) {
+    for (const column of negated) column?.set(index, -column.get(index));
+    if (!w || !x || !y || !z) continue;
+    // Each Gaussian's own rotation (w, x, y, z) is turned with it: the half turn about x, applied first.
+    const [qw, qx, qy, qz] = [w.get(index), x.get(index), y.get(index), z.get(index)];
+    w.set(index, -qx);
+    x.set(index, qw);
+    y.set(index, -qz);
+    z.set(index, qy);
+  }
+}
+
 /** No published splat has more Gaussians than this. Rooms are cut to it; dishes are cut much lower. */
 export const maxGaussians = 400_000;
 
@@ -134,7 +171,7 @@ function splatCli(): Promise<string[] | undefined> {
 }
 
 export async function convertSplat(
-  config: Config, jobId: string, kind: 'room' | 'dish', original: string, commit: CommitFile = rename,
+  config: Config, jobId: string, kind: 'room' | 'dish', original: string, commit: CommitFile = rename, turnOver = false,
 ) {
   const format: 'spz' | 'ply' = extname(original) === '.spz' ? 'spz' : 'ply';
   const unique = resolve(config.outputs, `${jobId}.${randomUUID()}.part`);
@@ -153,6 +190,12 @@ export async function convertSplat(
     } else {
       const payload = await readFile(original);
       geometry = inspectSplat(payload, kind === 'dish');
+      if (turnOver && geometry.layout && geometry.bounds) {
+        turnOverPly(payload, geometry.layout);
+        // Turning over swaps and negates the y and z limits. The width, measured across x and z, is unchanged.
+        const { min, max } = geometry.bounds;
+        for (const axis of [1, 2]) [min[axis], max[axis]] = [-max[axis], -min[axis]];
+      }
       await writeFile(normalized, payload, { flag: 'wx' });
     }
     const target = kind === 'room' ? maxGaussians : 60_000;

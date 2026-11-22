@@ -10,6 +10,7 @@ import { publishSplats } from '../services/captures.ts';
 import type { Captures } from '../services/captures.ts';
 import { findDemoAsset } from '../services/demoAssets.ts';
 import { measureDish } from '../services/dishMeasure.ts';
+import { checkDishOrientation } from '../services/dishOrientation.ts';
 import { MAX_IMAGE_BYTES } from '../services/imagePrep.ts';
 import { downloadFile, ProviderHttpError, TerminalProviderError, type CommitFile } from '../services/providerHttp.ts';
 import { publishAsset } from '../services/publish.ts';
@@ -116,7 +117,7 @@ async function advance(store: Store, config: Config, initialJob: JobRecord, leas
       } else {
         if (!job.provider_task_id) {
           if (job.submission_pending) throw new Error(failedSubmission);
-          const provider_task_id = await submitTrellis(config, inputs(), assertCurrent, () => set({ submission_pending: true }));
+          const provider_task_id = await submitTrellis(config, buildPhotos(), assertCurrent, () => set({ submission_pending: true }));
           set({ provider_task_id, submission_pending: false, progress: 25 });
           return;
         }
@@ -171,7 +172,20 @@ async function advance(store: Store, config: Config, initialJob: JobRecord, leas
     if (job.status === 'converting') {
       const original = job.original_spz_path ?? job.original_ply_path;
       if (!original) throw new TerminalProviderError('Original splat checkpoint is missing');
-      const converted = await convertSplat(config, job.id, job.kind, original, commit);
+      // A TRELLIS dish arrives standing on its head, so it is turned over. Before that, the turned model is
+      // checked against its photo: the check can leave it unturned or hold it for a person, never fail the job.
+      const turns = job.kind === 'dish' && job.provider === 'trellis-replicate' && Boolean(job.original_ply_path);
+      if (turns && job.dish_orientation === undefined) {
+        const dish_orientation = await checkDishOrientation(config, job.dish_name, referencePhoto(), original);
+        set({
+          dish_orientation, progress: 90,
+          status_message: dish_orientation.verdict === 'upright' ? 'Checked: the dish stands upright'
+            : dish_orientation.held ? `The dish needs a look before it goes live: ${dish_orientation.reason}`
+            : dish_orientation.reason,
+        });
+        return;
+      }
+      const converted = await convertSplat(config, job.id, job.kind, original, commit, turns && (job.dish_orientation?.turned_over ?? true));
       // The size judged from the photos sets the scale. A size sent with the job overrides it, and the
       // figure the catalog lists for the dish is used only when the photos could not be measured.
       const width = converted.metadata.measured_width;
@@ -202,12 +216,15 @@ async function advance(store: Store, config: Config, initialJob: JobRecord, leas
         source_photos: inputs().map((upload) => upload.url), captured_on: new Date().toISOString().slice(0, 10),
         status: 'needs_review', metadata: converted.metadata,
       };
+      // A model the upright check could not vouch for is never published by itself, even with auto-publish on.
+      const held = job.dish_orientation?.held ? job.dish_orientation : undefined;
       store.transaction(() => {
         const reviewed = store.updateJob(job, {
-          status: 'needs_review', progress: progress.needs_review, status_message: description(job, 'Ready to review'),
+          status: 'needs_review', progress: progress.needs_review,
+          status_message: description(job, held ? `Held for review: ${held.reason}` : 'Ready to review'),
           error: null, asset_id: asset.id, converted_asset_path: converted.path,
         }, lease);
-        if (config.autoPublish) publishAsset(store, asset, reviewed, {}, lease);
+        if (config.autoPublish && !held) publishAsset(store, asset, reviewed, {}, lease);
         else store.put('assets', asset);
       });
     }
@@ -228,11 +245,27 @@ async function advance(store: Store, config: Config, initialJob: JobRecord, leas
     }
   }
 
+  /** The clearest view of the dish, when the measuring step picked one. Otherwise the first photo. */
+  function referencePhoto(): Upload {
+    const photos = inputs();
+    return photos[job.dish_measure?.best_photo ?? 0] ?? photos[0];
+  }
+
+  /**
+   * The photos TRELLIS builds from: the clearest view and the one taken next to it. All of a job's
+   * photos are used to measure the dish, but a build from eight views came back as three copies of the
+   * object in a row, where a build from two came back as one.
+   */
+  function buildPhotos(): Upload[] {
+    const photos = inputs();
+    if (photos.length <= 2) return photos;
+    const best = photos.indexOf(referencePhoto());
+    return [photos[best], photos[best + 1 < photos.length ? best + 1 : best - 1]];
+  }
+
   async function useReferencePreview() {
     if (job.preview_image_path && existsSync(job.preview_image_path)) return;
-    // The clearest view of the dish, when the measuring step picked one.
-    const photos = inputs();
-    const upload = photos[job.dish_measure?.best_photo ?? 0] ?? photos[0];
+    const upload = referencePhoto();
     const file = resolve(config.outputs, `${job.id}-preview${extname(upload.file)}`);
     const preview_image_path = await copyAtomically(resolve(config.uploads, upload.file), file, commit);
     set({ preview_image_path, preview_download_pending: false });

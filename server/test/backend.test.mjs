@@ -16,7 +16,8 @@ import { demoSchedules } from '../dist/routes/mbtaDemo.js';
 import { downloadFile } from '../dist/services/providerHttp.js';
 import { pollAtlasSplats, submitAtlasSplats } from '../dist/services/atlasClient.js';
 import { findDemoAsset } from '../dist/services/demoAssets.js';
-import { inspectSplat } from '../dist/services/splatProcessor.js';
+import { inspectSplat, turnOverPly } from '../dist/services/splatProcessor.js';
+import { checkDishOrientation } from '../dist/services/dishOrientation.js';
 import { fetchLiveReviews } from '../dist/services/liveReviews.js';
 
 const room = 'room-study-cafe.ply';
@@ -434,6 +435,7 @@ test('provider request contracts and TRELLIS retry preserve the paid prediction'
   let imageId;
   let trellisSubmissions = 0;
   let measurements = 0;
+  let orientationChecks = 0;
   let previewDownloads = 0;
   let plyDownloads = 0;
   const json = (body) => Response.json(body);
@@ -445,6 +447,21 @@ test('provider request contracts and TRELLIS retry preserve the paid prediction'
       assert.equal(init.headers['x-goog-api-key'], 'test-gemini');
       assert.equal(payload.generationConfig.responseMimeType, 'application/json');
       assert.deepEqual(payload.contents[0].parts[2].inlineData, { mimeType: 'image/png', data: image.toString('base64') });
+      // Once the build is back, the job shows Gemini the photo and a drawing of the turned model.
+      if (payload.contents[0].parts[0].text.startsWith('Image 1 is a photo of a real object')) {
+        orientationChecks++;
+        assert.equal(trellisSubmissions, 1);
+        assert.match(payload.contents[0].parts[0].text, /"Other dish"/);
+        const drawing = payload.contents[0].parts[4].inlineData;
+        assert.equal(drawing.mimeType, 'image/png');
+        const png = Buffer.from(drawing.data, 'base64');
+        assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+        // Two square views side by side.
+        assert.equal(png.readUInt32BE(16), 2 * png.readUInt32BE(20));
+        return json({ candidates: [{ content: { parts: [{ text: JSON.stringify({
+          orientation: 'upright', single_object: true, confidence: 0.9, reason: 'The rim is at the top.',
+        }) }] } }] });
+      }
       // A dish job asks for the dish's size before its build is submitted.
       if (payload.contents[0].parts[0].text.startsWith('You are measuring one dish')) {
         measurements++;
@@ -526,6 +543,19 @@ test('provider request contracts and TRELLIS retry preserve the paid prediction'
   });
   // The dish was measured once, before the build, and the retry did not measure it again.
   assert.equal(measurements, 1);
+  // The built model was checked once against its photo, and the provider's file was turned over.
+  assert.equal(orientationChecks, 1);
+  assert.deepEqual(dishReview.dish_orientation, {
+    verdict: 'upright', turned_over: true, held: false, confidence: 0.9, reason: 'The rim is at the top.', model: 'gemini-4-hydrogen',
+  });
+  // Without the splat tool the published file is the PLY itself, so the turn can be read off it. The fixture's
+  // last point sits at z = 1/3, which centring the dish moves to +1/6, and turning over moves to -1/6.
+  if (dishReview.converted_asset_path.endsWith('.ply')) {
+    const built = await readFile(dishReview.converted_asset_path);
+    const { layout } = inspectSplat(built);
+    const z = built.readFloatLE(layout.offset + 4 * layout.stride + layout.properties.get('z').offset);
+    assert.ok(Math.abs(z + 1 / 6) < 1e-6);
+  }
   assert.deepEqual(dishReview.dish_measure, {
     width_m: 0.3, depth_m: 0.2, height_m: 0.06, vessel: 'plate', vessel_diameter_m: 0.3, confidence: 0.7,
     basis: 'A dinner fork beside the plate.', best_photo: 0, guidance: 'A 30 cm plate of food, 6 cm tall.', model: 'gemini-4-hydrogen',
@@ -1153,4 +1183,64 @@ test('upload ingest removes PNG metadata, rejects truncation, and bounds multipa
   assert.equal((await post('/api/uploads', Buffer.alloc(8 * 1024 * 1024 + 65537), {
     'content-type': 'multipart/form-data; boundary=fixture',
   })).statusCode, 413);
+});
+
+test('turning a splat over negates y and z, turns every Gaussian with it, and twice is no change', () => {
+  const ply = fixturePly();
+  const { layout } = inspectSplat(ply);
+  const row = (index) => layout.offset + index * layout.stride;
+  const read = (index, name) => ply.readFloatLE(row(index) + layout.properties.get(name).offset);
+  turnOverPly(ply, layout);
+  assert.equal(read(4, 'x'), Math.fround(2 / 8));
+  assert.equal(read(4, 'z'), -Math.fround(4 / 12));
+  // The fixture's Gaussians are unrotated (w = 1). A half turn about x is (w, x, y, z) = (0, 1, 0, 0).
+  assert.deepEqual(['rot_0', 'rot_1', 'rot_2', 'rot_3'].map((name) => Math.abs(read(4, name))), [0, 1, 0, 0]);
+  turnOverPly(ply, layout);
+  assert.equal(read(4, 'z'), Math.fround(4 / 12));
+  // Two half turns give (-1, 0, 0, 0), which is the same rotation as (1, 0, 0, 0).
+  assert.deepEqual(['rot_0', 'rot_1', 'rot_2', 'rot_3'].map((name) => Math.abs(read(4, name))), [1, 0, 0, 0]);
+});
+
+test('the upright check keeps the turn, undoes it on a confirmed second look, holds what it cannot vouch for, and never throws', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'faresight-upright-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await writeFile(join(dir, 'photo.png'), image);
+  await writeFile(join(dir, 'dish.ply'), fixturePly());
+  const config = { mode: 'auto', geminiKey: 'test-gemini', uploads: dir };
+  const photo = { file: 'photo.png', mime_type: 'image/png' };
+  const answers = [];
+  let asked = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    asked++;
+    const next = answers.shift();
+    if (!next) return new Response(null, { status: 503 });
+    return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify(next) }] } }] });
+  });
+  const check = () => checkDishOrientation(config, 'Soup', photo, join(dir, 'dish.ply'));
+
+  answers.push({ orientation: 'upright', single_object: true, confidence: 0.9, reason: 'Rim on top.' });
+  assert.deepEqual(await check(), { verdict: 'upright', turned_over: true, held: false, confidence: 0.9, reason: 'Rim on top.', model: 'gemini-4-hydrogen' });
+
+  // Sure that the turned model is on its head, and the unturned one then looks right: the turn is undone.
+  answers.push({ orientation: 'upside_down', single_object: true, confidence: 0.95, reason: 'Rim at the bottom.' },
+    { orientation: 'upright', single_object: true, confidence: 0.9, reason: 'Rim on top.' });
+  assert.deepEqual(await check(), { verdict: 'upright', turned_over: false, held: false, confidence: 0.9, reason: 'Rim on top.', model: 'gemini-4-hydrogen' });
+
+  // Not sure enough to undo the turn: it stays turned and waits for a person.
+  answers.push({ orientation: 'upside_down', single_object: true, confidence: 0.5, reason: 'Hard to tell.' });
+  assert.deepEqual(await check(), { verdict: 'upside_down', turned_over: true, held: true, confidence: 0.5, reason: 'Hard to tell.', model: 'gemini-4-hydrogen' });
+
+  answers.push({ orientation: 'upright', single_object: false, confidence: 0.9, reason: 'Three cans in a row.' });
+  assert.equal((await check()).verdict, 'several_objects');
+  answers.push({ orientation: 'on_its_side', single_object: true, confidence: 0.9, reason: 'It lies flat.' });
+  assert.deepEqual([(await check()).verdict, (await check()).verdict], ['on_its_side', 'unchecked']);
+
+  // Every model is busy: the job is not stopped, the turned model goes out marked as unchecked.
+  asked = 0;
+  const busy = await check();
+  assert.equal(asked, 4);
+  assert.deepEqual([busy.verdict, busy.turned_over, busy.held, busy.model], ['unchecked', true, false, null]);
+  assert.match(busy.reason, /could not run: gemini-3\.5-flash-lite answered 503/);
+  assert.deepEqual(await checkDishOrientation({ ...config, geminiKey: undefined }, 'Soup', photo, join(dir, 'dish.ply')),
+    { verdict: 'unchecked', turned_over: true, held: false, confidence: 0, reason: 'The upright check is switched off', model: null });
 });

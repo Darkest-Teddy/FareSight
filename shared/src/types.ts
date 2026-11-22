@@ -205,6 +205,20 @@ export interface Asset {
   };
 }
 
+/** Whether a dish model stands the right way up, checked against its photo before it is published. */
+export interface DishOrientation {
+  /** How the model stands as it will be shown. `unchecked` when the check could not run. */
+  verdict: 'upright' | 'upside_down' | 'on_its_side' | 'unrecognizable' | 'several_objects' | 'unchecked';
+  /** Whether the provider's file was turned over to get there. */
+  turned_over: boolean;
+  /** True when the model is not published by itself and waits for a person to look at it. */
+  held: boolean;
+  confidence: number;
+  /** The feature the check went by, or why it could not run. */
+  reason: string;
+  model: string | null;
+}
+
 export type JobStage = 'queued' | 'generating' | 'downloading' | 'converting' | 'needs_review' | 'ready' | 'failed';
 export const ROOM_MODEL_TIERS = ['atlas-draft', 'atlas-refined'] as const;
 export type RoomModelTier = typeof ROOM_MODEL_TIERS[number];
@@ -254,6 +268,8 @@ export interface GenerationJob {
   plate_diameter_m?: number | null;
   /** Dish jobs only: the size judged from the photos. Null when it could not be judged, absent until tried. */
   dish_measure?: DishMeasure | null;
+  /** Dish jobs only: the upright check on the built model. Absent until the build has been checked. */
+  dish_orientation?: DishOrientation;
   model_tier?: RoomModelTier;
   progress: number;
   status_message: string;
