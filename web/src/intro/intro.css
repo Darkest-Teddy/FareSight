@@ -1,16 +1,24 @@
 /*
- * FareSight landing page. One dark theme, one accent (the Green Line), one radius rule:
+ * FareSight landing page. One paper theme, one accent (the Green Line), one radius rule:
  * interactive things are full pills, nothing else is boxed.
  * Layers, bottom to top: stage 0, shade 1, veil 2, copy 3, bar 4, status 5.
  */
 :root {
-  color-scheme: dark;
-  --bg: #05070c;
-  --ink: #f5f5f7;
-  --dim: rgb(245 245 247 / 66%);
-  --faint: rgb(245 245 247 / 52%);
-  --edge: rgb(255 255 255 / 16%);
-  --accent: #3ccb78;
+  color-scheme: light;
+  /* Same paper, ink and card tones as the app (web/src/styles/tokens.css). */
+  --bg: #F5F0E6;
+  --card: #FFFDF8;
+  --ink: #22252B;
+  --dim: rgb(34 37 43 / 78%);
+  --faint: rgb(34 37 43 / 66%);
+  --edge: rgb(34 37 43 / 16%);
+  --accent: #00843D;
+  /* The Green Line darkened until it passes 4.5:1 as small text on paper. */
+  --accent-ink: #006B31;
+  /* Inside the scanned room the scene behind the page is dark, so the bar and that beat's copy
+     turn to paper-on-dark. --interior runs 0 to 1 and is set by main.ts. */
+  --room: #1A140E;
+  --bar-ink: color-mix(in srgb, var(--ink), var(--card) calc(var(--interior, 0) * 100%));
   --gutter: clamp(1.25rem, 5.5vw, 5.5rem);
   --bar: 4rem;
   font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', Roboto, sans-serif;
@@ -22,7 +30,7 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-html { scrollbar-width: thin; scrollbar-color: rgb(255 255 255 / 18%) transparent; }
+html { scrollbar-width: thin; scrollbar-color: rgb(34 37 43 / 24%) transparent; }
 body { margin: 0; background: var(--bg); overflow-x: hidden; }
 h1, h2, p { margin: 0; }
 a { color: inherit; text-decoration: none; }
@@ -48,13 +56,13 @@ body[data-stage=missing] #stage { display: none; }
   position: fixed; inset: 0; z-index: 1; pointer-events: none;
   opacity: calc(1 - .67 * var(--interior, 0));
   background:
-    radial-gradient(120% 85% at 50% 42%, transparent 46%, rgb(5 7 12 / 72%) 100%),
-    linear-gradient(to top, rgb(5 7 12 / 78%), transparent 34%),
-    linear-gradient(to bottom, rgb(5 7 12 / 55%), transparent 16%);
+    radial-gradient(120% 85% at 50% 42%, transparent 50%, rgb(245 240 230 / 62%) 100%),
+    linear-gradient(to top, rgb(245 240 230 / 86%), transparent 36%),
+    linear-gradient(to bottom, rgb(245 240 230 / 70%), transparent 16%);
 }
 .veil {
   position: fixed; inset: 0; z-index: 2; pointer-events: none; opacity: 0;
-  background: radial-gradient(ellipse min(37rem, 70vw) 38vh at 50% 50%, var(--bg) 10%, transparent 90%);
+  background: radial-gradient(ellipse min(37rem, 70vw) 38vh at 50% 50%, var(--room) 10%, transparent 90%);
 }
 
 .bar {
@@ -62,11 +70,11 @@ body[data-stage=missing] #stage { display: none; }
   height: var(--bar); padding: 0 var(--gutter);
   display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 1.5rem;
 }
-.wordmark { justify-self: start; font-size: 1.06rem; font-weight: 650; letter-spacing: -.02em; }
+.wordmark { justify-self: start; font-size: 1.06rem; font-weight: 650; letter-spacing: -.02em; color: var(--bar-ink); }
 .chapters { display: flex; gap: clamp(1rem, 2.4vw, 2.25rem); font-size: .8rem; letter-spacing: -.005em; white-space: nowrap; }
-.chapters a { padding: .5rem 0; color: var(--faint); transition: color .35s ease; }
-.chapters a:hover { color: var(--dim); }
-.chapters a[aria-current] { color: var(--ink); }
+.chapters a { padding: .5rem 0; color: color-mix(in srgb, var(--bar-ink) 68%, transparent); transition: color .35s ease; }
+.chapters a:hover { color: color-mix(in srgb, var(--bar-ink) 84%, transparent); }
+.chapters a[aria-current] { color: var(--bar-ink); }
 .bar .pill { justify-self: end; }
 .meter {
   position: absolute; inset: auto 0 0; height: 1px;
@@ -78,14 +86,15 @@ body[data-stage=missing] #stage { display: none; }
   height: 2.25rem; padding: 0 1.05rem;
   border: 1px solid var(--edge); border-radius: 999px;
   font-size: .8rem; font-weight: 550; white-space: nowrap;
-  color: var(--ink); background: rgb(255 255 255 / 6%);
+  color: var(--ink); background: rgb(255 253 248 / 72%);
+  box-shadow: 0 4px 14px rgb(80 60 30 / 10%);
   -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
   transition: background .25s ease, border-color .25s ease, transform .15s ease;
 }
-.pill:hover { background: rgb(255 255 255 / 13%); border-color: rgb(255 255 255 / 28%); }
+.pill:hover { background: var(--card); border-color: rgb(34 37 43 / 30%); }
 .pill:active { transform: scale(.975); }
-.pill.solid { height: 2.9rem; padding: 0 1.5rem; font-size: .95rem; color: #0a0b0e; background: var(--ink); border-color: var(--ink); }
-.pill.solid:hover { background: #fff; border-color: #fff; }
+.pill.solid { height: 2.9rem; padding: 0 1.5rem; font-size: .95rem; color: var(--card); background: var(--ink); border-color: var(--ink); }
+.pill.solid:hover { background: #33373F; border-color: #33373F; }
 
 /* Copy. Every beat is fixed over the stage; main.ts fades and drifts its .copy. */
 .beat {
@@ -99,12 +108,12 @@ h1 { font-size: clamp(2.6rem, 6.1vw, 5.6rem); max-width: 10.5em; }
 h2 { font-size: clamp(2.1rem, 4.5vw, 4.1rem); }
 .lead { margin-top: 1.15rem; max-width: 33ch; font-size: clamp(1.02rem, 1.28vw, 1.24rem); line-height: 1.42; letter-spacing: -.012em; color: var(--dim); text-wrap: pretty; }
 .note { margin-top: .85rem; max-width: 36ch; font-size: .92rem; line-height: 1.5; color: var(--faint); }
-.line { display: inline-flex; align-items: center; gap: .55rem; margin-bottom: 1rem; font-size: .82rem; font-weight: 550; color: var(--accent); }
+.line { display: inline-flex; align-items: center; gap: .55rem; margin-bottom: 1rem; font-size: .82rem; font-weight: 550; color: var(--accent-ink); }
 .line::before { content: ''; width: 1.6rem; height: 2px; border-radius: 2px; background: var(--accent); }
 .room-tag {
   width: fit-content; margin: 1.25rem auto 0; padding: .34rem .7rem;
-  border: 1px solid rgb(140 228 255 / 30%); border-radius: 999px;
-  color: #c4f3ff; background: rgb(10 28 39 / 65%); font-size: .76rem;
+  border: 1px solid var(--edge); border-radius: 999px;
+  color: var(--ink); background: rgb(255 253 248 / 82%); font-size: .76rem;
 }
 
 .beat-hero { align-items: end; justify-items: start; visibility: visible; }
@@ -117,7 +126,12 @@ h2 { font-size: clamp(2.1rem, 4.5vw, 4.1rem); }
 .beat-place .copy { width: min(26rem, 100%); padding-bottom: 2vh; }
 .beat-place h2 { font-size: clamp(2rem, 3.6vw, 3.3rem); }
 .beat-inside { align-items: center; justify-items: center; text-align: center; }
-.beat-inside .copy { text-shadow: 0 2px 15px rgb(7 8 11 / 86%); }
+/* Inside the room the copy is paper on the dark veil. */
+.beat-inside .copy { color: var(--card); text-shadow: 0 2px 15px rgb(20 14 8 / 86%); }
+.beat-inside .lead { color: rgb(255 253 248 / 90%); }
+.beat-inside .room-tag, .beat-inside .pill { text-shadow: none; }
+.beat-inside .pill.solid { color: var(--ink); background: var(--card); border-color: var(--card); }
+.beat-inside .pill.solid:hover { background: #fff; border-color: #fff; }
 .beat-inside .lead { margin-inline: auto; max-width: 38ch; }
 .beat-inside .pill { margin-top: 1.25rem; }
 .look-hint { display: none; margin-top: .9rem; font-size: .8rem; color: var(--dim); }
@@ -150,10 +164,10 @@ body[data-state=loading] .status::after {
   .lead { max-width: 30ch; }
   .shade {
     background:
-      linear-gradient(to top, rgb(5 7 12 / 92%), rgb(5 7 12 / 60%) 30%, transparent 56%),
-      linear-gradient(to bottom, rgb(5 7 12 / 60%), transparent 14%);
+      linear-gradient(to top, rgb(245 240 230 / 94%), rgb(245 240 230 / 70%) 30%, transparent 56%),
+      linear-gradient(to bottom, rgb(245 240 230 / 72%), transparent 14%);
   }
-  .veil { background: radial-gradient(ellipse 90vw 32vh at 36% 82%, var(--bg) 12%, transparent 92%); }
+  .veil { background: radial-gradient(ellipse 90vw 32vh at 36% 82%, var(--room) 12%, transparent 92%); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -162,5 +176,5 @@ body[data-state=loading] .status::after {
   .pill { transition: none; }
 }
 @media (prefers-reduced-transparency: reduce) {
-  .pill { -webkit-backdrop-filter: none; backdrop-filter: none; background: #1a1c21; }
+  .pill { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--card); }
 }

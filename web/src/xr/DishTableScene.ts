@@ -8,7 +8,7 @@ import { jarvisPoints, type JarvisReveal } from './JarvisReveal';
 import { PhysicalMenuBook } from './PhysicalMenuBook';
 import type { SurfaceMatch } from './PhysicalSurfaces';
 import type { SplatLoader } from './SplatLoader';
-import { assetBase, child, cyan, damp, levelYaw, material, pickBounds, shape, type HitTarget, type ModelLibrary, type PickBounds, type XYZ } from './sceneSupport';
+import { assetBase, child, damp, levelYaw, material, pickBounds, shape, sunflower, type HitTarget, type ModelLibrary, type PickBounds, type XYZ } from './sceneSupport';
 
 export interface GrabbableDish {
   id: 'primary' | 'secondary';
@@ -77,7 +77,7 @@ export class DishTableScene {
     const iron = material('#353337');
     const trim = material('#826747');
     const porcelain = material('#adbdc9', 0.07);
-    const ruler = material(cyan, 0.30, 0.78);
+    const ruler = material(sunflower, 0.30, 0.82);
     const brass = material('#a08050', 0.08);
     this.surfaceMaterials = [porcelain, ruler, brass];
     this.fallbackMaterials = [walnut, iron, trim];

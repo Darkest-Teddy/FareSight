@@ -1,219 +1,85 @@
-// The ground the network sits on.
+// The ground the network sits on, and the contact shadows that sit on the ground.
 //
-// It is cut to the city: solid where buildings stand, fading out a short way past the last of
-// them, and absent beyond that so the rails run on over nothing at the cleared ends of each line.
+// Two problems had to be solved together. A rectangular deck reads as a slab dropped under the
+// map -- its corners have nothing to do with where Boston actually is. And any finite ground ends
+// somewhere, and a hard edge against the backdrop looks like the map ran out rather than like a
+// place.
 //
-// The shape comes from a distance field rather than from a radius per compass direction. The
-// earlier polar version measured one reach for each of 128 bearings out of a single centre, and
-// that cannot hug a city: a reach spread even a few degrees to its neighbours bulges by a tenth of
-// a unit at this radius, so the outline ballooned into an ellipse no matter how the skirt was
-// tuned. Here every building is measured individually -- the ground exists wherever it is within
-// REACH of any of them -- which is what makes the edge follow the blocks instead of circling them.
+// So the shape is derived from the network itself: for each direction out from the centre, the
+// ground reaches as far as the furthest track in that direction plus the width of the city beside
+// it, then those radii are smoothed into an organic outline. No corners, no bounding box, and the
+// silhouette follows the lines because it is built from them.
 //
-// The outline stays organic for free. A union of discs has no corners, and the rim is a gradient
-// rather than a hard boundary, so no contour has to be extracted or triangulated: the field is
-// sampled on a grid and written straight out as vertex colour.
-import { face } from './geometry.mjs';
-
-/** Must match studioBackdrop in web/src/xr/PlayCanvasApp.ts, or the rim will show a seam. */
-const BACKDROP = '#151922';
-
-/**
- * The lit ground under the middle of the network.
- *
- * Lighter than it used to be. The old tone was only a shade off the backdrop, which was fine when
- * the blob sprawled across most of the frame but leaves a tight one almost invisible: once the
- * ground hugs the buildings, contrast is the only thing telling you it is there.
- */
-const GROUND = '#38425a';
-
-/**
- * The ground is a morphological closing of the city: grown by GROW so the gaps between scattered
- * blocks seal into one surface, then shrunk back by nearly the same amount so the outer edge
- * returns to the buildings it came from.
- *
- * Doing only the growth leaves the edge GROW away from the last block, which is far too generous.
- * Doing only a small growth never seals the interior and the ground breaks into islands around
- * each building. Closing gets both: a continuous surface that still finishes a pavement's width
- * past the outermost block.
- */
-const GROW = 0.085;
-const KEEP = 0.018;
-
-/** How far the rim then takes to dissolve into the backdrop. */
-const FADE = 0.042;
-
-/**
- * Grid step for sampling the field.
- *
- * The interior is one flat colour, so resolution only matters at the rim, where the fade spans a
- * couple of cells and the per-vertex gradient hides the rest.
- */
-const STEP = 0.012;
-
-const mixHex = (a, b, t) =>
-  '#' +
-  [1, 3, 5]
-    .map((i) => {
-      const u = parseInt(a.slice(i, i + 2), 16);
-      const v = parseInt(b.slice(i, i + 2), 16);
-      return Math.round(u + (v - u) * t)
-        .toString(16)
-        .padStart(2, '0');
-    })
-    .join('');
-
-/** Smooth, so the fade has no visible start or end. */
-const smoothstep = (t) => t * t * (3 - 2 * t);
-
-/**
- * Distance from a point to the nearest building's edge, negative inside one.
- *
- * Sites are bucketed by cell so each sample only tests the handful nearby; checking all of them
- * for every grid point is the one part of this that would actually be slow.
- */
-function fieldSampler(sites) {
-  const cell = 0.08;
-  const buckets = new Map();
-  const key = (i, j) => i + ':' + j;
-  let span = 0;
-  for (const site of sites) {
-    span = Math.max(span, site[2]);
-    const i = Math.floor(site[0] / cell);
-    const j = Math.floor(site[1] / cell);
-    const k = key(i, j);
-    if (!buckets.has(k)) buckets.set(k, []);
-    buckets.get(k).push(site);
-  }
-  // How many rings of cells can hold a site whose edge still reaches GROW from here.
-  const rings = Math.ceil((GROW + span) / cell);
-
-  return (x, z) => {
-    const ci = Math.floor(x / cell);
-    const cj = Math.floor(z / cell);
-    let best = Infinity;
-    for (let i = -rings; i <= rings; i++)
-      for (let j = -rings; j <= rings; j++) {
-        const here = buckets.get(key(ci + i, cj + j));
-        if (!here) continue;
-        for (const [sx, sz, radius] of here) {
-          const d = Math.hypot(x - sx, z - sz) - radius;
-          if (d < best) best = d;
-        }
-      }
-    return best;
-  };
-}
-
-/**
- * Build the ground into `surface`, which is shared with the city so this costs no extra draw call.
- */
-export function groundBlob(surface, sites, y) {
-  if (!sites.length) return 0;
-  // The shrink step can only pull the edge back to where the growth put it.
-  const erode = Math.max(0, GROW - KEEP);
-
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minZ = Infinity;
-  let maxZ = -Infinity;
-  for (const [x, z, radius] of sites) {
-    minX = Math.min(minX, x - radius - GROW - STEP);
-    maxX = Math.max(maxX, x + radius + GROW + STEP);
-    minZ = Math.min(minZ, z - radius - GROW - STEP);
-    maxZ = Math.max(maxZ, z + radius + GROW + STEP);
-  }
-
-  const distanceAt = fieldSampler(sites);
-  const cols = Math.ceil((maxX - minX) / STEP) + 1;
-  const rows = Math.ceil((maxZ - minZ) / STEP) + 1;
-  const at = (c, r) => r * cols + c;
-
-  // Distance from every grid vertex to the nearest building's edge.
-  const field = new Float64Array(cols * rows);
-  for (let r = 0; r < rows; r++)
-    for (let c = 0; c < cols; c++)
-      field[at(c, r)] = distanceAt(minX + c * STEP, minZ + r * STEP);
-
-  // The closing, done on the field itself rather than on a mask of it.
-  //
-  // A point survives if a disc of radius `erode` around it still lies entirely inside the grown
-  // shape -- that is, if the largest distance-to-a-building anywhere in that disc is still within
-  // GROW. So the test is a dilation of the field, and GROW minus that peak is how deep the point
-  // sits inside the closed region.
-  //
-  // Thresholding the field into a grown/not-grown mask first, as this did before, throws away
-  // everything between one grid step and the next: the boundary could then only land on a cell
-  // edge, and the rim came out in visible squares before cutting off. Keeping the field
-  // continuous means the depth varies smoothly across a cell and the vertex colours interpolate
-  // over it.
-  const stencil = [];
-  const reach = Math.ceil(erode / STEP);
-  for (let j = -reach; j <= reach; j++)
-    for (let i = -reach; i <= reach; i++)
-      if (Math.hypot(i, j) * STEP <= erode) stencil.push([i, j]);
-
-  const depth = new Float64Array(cols * rows);
-  for (let r = 0; r < rows; r++)
-    for (let c = 0; c < cols; c++) {
-      let peak = -Infinity;
-      for (const [i, j] of stencil) {
-        const cc = c + i;
-        const rr = r + j;
-        // Off the grid counts as infinitely far from any building, so the shape cannot leak out.
-        const v = cc < 0 || cc >= cols || rr < 0 || rr >= rows ? Infinity : field[at(cc, rr)];
-        if (v > peak) peak = v;
-      }
-      depth[at(c, r)] = GROW - peak;
-    }
-
-  // Solid once a vertex sits a full FADE inside the closed edge, dissolving to nothing at it.
-  const tintAt = (d) => 1 - smoothstep(Math.max(0, Math.min(1, d / FADE)));
-  const up = [0, 1, 0];
-  let quads = 0;
-
-  for (let r = 0; r < rows - 1; r++)
-    for (let c = 0; c < cols - 1; c++) {
-      const corners = [
-        depth[at(c, r)],
-        depth[at(c + 1, r)],
-        depth[at(c + 1, r + 1)],
-        depth[at(c, r + 1)],
-      ];
-      // Nothing to draw where every corner has already dissolved.
-      if (corners.every((d) => d <= 0)) continue;
-
-      const x0 = minX + c * STEP;
-      const z0 = minZ + r * STEP;
-      const points = [
-        [x0, y, z0],
-        [x0 + STEP, y, z0],
-        [x0 + STEP, y, z0 + STEP],
-        [x0, y, z0 + STEP],
-      ];
-      const colours = corners.map((d) => mixHex(GROUND, BACKDROP, tintAt(d)));
-      const ids = points.map((point, i) => surface.vertex(point, up, colours[i]));
-      surface.indices.push(ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]);
-      quads++;
-    }
-
-  return quads;
-}
-
-// ---------------------------------------------------------------------------------------------
-// The flat maps' ground.
+// The plate is a sheet of cool gray glass on a light backdrop. Its colour and its opacity are both
+// written per vertex, so the rim is a real gradient to nothing rather than a step, and it dissolves
+// into whatever is behind it without knowing what that colour is. That needs alpha blending, so the
+// plate is its own surface ('Ground plate'); the renderer draws it after everything opaque and
+// without writing depth.
 //
-// The Contribute app draws the network on one rounded island. That outline is still measured the
-// polar way the 3D ground used to be: a reach per compass direction out of one centre, smoothed.
-// It is deliberately simpler than the 3D ground above, which is cut to the buildings.
+// The Charles is in the sheet too (water.mjs): a blue tint at the plate's own level, drawn after
+// the plate and before the shadows.
+//
+// The same surface carries the contact shadows: a soft strip under each track and a halo round the
+// foot of each building. They are darker ink on the same sheet, lifted a hair above it, and they
+// come after the plate in the index buffer so that within the one draw call they blend over it.
+import { TAU, norm, sub } from './geometry.mjs';
 
-/** The point the outline is measured out from. */
-const CENTRE = [0.02, 0];
-/** Directions sampled around the centre. */
+/** The plate's tint. Light passes through it, so on screen it reads paler than this. */
+export const PLATE_COLOUR = '#687080';
+
+/** Opacity of the solid part of the plate, before the rim fades it out. */
+export const PLATE_ALPHA = 0.23;
+
+/** Directions sampled around the centre. 128 is smooth at this scale and costs little. */
 const SPOKES = 128;
-/** How far past the outermost track the solid ground reaches, and how far its rim then fades. */
-const OUTLINE_SKIRT = 0.3;
-const OUTLINE_FADE = 0.1;
+
+/**
+ * How far past the outermost track the ground reaches before its edge. The city is placed in four
+ * bands out to roughly 0.22 units from a line, so this clears the buildings.
+ */
+const SKIRT = 0.3;
+
+/** How far past the skirt the rim runs before it is gone. */
+const FADE = 0.1;
+
+/**
+ * Where the dissolve begins, measured like the skirt. Inside this the plate is at full strength;
+ * from here to SKIRT + FADE it eases to nothing.
+ */
+const SOLID = SKIRT * 0.55;
+
+/**
+ * Rings across the dissolve, split either side of the skirt. Vertex alpha interpolates linearly, so
+ * the ease is drawn as this many straight pieces; six is past the point where the eye finds them.
+ */
+const RIM_STEPS = [3, 3];
+
+/**
+ * The river. A soft map blue, well short of the Blue Line's, laid into the plate at this opacity
+ * where the plate is solid; like everything else on the plate it fades out with the rim.
+ */
+export const WATER_COLOUR = '#4F86C6';
+export const WATER_ALPHA = 0.5;
+
+/** Ink of every contact shadow. Neutral and near black, so it darkens without tinting. */
+export const SHADOW_INK = '#22252B';
+
+/** How far the shadows float above the plate. They never write depth; this only clears the sheet. */
+export const SHADOW_LIFT = 0.0002;
+
+/** Shadow under a track: opacity under its centreline, and how far out the strip reaches each side. */
+export const TRACK_SHADOW_ALPHA = 0.22;
+export const TRACK_SHADOW_HALF_WIDTH = 0.011;
+
+/** Halo round a building's foot: opacity at the wall, and how far out it takes to reach nothing. */
+export const BUILDING_SHADOW_ALPHA = 0.2;
+export const BUILDING_SHADOW_REACH = 0.0055;
+
+const UP = [0, 1, 0];
+const smooth = (t) => {
+  const u = Math.max(0, Math.min(1, t));
+  return u * u * (3 - 2 * u);
+};
 
 /**
  * Reach per direction, from the track geometry.
@@ -246,29 +112,248 @@ function reaches(lines, centre) {
   }
 
   // Circular smoothing, twice, so the outline reads as a coastline and not as a polygon.
-  let smooth = raw;
+  let smoothed = raw;
   for (let pass = 0; pass < 2; pass++) {
     const next = new Array(SPOKES);
     for (let i = 0; i < SPOKES; i++) {
       let sum = 0;
-      for (let k = -6; k <= 6; k++) sum += smooth[(i + k + SPOKES) % SPOKES];
+      for (let k = -6; k <= 6; k++) sum += smoothed[(i + k + SPOKES) % SPOKES];
       next[i] = sum / 13;
     }
-    smooth = next;
+    smoothed = next;
   }
-  return smooth;
+  return smoothed;
 }
+
+/** How much of the plate is left at `pad` units past the outermost track: 1 solid, 0 gone. */
+const rim = (pad) => 1 - smooth((pad - SOLID) / (SKIRT + FADE - SOLID));
+
+/** One flat triangle, wound so it faces up whichever way its corners run. */
+function triUp(surface, a, b, c) {
+  const p = surface.positions;
+  const turn =
+    (p[b * 3 + 2] - p[a * 3 + 2]) * (p[c * 3] - p[a * 3]) -
+    (p[b * 3] - p[a * 3]) * (p[c * 3 + 2] - p[a * 3 + 2]);
+  if (turn >= 0) surface.indices.push(a, b, c);
+  else surface.indices.push(a, c, b);
+}
+
+function quadUp(surface, a, b, c, d) {
+  triUp(surface, a, b, c);
+  triUp(surface, a, c, d);
+}
+
+/**
+ * Build the plate into `surface` and return the ground, which the tracks and the city then draw
+ * their shadows onto. Call this before anything casts a shadow: the plate has to come first in the
+ * index buffer for the shadows to blend over it.
+ *
+ * The outline is a hub and rings: the solid part out to its edge, then a short run of rings across
+ * which the opacity eases to zero. Ring vertices are shared, so the fade is one continuous
+ * gradient.
+ */
+export function groundPlate(surface, lines, y) {
+  const centre = [0.02, 0];
+  const reach = reaches(lines, centre);
+
+  // Rings by how far past each spoke's reach they sit. The first is the edge of the solid part,
+  // fanned straight from the hub; the rest step outward through the dissolve.
+  const bands = [{ pad: SOLID }];
+  for (let k = 1; k <= RIM_STEPS[0]; k++)
+    bands.push({ pad: SOLID + ((SKIRT - SOLID) * k) / RIM_STEPS[0] });
+  for (let k = 1; k <= RIM_STEPS[1]; k++)
+    bands.push({ pad: SKIRT + (FADE * k) / RIM_STEPS[1] });
+
+  const hub = surface.vertex([centre[0], y, centre[1]], UP, PLATE_COLOUR, undefined, PLATE_ALPHA);
+  const rings = bands.map((band) =>
+    Array.from({ length: SPOKES }, (_, i) => {
+      const angle = (i / SPOKES) * Math.PI * 2;
+      const r = reach[i] + band.pad;
+      return surface.vertex(
+        [centre[0] + Math.cos(angle) * r, y, centre[1] + Math.sin(angle) * r],
+        UP,
+        PLATE_COLOUR,
+        undefined,
+        PLATE_ALPHA * rim(band.pad),
+      );
+    }),
+  );
+  for (let i = 0; i < SPOKES; i++) {
+    const j = (i + 1) % SPOKES;
+    surface.indices.push(hub, rings[0][j], rings[0][i]);
+    for (let b = 1; b < rings.length; b++)
+      surface.indices.push(
+        rings[b - 1][i], rings[b - 1][j], rings[b][j],
+        rings[b - 1][i], rings[b][j], rings[b][i],
+      );
+  }
+
+  /**
+   * How much plate there is under a point, 1 on the solid part and 0 past the rim. A shadow is
+   * multiplied by this, so nothing is left lying on the backdrop where the plate has dissolved.
+   */
+  const coverage = (x, z) => {
+    const dx = x - centre[0];
+    const dz = z - centre[1];
+    const turn = ((Math.atan2(dz, dx) / TAU) * SPOKES + SPOKES) % SPOKES;
+    const i = Math.floor(turn) % SPOKES;
+    const f = turn - Math.floor(turn);
+    const edge = reach[i] + (reach[(i + 1) % SPOKES] - reach[i]) * f;
+    return rim(Math.hypot(dx, dz) - edge);
+  };
+
+  const level = y + SHADOW_LIFT;
+  const ink = (x, z, alpha) =>
+    surface.vertex([x, level, z], UP, SHADOW_INK, undefined, alpha * coverage(x, z));
+
+  return {
+    coverage,
+
+    /**
+     * Water, as `points` ([x, z]) and `triangles` over them (water.mjs). It is a tint in the sheet
+     * itself, at the plate's own level, so call this before anything casts a shadow: the shadows
+     * then fall across the water as they do across the ground.
+     */
+    water({ points, triangles }) {
+      const cover = points.map(([x, z]) => coverage(x, z));
+      const placed = new Map();
+      const corner = (i) => {
+        if (!placed.has(i))
+          placed.set(i, surface.vertex([points[i][0], y, points[i][1]], UP, WATER_COLOUR, undefined, WATER_ALPHA * cover[i]));
+        return placed.get(i);
+      };
+      for (const [a, b, c] of triangles) {
+        // Past the rim there is no plate to tint, and nothing to draw.
+        if (cover[a] + cover[b] + cover[c] === 0) continue;
+        triUp(surface, corner(a), corner(b), corner(c));
+      }
+    },
+
+    /**
+     * The shadow of one track: a strip along its centreline, darkest under the middle of the
+     * plate and falling to nothing at the strip's edge, with a rounded end so a terminus does not
+     * cast a square.
+     */
+    trackShadow(points) {
+      const wide = TRACK_SHADOW_HALF_WIDTH;
+      const profile = [
+        [-wide, 0],
+        [0, TRACK_SHADOW_ALPHA],
+        [wide, 0],
+      ];
+      const frames = points.map((point, i) => {
+        const along = norm(
+          sub(points[Math.min(i + 1, points.length - 1)], points[Math.max(i - 1, 0)]),
+        );
+        const flat = norm([along[0], 0, along[2]]);
+        return { at: point, along: flat, side: [-flat[2], 0, flat[0]] };
+      });
+      const rows = frames.map(({ at, side }) =>
+        profile.map(([offset, alpha]) =>
+          ink(at[0] + side[0] * offset, at[2] + side[2] * offset, alpha),
+        ),
+      );
+      for (let i = 1; i < rows.length; i++)
+        for (let k = 1; k < profile.length; k++)
+          quadUp(surface, rows[i - 1][k - 1], rows[i - 1][k], rows[i][k], rows[i][k - 1]);
+
+      // Round ends: half a disc beyond each terminus, on the same falloff as the strip.
+      const steps = 6;
+      for (const [frame, sign] of [
+        [frames[0], -1],
+        [frames.at(-1), 1],
+      ]) {
+        const { at, along, side } = frame;
+        const middle = ink(at[0], at[2], TRACK_SHADOW_ALPHA);
+        const arc = Array.from({ length: steps + 1 }, (_, k) => {
+          const a = -Math.PI / 2 + (Math.PI * k) / steps;
+          const u = Math.cos(a) * wide * sign;
+          const v = Math.sin(a) * wide;
+          return ink(at[0] + along[0] * u + side[0] * v, at[2] + along[2] * u + side[2] * v, 0);
+        });
+        for (let k = 0; k < steps; k++) triUp(surface, middle, arc[k], arc[k + 1]);
+      }
+    },
+
+    /**
+     * The halo round a building: a band hugging its footprint, darkest against the wall. `outline`
+     * is the footprint in plan, [x, z] corners in either winding.
+     */
+    footprintShadow(outline, reachOut = BUILDING_SHADOW_REACH, alpha = BUILDING_SHADOW_ALPHA) {
+      const count = outline.length;
+      let signed = 0;
+      for (let i = 0; i < count; i++) {
+        const a = outline[i];
+        const b = outline[(i + 1) % count];
+        signed += a[0] * b[1] - b[0] * a[1];
+      }
+      const hand = signed < 0 ? -1 : 1;
+      // Outward normal of each edge, then each corner pushed out along the mitre of its two edges.
+      const normals = outline.map((a, i) => {
+        const b = outline[(i + 1) % count];
+        const length = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+        return [((b[1] - a[1]) / length) * hand, (-(b[0] - a[0]) / length) * hand];
+      });
+      const inner = [];
+      const outer = [];
+      for (let i = 0; i < count; i++) {
+        const before = normals[(i + count - 1) % count];
+        const after = normals[i];
+        let mx = before[0] + after[0];
+        let mz = before[1] + after[1];
+        const length = Math.hypot(mx, mz);
+        if (length < 1e-6) [mx, mz] = after;
+        else [mx, mz] = [mx / length, mz / length];
+        // A sharp corner would throw its mitre a long way out; capped so the halo stays a halo.
+        const stretch = Math.min(2, 1 / Math.max(1e-6, mx * after[0] + mz * after[1]));
+        const [x, z] = outline[i];
+        inner.push(ink(x, z, alpha));
+        outer.push(ink(x + mx * reachOut * stretch, z + mz * reachOut * stretch, 0));
+      }
+      for (let i = 0; i < count; i++) {
+        const j = (i + 1) % count;
+        quadUp(surface, inner[i], inner[j], outer[j], outer[i]);
+      }
+    },
+
+    /** The halo round something circular standing on the plate, such as a station drum. */
+    discShadow(x, z, radius, reachOut, alpha = BUILDING_SHADOW_ALPHA, sides = 24) {
+      const ringAt = (r, a) =>
+        Array.from({ length: sides }, (_, i) => {
+          const turn = (i / sides) * TAU;
+          return ink(x + Math.cos(turn) * r, z + Math.sin(turn) * r, a);
+        });
+      const inner = ringAt(radius, alpha);
+      const outer = ringAt(radius + reachOut, 0);
+      for (let i = 0; i < sides; i++) {
+        const j = (i + 1) % sides;
+        quadUp(surface, inner[i], inner[j], outer[j], outer[i]);
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// The flat maps' ground.
+//
+// The Contribute app draws the network on one rounded island. Its outline is measured the same
+// polar way as the plate above: a reach per compass direction out of one centre, smoothed.
+
+/** How far past the outermost track the solid ground reaches, and how far its rim then fades. */
+const OUTLINE_SKIRT = 0.3;
+const OUTLINE_FADE = 0.1;
 
 /**
  * The ground seen from above, for the flat maps: `solid` is the edge of the lit ground and
  * `rim` is where it has faded into the backdrop. Both are rings of [x, z].
  */
 export function groundOutline(lines) {
-  const reach = reaches(lines, CENTRE);
+  const centre = [0.02, 0];
+  const reach = reaches(lines, centre);
   const ring = (pad) =>
     reach.map((r, i) => {
       const angle = (i / SPOKES) * Math.PI * 2;
-      return [CENTRE[0] + Math.cos(angle) * (r + pad), CENTRE[1] + Math.sin(angle) * (r + pad)];
+      return [centre[0] + Math.cos(angle) * (r + pad), centre[1] + Math.sin(angle) * (r + pad)];
     });
   return { solid: ring(OUTLINE_SKIRT), rim: ring(OUTLINE_SKIRT + OUTLINE_FADE) };
 }

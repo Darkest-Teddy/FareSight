@@ -2,6 +2,23 @@ import * as pc from 'playcanvas';
 import type { XRSceneCallbacks } from './bridgeTypes';
 
 export const assetBase = '/assets-demo/';
+/** Text, rings and outlines on the paper backdrop. */
+export const ink = '#22252B';
+/** The one warm highlight, used as a fill behind ink. Matches --highlight in tokens.css. */
+export const sunflower = '#FFC93C';
+/** Sunflower deepened until it holds its own as a line or ring on a pale surface. */
+export const highlightInk = '#B46A00';
+/**
+ * The studio light rig, shared by the app and the landing page. Ambient is high because on a light
+ * backdrop the shaded side of a pale model must not go muddy; the key stays warm and modest so
+ * light surfaces keep their colour instead of clipping to white.
+ */
+export const studioAmbient: XYZ = [0.54, 0.54, 0.55];
+export const studioLights: { name: string; tint: string; intensity: number; angles: XYZ }[] = [
+  { name: 'Warm studio key', tint: '#fff6e8', intensity: 1.38, angles: [37, -31, 36] },
+  { name: 'Sky fill', tint: '#d5deea', intensity: 0.56, angles: [63, 44, 35] },
+  { name: 'Warm bounce', tint: '#efe2cf', intensity: 0.40, angles: [30, 146, -27] },
+];
 export const cyan = '#62edff';
 export const amber = '#ffbb78';
 export const brass = '#c9ab7d';

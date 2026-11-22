@@ -19,12 +19,16 @@ import { StationDioramaScene } from './StationDioramaScene';
 import { VenueSplatScene } from './VenueSplatScene';
 import { VRReviewDeck } from './VRReviewCard';
 import { XRPresence } from './XRPresence';
-import { assetBase, brass, child, clamp, cyan, damp, material, ModelLibrary, pickBounds, ScenePicker, shape, smooth,
+import { assetBase, brass, child, clamp, cyan, damp, material, ModelLibrary, pickBounds, ScenePicker, shape, smooth, studioAmbient, studioLights,
   type HitTarget, type PickBounds, type XYZ } from './sceneSupport';
 
 type ActiveXR = 'none' | 'vr' | 'ar';
 type SurfaceScene = Exclude<SceneMode, 'venue'>;
-const studioBackdrop = '#151922';
+/**
+ * Backdrop inside a headset. Deliberately a step darker than the flat-screen paper tone: a cream
+ * field that fills the whole view is far brighter in a headset than on a monitor.
+ */
+const studioBackdrop = '#E4DCCB';
 
 interface PointerDishGrab {
   pointerId: number;
@@ -66,9 +70,13 @@ const desktopSplatBudget = 420_000;
 const mapClearance = 0.006;
 const cartridgeDepth = 0.430;
 const dishClearance = 0.002;
-// On a flat screen the neighbourhood rests up and to the left of the map centre, clear of the
-// drawer and filter bar, so the camera never has to move to frame it.
-const stationHome: XYZ = [-0.3, 0, -0.2];
+// On a flat screen the neighbourhood rests left of the map centre, clear of the place card, so
+// the camera never has to move to frame it. On a wide screen it also rests below the map plane:
+// the price signs stand tall above the roofs, and with no top bar to hide behind they would
+// otherwise run off the top of the view. A phone keeps it level, since the sheet covers the
+// lower half of a tall screen.
+const stationHomeWide: XYZ = [-0.34, -0.2, -0.2];
+const stationHomeTall: XYZ = [-0.3, 0, -0.2];
 const standbyScale = 0.0004;
 
 export class PlayCanvasApp implements FareSightSceneEngine {
@@ -169,7 +177,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
       app.setCanvasFillMode(pc.FILLMODE_NONE);
       this.canvas.style.width = width;
       this.canvas.style.height = height;
-      app.scene.ambientLight = new pc.Color(0.38, 0.39, 0.42);
+      app.scene.ambientLight = new pc.Color(...studioAmbient);
       app.scene.gsplat.splatBudget = desktopSplatBudget;
       this.rig = child(app.root, 'Camera rig');
       this.camera = child(this.rig, 'Viewer');
@@ -260,12 +268,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   }
 
   private addLights(root: pc.Entity): void {
-    const lights = [
-      { name: 'Warm studio key', tint: '#fff6e8', intensity: 1.75, angles: [37, -31, 36] },
-      { name: 'Sky fill', tint: '#c8d8ee', intensity: 0.68, angles: [63, 44, 35] },
-      { name: 'Warm bounce', tint: '#e9d7bf', intensity: 0.45, angles: [30, 146, -27] },
-    ];
-    for (const { name, tint, intensity, angles } of lights) {
+    for (const { name, tint, intensity, angles } of studioLights) {
       const light = child(root, name);
       light.addComponent('light', { type: 'directional', color: new pc.Color().fromString(tint), intensity });
       light.setLocalEulerAngles(angles[0], angles[1], angles[2]);
@@ -461,7 +464,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     const origin = mapRoot.getPosition();
     const mapRotation = mapRoot.getRotation().clone();
     const anchor = mapRotation.transformVector(this.map.stopPosition(stopId) ?? new pc.Vec3(0, 0.07, 0)).add(origin);
-    const stage = flat ? new pc.Vec3(...stationHome) : dir === -1 ? this.station.root.getPosition().clone()
+    const stage = flat ? new pc.Vec3(...this.stationHome()) : dir === -1 ? this.station.root.getPosition().clone()
       : this.stationStage();
     const stageRotation = !flat && dir === -1 ? this.station.root.getRotation().clone() : mapRotation;
     this.mode = dir === 1 ? 'station' : 'map';
@@ -736,6 +739,10 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     this.callbacks.onNavigateScene(scene);
   }
 
+  private stationHome(): XYZ {
+    return this.canvas.clientWidth >= this.canvas.clientHeight ? stationHomeWide : stationHomeTall;
+  }
+
   private desktopPose() {
     const aspect = this.canvas.clientWidth / Math.max(this.canvas.clientHeight, 1);
     const portrait = clamp(0.79 / Math.max(aspect, 0.4), 1, 1.60);
@@ -784,7 +791,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     this.map.root.setLocalScale(1, 1, 1);
     if (this.mode === 'map' && !this.leaving.has('station')) this.parkStation();
     else if (this.mode === 'station') {
-      this.station.root.setLocalPosition(...stationHome);
+      this.station.root.setLocalPosition(...this.stationHome());
       this.station.root.setLocalEulerAngles(0, 0, 0);
       this.station.root.setLocalScale(1, 1, 1);
     }
@@ -989,8 +996,8 @@ export class PlayCanvasApp implements FareSightSceneEngine {
 
   private buildGallery(root: pc.Entity, device: pc.GraphicsDevice): void {
     this.gallery = child(root, 'VR gallery');
-    const floor = material('#141821', 1);
-    const rings = material('#2a3242', 1);
+    const floor = material('#DAD1BF', 1);
+    const rings = material('#C2B8A3', 1);
     for (const surface of [floor, rings]) {
       surface.diffuse.set(0, 0, 0);
       surface.useLighting = false;

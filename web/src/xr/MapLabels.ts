@@ -17,6 +17,13 @@ interface Label {
 
 interface Box { left: number; top: number; right: number; bottom: number }
 
+/**
+ * Something on the map a label should not sit on top of, as the world-space corners of the box it
+ * fills. Landmarks are these: the Citgo sign stands right behind Kenmore, exactly where that
+ * station's label would otherwise go.
+ */
+export type KeepClear = readonly pc.Vec3[];
+
 // Vertical offsets (px) from the station to the label centre, in order of preference.
 const slots = [-44, 44, -84, 84, -124, 124, -164, 164];
 const gap = 6;
@@ -37,6 +44,7 @@ export class MapLabels {
   readonly root = document.createElement('div');
   private labels: Label[] = [];
   private screen = new pc.Vec3();
+  private corner = new pc.Vec3();
   private hovered?: string;
   private selected?: string;
   private highlighted = new Set<string>();
@@ -132,8 +140,14 @@ export class MapLabels {
     }
   }
 
-  /** Project every label; `opacity` 0 removes the layer from hit testing and the tab order. */
-  update(camera: pc.CameraComponent, position: (id: string) => pc.Vec3 | undefined, opacity: number): void {
+  /**
+   * Project every label; `opacity` 0 removes the layer from hit testing and the tab order.
+   * `keepClear` is what the labels step aside for, on top of each other.
+   */
+  update(
+    camera: pc.CameraComponent, position: (id: string) => pc.Vec3 | undefined, opacity: number,
+    keepClear: readonly KeepClear[] = [],
+  ): void {
     if (opacity !== this.opacity) {
       this.opacity = opacity;
       this.root.style.opacity = String(opacity);
@@ -144,6 +158,20 @@ export class MapLabels {
     const width = this.root.clientWidth;
     const height = this.root.clientHeight;
     const placed: Box[] = [];
+    for (const corners of keepClear) {
+      const box: Box = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+      let ahead = true;
+      for (const point of corners) {
+        camera.worldToScreen(point, this.corner);
+        if (this.corner.z <= 0) ahead = false;
+        box.left = Math.min(box.left, this.corner.x);
+        box.right = Math.max(box.right, this.corner.x);
+        box.top = Math.min(box.top, this.corner.y);
+        box.bottom = Math.max(box.bottom, this.corner.y);
+      }
+      // A box partly behind the lens projects to nonsense; nothing there can be covered anyway.
+      if (ahead) placed.push(box);
+    }
     for (const label of this.labels) {
       const world = position(label.stop.stop_id);
       if (world) camera.worldToScreen(world, this.screen);

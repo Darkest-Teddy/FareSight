@@ -16,6 +16,8 @@ import { registerCaptures } from '../dist/routes/captures.js';
 import { createPasscodeGuards } from '../dist/services/passcodes.js';
 import { frameKey, uploadTarget } from '../dist/services/captureKeys.js';
 import { createObjectStorage } from '../dist/services/objectStorage.js';
+import { decimatePly, decimateSpz } from '../dist/services/splatDecimate.js';
+import { inspectSplat } from '../dist/services/splatProcessor.js';
 import { upgradeSpz } from '../dist/services/spzUpgrade.js';
 
 const placeId = 'harvard-cafe-01';
@@ -379,4 +381,67 @@ test('a job whose worker died is requeued and goes live unreviewed, and unreadab
   assert.equal(failed.job.attempts, 1);
   assert.equal(failed.generation_job.status, 'failed');
   assert.match(failed.generation_job.error, /Photo 2/);
+});
+
+test('an oversized SPZ is cut to the target while every part of the scene stays covered', () => {
+  // Two clusters far apart: 40 large opaque Gaussians, and 40 small faint ones that a plain "most visible first" cut would drop entirely.
+  const count = 80;
+  const header = Buffer.alloc(16);
+  header.write('NGSP');
+  header.writeUInt32LE(2, 4);
+  header.writeUInt32LE(count, 8);
+  header[13] = 12;
+  const positions = Buffer.alloc(count * 9);
+  const alphas = Buffer.alloc(count);
+  const colors = Buffer.from(Array.from({ length: count * 3 }, (_, index) => Math.floor(index / 3)));
+  const scales = Buffer.alloc(count * 3);
+  const rotations = Buffer.alloc(count * 3, 127);
+  for (let index = 0; index < count; index++) {
+    const faint = index >= 40;
+    positions.writeIntLE((faint ? 400_000 : -400_000) + index, index * 9, 3);
+    alphas[index] = faint ? 40 : 255;
+    scales.fill(faint ? 60 : 120, index * 3, index * 3 + 3);
+  }
+  const reduced = decimateSpz(gzipSync(Buffer.concat([header, positions, alphas, colors, scales, rotations])), 20);
+  assert.equal(reduced.count, 20);
+  const data = gunzipSync(reduced.file);
+  assert.equal(data.readUInt32LE(8), 20);
+  assert.equal(data.length, 16 + 20 * 19);
+  // Colours carry each Gaussian's original index, so they show which ones survived and that streams stayed aligned.
+  const kept = Array.from({ length: 20 }, (_, index) => data[16 + 20 * 10 + index * 3]);
+  assert.ok(kept.some((index) => index < 40) && kept.some((index) => index >= 40), `kept ${kept}`);
+  for (const [at, index] of kept.entries()) {
+    assert.equal(data.readIntLE(16 + at * 9, 3), (index >= 40 ? 400_000 : -400_000) + index);
+    assert.equal(data[16 + 20 * 9 + at], index >= 40 ? 40 : 255);
+    // Survivors are enlarged a little to cover for the ones removed.
+    assert.ok(data[16 + 20 * 13 + at * 3] > (index >= 40 ? 60 : 120));
+  }
+  // Already small enough: left alone.
+  assert.equal(decimateSpz(gzipSync(Buffer.concat([header, positions, alphas, colors, scales, rotations])), 80), undefined);
+});
+
+test('an oversized PLY is cut to the target and stays a valid Gaussian PLY', () => {
+  const names = ['x', 'y', 'z', 'f_dc_0', 'f_dc_1', 'f_dc_2', 'opacity', 'scale_0', 'scale_1', 'scale_2', 'rot_0', 'rot_1', 'rot_2', 'rot_3'];
+  const count = 60;
+  const header = Buffer.from(`ply\nformat binary_little_endian 1.0\nelement vertex ${count}\n${names.map((name) => `property float ${name}`).join('\n')}\nend_header\n`);
+  const rows = Buffer.alloc(count * names.length * 4);
+  for (let row = 0; row < count; row++) {
+    const faint = row >= 30;
+    const values = [faint ? 5 + row / 100 : -5 + row / 100, 0, 0, row, 0, 0, faint ? -2 : 4, faint ? -6 : -2, faint ? -6 : -2, faint ? -6 : -2, 1, 0, 0, 0];
+    for (const [column, value] of values.entries()) rows.writeFloatLE(value, (row * names.length + column) * 4);
+  }
+  const file = Buffer.concat([header, rows]);
+  const reduced = decimatePly(file, inspectSplat(file).layout, 12);
+  assert.equal(reduced.count, 12);
+  const result = inspectSplat(reduced.file);
+  assert.equal(result.count, 12);
+  assert.equal(reduced.file.length, result.layout.offset + 12 * names.length * 4);
+  // f_dc_0 carries each row's original index.
+  const kept = Array.from({ length: 12 }, (_, row) => reduced.file.readFloatLE(result.layout.offset + (row * names.length + 3) * 4));
+  assert.ok(kept.some((row) => row < 30) && kept.some((row) => row >= 30), `kept ${kept}`);
+  for (const [at, row] of kept.entries()) {
+    const scale = reduced.file.readFloatLE(result.layout.offset + (at * names.length + 7) * 4);
+    assert.ok(scale > (row >= 30 ? -6 : -2) && scale < (row >= 30 ? -5.7 : -1.7));
+  }
+  assert.equal(decimatePly(file, inspectSplat(file).layout, 60), undefined);
 });

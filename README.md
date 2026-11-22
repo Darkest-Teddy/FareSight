@@ -73,6 +73,29 @@ node scripts/capture_flow.mjs harvard-cafe-01 photo1.jpg photo2.jpg   # One capt
 
 For production, use the pooled Tiger Data URL as `DATABASE_URL` and the direct one as `DATABASE_URL_DIRECT` (`LISTEN` does not work through a transaction pooler). Point `VULTR_S3_ENDPOINT` at the bucket's region, for example `https://ewr1.vultrobjects.com`, run `buckets` once, and set `APP_ORIGINS` to the app origins that may upload. Put a CDN in front of the splat bucket by setting `CDN_BASE_URL`. `pnpm --filter @faresight/server migrate down` reverts the last migration.
 
+## Deploying the web app (Vultr CDN)
+
+`.github/workflows/deploy-cdn.yml` runs on every push to `main` that changes the web app, and can be started by hand from the Actions tab. It builds `web/`, uploads `web/dist` to a Vultr Object Storage bucket and purges the Vultr CDN pull zone in front of that bucket. Only the web app is deployed: the Fastify server and the Contribute app are not.
+
+One-time setup, under the repository's Settings > Secrets and variables > Actions:
+
+| Kind | Name | Value |
+| --- | --- | --- |
+| Secret | `VULTR_S3_ACCESS_KEY`, `VULTR_S3_SECRET_KEY` | The Object Storage keys, as in `.env`. |
+| Variable | `VULTR_S3_ENDPOINT` | For example `https://ewr2.vultrobjects.com`. |
+| Variable | `VULTR_S3_REGION` | For example `ewr2`. |
+| Variable | `WEB_BUCKET` | A bucket for the site only, for example `faresight-web`. The first deploy creates it. |
+| Variable | `VITE_API_ORIGIN` | The public address of the Fastify server. The CDN serves files only, so the app cannot reach `/api` through it. Leave it unset to ship the built-in demo data. |
+| Secret | `VULTR_API_KEY` | A Vultr API key, used to purge the CDN. In Vultr's API settings, allow it from any IP address: GitHub's runners have no fixed address. |
+| Variable | `VULTR_CDN_PULL_ZONE_ID` | The pull zone's ID (see below). |
+
+Then run the workflow once so the bucket exists, and in the Vultr console create a CDN pull zone whose origin is `https://<WEB_BUCKET>.<endpoint host>`, for example `https://faresight-web.ewr2.vultrobjects.com`. Put its ID in `VULTR_CDN_PULL_ZONE_ID`. The last two rows are optional: without them the files are still uploaded, but the CDN is not purged.
+
+- The site is at `https://<zone>.vultrcdn.com/index.html`, and the landing page at `/intro.html`. The bare `/` address shows an error, because Object Storage has no default page.
+- Vultr allows one purge every six hours. A deploy inside that window still uploads everything and reports the refused purge as a warning; the CDN may serve the previous pages until its cache expires.
+- Earlier builds' files in `assets/` are kept, so a page that is still cached keeps working. Everything else that is no longer in the build is deleted from the bucket.
+- To deploy from a laptop: `pnpm --filter @faresight/web build`, then `WEB_BUCKET=faresight-web pnpm --filter @faresight/server run deploy-web` (add `--dry-run` to see what would change).
+
 ## Build & Verify
 
 ```bash
