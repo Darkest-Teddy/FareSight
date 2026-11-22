@@ -600,15 +600,10 @@ export class XRActionBar {
   private updatePose(camera: pc.Entity, dt: number, mount: ForearmPose | null, snap: boolean, clearance?: PickBounds): void {
     if (mount) {
       this.anchored = false;
-      const target = forearmTarget(mount, camera.getPosition());
-      clampForearmClearance(target.position, target.rotation, mount, target.radial);
-      const previous = this.entity.getPosition();
-      const blend = snap || this.previousMount !== mount.kind || previous.distanceSq(target.position) > 0.18 ** 2
-        ? 1 : damp(dt, 24);
-      const position = this.position.lerp(previous, target.position, blend);
-      const rotation = this.facing.slerp(this.entity.getRotation(), target.rotation, blend);
-      this.entity.setPosition(clampForearmClearance(position, rotation, mount, target.radial));
-      this.entity.setRotation(rotation);
+      const blend = snap || this.previousMount !== mount.kind ? 1 : damp(dt, 28);
+      const target = forearmTarget(mount, camera.getPosition(), this.entity.getRotation(), blend);
+      this.entity.setPosition(clampForearmClearance(target.position, target.rotation, mount, target.radial));
+      this.entity.setRotation(target.rotation);
       this.previousMount = mount.kind;
       return;
     }

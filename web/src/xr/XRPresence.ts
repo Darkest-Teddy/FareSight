@@ -958,6 +958,7 @@ export class XRPresence {
     const pose = this.forearmPose;
     pose.kind = 'controller';
     rotation.transformVector(pc.Vec3.BACK, pose.direction).normalize();
+    // The grip drives placement while the estimated wrist starts the forearm capsule.
     pose.wrist.copy(position).addScaled(pose.direction, 0.045);
     pose.handCenter.copy(position);
     return pose;
