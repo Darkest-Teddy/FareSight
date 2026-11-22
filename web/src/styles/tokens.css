@@ -1,7 +1,7 @@
 /* Paper Map: warm paper, ink for everything that matters, sunflower for whatever is being pointed at. */
 :root {
   color-scheme: light;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: Switzer, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
   color: var(--ink);
   background: var(--paper);
@@ -9,7 +9,7 @@
 
   /* Surfaces */
   --paper: #F5F0E6;        /* behind the canvas; matches the 3D sky dome */
-  --surface: #FFFDF8;      /* cards, pills, panels */
+  --surface: #FFFDF8;      /* cards, bars, panels */
   --surface-2: #F1EBDF;    /* raised or inset areas, hover fills */
 
   /* Ink */
@@ -33,18 +33,14 @@
   --shadow: 0 1px 2px rgb(80 60 30 / 8%), 0 8px 24px rgb(80 60 30 / 12%);
   --shadow-lg: 0 2px 6px rgb(80 60 30 / 8%), 0 20px 48px rgb(80 60 30 / 18%);
 
-  /* Shape */
-  --radius-sm: .625rem;
-  --radius: .875rem;
-  --radius-lg: 1.25rem;
-  --pill: 999px;
+  /* Shape: rounded corners on one small scale, sized to the element. Only dots and spinners are round. */
+  --radius-xs: .375rem;    /* tags and counts */
+  --radius-sm: .5rem;      /* map labels, tooltips, small controls */
+  --radius: .625rem;       /* buttons, fields, rows */
+  --radius-lg: .875rem;    /* the menu card, panels, dialogs */
 
   /* Layout */
   --gutter: 1rem;
-  --bar: 3rem;                                             /* height of the floating top pills */
-  --below-bar: calc(var(--gutter) + var(--bar) + .625rem); /* where panels under the top row start */
-  --drawer-width: 380px;
-  --fab: 3.5rem;
-  --phone-bar: 4rem;
+  --tap: 2.75rem;          /* the corner controls: back button height, menu button size */
   --ease: cubic-bezier(.2, .8, .2, 1);
 }

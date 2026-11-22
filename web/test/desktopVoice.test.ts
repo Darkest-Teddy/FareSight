@@ -2,9 +2,7 @@ import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
 import test, { type TestContext } from 'node:test';
 import { api } from '../src/api/client.ts';
-import type { BriefingCard } from '../src/data/reviewBriefing.ts';
 import { LiveVoiceDock } from '../src/ui/LiveVoiceDock.ts';
-import { ReviewBriefingModal } from '../src/ui/ReviewBriefingModal.ts';
 import { RealtimeVoice, type VoiceTranscript } from '../src/voice/RealtimeVoice.ts';
 
 class TestElement extends EventTarget {
@@ -129,46 +127,6 @@ test('desktop dock opens in idle, sends a draft and hides without touching the l
   control('Enable audio').click();
   control('End session').click();
   assert.deepEqual(actions, ['mute', 'audio', 'stop']);
-});
-
-test('desktop briefing preserves outside focus, supports four tabs, actions and Escape', (t) => {
-  const { doc } = installDom(t);
-  const input = doc.createElement('input');
-  input.focus();
-  const opened: string[] = [];
-  const dismissed: Array<string | undefined> = [];
-  const panel = new ReviewBriefingModal({
-    dismiss: (id) => { dismissed.push(id); if (!id) panel.hide(); },
-    openVenue: (id) => opened.push(id),
-    openDish: () => {},
-    compareDishes: () => {},
-    viewOnMap: () => {},
-  });
-  const root = panel.root as unknown as TestElement;
-  const cards: BriefingCard[] = Array.from({ length: 4 }, (_, index) => ({
-    id: String(index), title: 'Briefing ' + index,
-    sections: [{ kind: 'text', body: 'Travel by train.' }],
-    actions: [{ kind: 'venue', label: 'Open venue', placeId: 'venue-' + index }],
-  }));
-  panel.show(cards);
-  assert.equal(root.tagName, 'section');
-  assert.equal(root.hidden, false);
-  assert.equal(root.attributes.get('aria-labelledby'), 'fare-briefing-title');
-  assert.equal(doc.activeElement, input);
-  const selected = find(root, ({ textContent }) => textContent === 'Briefing 1')!;
-  selected.click();
-  const open = find(root, ({ textContent }) => textContent === 'Open venue')!;
-  open.focus();
-  open.click();
-  assert.deepEqual(opened, ['venue-1']);
-  const claimedEscape = keyed('Escape');
-  claimedEscape.preventDefault();
-  panel.dismissOnEscape(claimedEscape);
-  assert.equal(root.hidden, false);
-  panel.dismissOnEscape(keyed('Escape'));
-  assert.deepEqual(dismissed, [undefined]);
-  assert.equal(root.hidden, true);
-  assert.equal(doc.activeElement, input);
 });
 
 class TestChannel extends EventTarget {

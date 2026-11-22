@@ -149,7 +149,7 @@ export class DishTableScene {
       ctx.font = '46px Georgia, serif';
       ctx.fillText(venue, 35, 156, w - 70);
       ctx.fillStyle = '#5a4836';
-      ctx.font = 'bold 41px system-ui, sans-serif';
+      ctx.font = 'bold 41px Switzer, system-ui, sans-serif';
       ctx.fillText(scaleAndPrice, 35, 224, w - 70);
     });
     setting.placard.enabled = true;
@@ -203,7 +203,8 @@ export class DishTableScene {
       const ready = await this.splats.show('compare', comparison, this.secondary.pivot);
       if (revision === this.revision) this.finishPreview(this.secondary, 'compare', ready, newSecondary);
     } else {
-      this.primary.placard.enabled = false;
+      // The placard is the dish's caption: its name, where it is from, its price and its size.
+      this.labelDish(this.primary, dish, place.name, asset);
       this.secondary.grab = undefined;
       this.secondary.preview = undefined;
       if (this.comparing) {

@@ -146,7 +146,7 @@ const schemas = {
   dismiss_review_card: [{}, { cardId: null }],
   get_current_view: [{}, { detail: true }],
   control_camera: [{ action: 'orbit', yawDeltaDeg: -180, pitchDeltaDeg: 90, zoomFactor: 4 }, { action: 'zoom', zoomFactor: 0 }],
-  control_ui: [{ drawer: 'expand', xrAction: 'exit_xr', locateNearestStop: true }, { xrAction: 'enter_ar' }],
+  control_ui: [{ xrAction: 'exit_xr', locateNearestStop: true }, { xrAction: 'enter_ar' }],
   submit_visit_note: [{ placeId: jefes, authorLabel: 'Pat', text: 'Good tacos', rating: 5 }, { placeId: jefes, authorLabel: 'Pat', text: 'Good tacos', rating: 0 }],
 } satisfies Record<RealtimeToolName, unknown[]>;
 
@@ -577,11 +577,9 @@ test('comparison tray mirrors add, open, remove, set and clear without exceeding
 test('control_ui updates panels, SFX, modal, tabletop, pairing, XR and GPS with structured results', async (t) => {
   const { call, log, state, app } = harness();
   state.highlightedStops = [bu];
-  const { result } = await call('control_ui', { drawer: 'expand', filterPanel: 'open', audioSfx: 'on', modal: 'credits',
+  const { result } = await call('control_ui', { filterPanel: 'open', audioSfx: 'on', modal: 'credits',
     tableMode: 'passthrough', sendToPairedDevice: 'trip', xrAction: 'exit_xr', clearHighlights: true, locateNearestStop: true, announce: 'Ready' });
   assert.equal(result.ok, true);
-  assert.equal(state.drawerOpen, true);
-  assert.equal(state.sheetExpanded, true);
   assert.equal(state.filterOpen, true);
   assert.equal(state.muted, false);
   assert.equal(log.modal, 'credits');

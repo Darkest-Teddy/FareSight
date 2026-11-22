@@ -4,11 +4,8 @@ import type { BriefingCard } from '../data/reviewBriefing';
 export type SceneMode = 'map' | 'station' | 'venue' | 'dish';
 
 export interface XRFilterSummary {
-  craving: string;
   maxBudget: number;
   startStopId: string;
-  groupSize: number;
-  familyVisit: boolean;
 }
 
 export interface XRStopData {

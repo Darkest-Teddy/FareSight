@@ -7,10 +7,15 @@
 //
 // That model suits the job well: 3436 triangles across 16 primitives, one per material, with no
 // textures at all -- every colour is a baseColorFactor. Recolouring a line is therefore a matter
-// of swapping one material's factor, and the geometry stays byte-identical to Flowcast's.
+// of swapping material factors, and the geometry stays byte-identical to Flowcast's.
 //
-// The accent material is `mbta_green`, which holds #00843D converted to linear. Each line gets its
-// own official colour in that slot.
+// Flowcast's own livery is a white bodyshell under a grey roof with the line colour as a band
+// along the skirt. That is right for a street-level view and wrong for this one: the map is seen
+// from above, where the band is hidden and all that shows is roof, so every train read as the
+// same grey sliver whatever line it ran on. The map livery below turns that inside out. The
+// bodyshell and roof take the line's official colour, the roof equipment becomes one pale stripe
+// down the spine, and the running gear goes to ink, so a train is unmistakably its line's colour
+// from any angle and still has a window band and a roof line to read as a train.
 //
 // One honest limitation: Flowcast only ships the Green Line LRV, so Red, Orange and Blue reuse its
 // bodyshell. Their real rolling stock is heavy rail and shaped differently. The livery and the
@@ -19,6 +24,31 @@ import { readFileSync, writeFileSync } from 'node:fs';
 
 /** The material slot holding the line accent in Flowcast's model. */
 const ACCENT = 'mbta_green';
+
+/** Paper Map tones shared with the app (web/src/styles/tokens.css). */
+const CARD = '#FFFDF8';
+const INK = '#22252B';
+
+/**
+ * The map livery: which Flowcast material slots change, and to what. `line` stands for the line's
+ * official colour. Slots not listed keep Flowcast's values (glass, lights, destination signs).
+ */
+const LIVERY = {
+  body: 'line',
+  roof: 'line',
+  equipment: CARD,
+  logo_white: CARD,
+  door: 'line',
+  steel: INK,
+  trim: INK,
+  under: INK,
+};
+
+/**
+ * How much of its own colour a painted surface emits. Matches LACQUER_GLOW in transit.mjs, so a
+ * train renders the same green as the line plate it runs on rather than a shade duller.
+ */
+const LIVERY_GLOW = 0.2;
 
 /** glTF stores colour factors in linear space, so sRGB hex has to be converted. */
 const toLinear = (hex) =>
@@ -82,18 +112,29 @@ export function trains(dir) {
   for (const [line, spec] of Object.entries(TRAINS)) {
     // Deep copy so each line writes its own document and they cannot share mutated state.
     const doc = JSON.parse(JSON.stringify(json));
+    const paint = (material, hex, glow = 0) => {
+      material.pbrMetallicRoughness = {
+        ...material.pbrMetallicRoughness,
+        baseColorFactor: [...toLinear(hex), 1],
+        metallicFactor: 0,
+      };
+      if (glow) material.emissiveFactor = toLinear(hex).map((v) => v * glow);
+    };
     const material = doc.materials[accentIndex];
     material.name = `mbta_${line}`;
-    material.pbrMetallicRoughness = {
-      ...material.pbrMetallicRoughness,
-      baseColorFactor: [...toLinear(spec.accent), 1],
-    };
+    paint(material, spec.accent, LIVERY_GLOW);
+    for (const [slot, tone] of Object.entries(LIVERY)) {
+      const target = doc.materials.find((m) => m.name === slot);
+      if (!target) throw new Error(`vendored train model has no "${slot}" material to repaint`);
+      if (tone === 'line') paint(target, spec.accent, LIVERY_GLOW);
+      else paint(target, tone);
+    }
     doc.asset = {
       ...doc.asset,
       extras: {
         ...(doc.asset.extras ?? {}),
         faresightLine: line,
-        source: 'Flowcast mbta-green-line-train.glb, recoloured',
+        source: 'Flowcast mbta-green-line-train.glb, map livery',
       },
     };
     writeGlb(dir + spec.file, doc, bin);

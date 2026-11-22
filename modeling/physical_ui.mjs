@@ -18,6 +18,9 @@ import {
 const alloy = '#9697b2',
   slate = '#6f708d',
   ink = '#262b38';
+// Paper Map tones for the pieces that sit on the light map (web/src/styles/tokens.css).
+const mapPaper = '#FFFDF8',
+  mapInk = '#22252B';
 const brass = '#c9a462',
   gold = '#d8b778',
   bronze = '#997544';
@@ -376,71 +379,69 @@ function controlDeck() {
   return m;
 }
 
+// A rounded rectangle in the instrument's front plane, counter-clockwise seen from the front.
+function roundedFace(w, h, r, z = 0, steps = 6) {
+  const points = [];
+  for (const [k, sx, sy] of [
+    [0, 1, -1],
+    [1, 1, 1],
+    [2, -1, 1],
+    [3, -1, -1],
+  ])
+    for (let i = 0; i <= steps; i++) {
+      const angle = ((k - 1 + i / steps) * TAU) / 4;
+      points.push([
+        sx * (w / 2 - r) + r * Math.cos(angle),
+        sy * (h / 2 - r) + r * Math.sin(angle),
+        z,
+      ]);
+    }
+  return points;
+}
+
+// The venue marker's label: a paper card with a hairline of ink around it, and nothing else.
+//
+// It used to be a slate housing in a brass bezel with four screws, a turned collar, two struts and
+// a red tab -- instrument-panel furniture that read as heavy and dark over the pale station
+// islands. A map label wants to be the lightest thing on the map. So this is now two parts: an
+// ink slab, and the card face a couple of millimetres smaller that the app draws the venue onto.
+// The slab showing around the face is the outline. It is kept thin: the map is looked down on, so
+// a deep slab shows its top as a heavy black bar along every label. The needle and the foot marker under it are drawn by the app, which restyles them
+// per venue (web/src/xr/StationDioramaScene.ts).
 function venueFlag() {
   const m = new Model();
-  const shell = part(m, 'Pin_Housing', 'Brushed slate', 0.54, 0.38);
-  const trim = part(m, 'Pin_Fittings', 'Turned brass', 0.7, 0.33);
-  panel(
-    shell,
-    0,
-    58,
-    236,
-    84,
-    6,
-    [
-      [-5.8, 2.5],
-      [-4.5, 0],
-      [6.8, 0],
-      [8.1, 1.7],
-    ],
-    slate,
+  const width = 204,
+    height = 64,
+    radius = 10,
+    edge = 2.4,
+    center = 58;
+  // The slab is the outline, so it must stay ink whatever the light is doing: black base colour,
+  // ink emission. The app tints the base towards grey to mute a filtered-out venue.
+  const slab = m.surface(
+    m.material('Pin ink', { color: '#000000', emission: mapInk, rough: 1 }),
+    'Pin_Housing',
   );
-  bezel(trim, 0, 58, 235, 83, 6, [
-    [0, 6.6],
-    [1.3, 9, bronze],
-    [2.5, 9, gold],
-    [6.2, 8.3, brass],
-  ]);
-  canvas(m, 'Pin_Plate', [0, 58, 8.6], 218, 68, '#34414a');
-  for (const x of signs)
-    for (const y of signs) screw(trim, x * 112.2, 58 + y * 33, 8.6, 1.4);
-  turnedCollar(trim, [
-    [0, 6.6],
-    [1, 7],
-    [3.4, 7],
-    [4.1, 5.3],
-    [7.3, 5.3],
-    [8.3, 6.3],
-  ]);
-  for (const side of signs)
-    rod(trim, [side * 2, 7, 0], [side * 18, 17.8, 0], 2.8, brass, 12);
-  panel(
-    shell,
-    0,
-    58,
-    223,
-    71,
-    5,
-    [
-      [-6.35, 1],
-      [-5.7, 0],
-    ],
-    ink,
+  loft(
+    slab,
+    [-1.2, 1.2].map((z) =>
+      roundedFace(width + 2 * edge, height + 2 * edge, radius + edge, z)
+        .map(([x, y, depth]) => [x, y + center, depth])
+        .reverse(),
+    ),
+    '#ffffff',
   );
-  for (let i = -2; i <= 2; i++)
-    panel(
-      shell,
-      0,
-      58 + 9 * i,
-      194 - 6 * Math.abs(i),
-      3.8,
-      1.4,
-      [
-        [-7, 0.7],
-        [-6.2, 0],
-      ],
-      slate,
-    );
+  const card = m.surface(
+    m.material('Pin_Plate enamel', { color: mapPaper, rough: 0.55 }),
+    'Pin_Plate',
+    [0, center, 1.5],
+  );
+  const outline = roundedFace(width, height, radius);
+  face(
+    card,
+    outline,
+    '#ffffff',
+    outline.map(([x, y]) => [x / width + 0.5, 0.5 - y / height]),
+  );
   return m;
 }
 

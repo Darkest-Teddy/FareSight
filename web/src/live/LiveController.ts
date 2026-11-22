@@ -6,7 +6,7 @@ import { has3D, has3DDish, has3DRoom, hasDishPreview, isSplat, measuredRoomForAs
 import { composeBriefingCard } from '../data/composeBriefing.ts';
 import { bostonTime, catalogReviewSnapshots, loadLiveReviews, loadPlaceDecision, nextTrainLabel, reviewFacts, type BriefingCard, type BriefingMode, type PlaceDecision } from '../data/reviewBriefing.ts';
 import { cravings, initialFilters, matchingPlaces, oneWayCost, type Craving, type Filters } from '../ui/state.ts';
-import type { Seating } from '../ui/PlaceDrawer';
+import type { Seating } from '../ui/viewState.ts';
 import type { SceneMode } from '../xr';
 import { realtimeTools, validToolValue, type RealtimeToolName } from '../voice/tools.ts';
 import { alertsForStops, listPlaces, recommendPlaces, searchDishes, stationOverview, tripBreakdown, type RecommendationFilters } from './recommendations.ts';
@@ -416,7 +416,10 @@ export class LiveController {
         catch (error) { return { result: { ok: false, error: error instanceof Error ? error.message : 'Invalid briefing.' } }; }
         const updated = state.briefings.some(({ id }) => id === cardId);
         this.app.showReviewCard(card, mode);
-        return { result: { ok: true, cardId, ...this.openBriefingIds() },
+        // Clipboards stand only in a headset. A flat screen keeps the card for when VR starts, but shows nothing.
+        const unseen = state.xrMode === 'none'
+          ? { shown: false, note: 'Clipboards appear only in a headset. Give the answer aloud.' } : {};
+        return { result: { ok: true, cardId, ...unseen, ...this.openBriefingIds() },
           actionLabel: `${updated ? 'Updated' : 'Opened'} briefing: ${card.title}` };
       }
       case 'dismiss_review_card': {

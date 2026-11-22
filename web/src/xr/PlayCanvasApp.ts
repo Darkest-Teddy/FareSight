@@ -70,13 +70,11 @@ const desktopSplatBudget = 420_000;
 const mapClearance = 0.006;
 const cartridgeDepth = 0.430;
 const dishClearance = 0.002;
-// On a flat screen the neighbourhood rests left of the map centre, clear of the place card, so
-// the camera never has to move to frame it. On a wide screen it also rests below the map plane:
-// the price signs stand tall above the roofs, and with no top bar to hide behind they would
-// otherwise run off the top of the view. A phone keeps it level, since the sheet covers the
-// lower half of a tall screen.
-const stationHomeWide: XYZ = [-0.34, -0.2, -0.2];
-const stationHomeTall: XYZ = [-0.3, 0, -0.2];
+// On a flat screen the neighbourhood rests on the camera's centre line, so it sits in the middle
+// of the view and the camera never has to move to frame it. It rests below the map plane: the
+// price signs stand tall above the roofs and would otherwise run off the top of the view.
+const stationHomeWide: XYZ = [-0.165, -0.2, -0.2];
+const stationHomeTall: XYZ = [-0.165, -0.2, -0.2];
 const standbyScale = 0.0004;
 
 export class PlayCanvasApp implements FareSightSceneEngine {
@@ -396,16 +394,24 @@ export class PlayCanvasApp implements FareSightSceneEngine {
       if (dive) {
         dive.dir = -1;
         this.mode = 'map';
+        this.clearSelection();
         this.station.setPinsShown(false);
         this.applyPresentation();
         return;
       }
       if (this.mode === 'station' && this.activeStop && this.canDive()) {
         this.startDive(this.activeStop, -1);
+        this.clearSelection();
         return;
       }
     }
     this.applyScene(mode);
+  }
+
+  /** The map keeps no selection: heading back to it un-marks the stop that was open. */
+  private clearSelection(): void {
+    this.activeStop = undefined;
+    this.map.select(undefined);
   }
 
   async focusStop(stopId: string): Promise<void> {
@@ -619,6 +625,10 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     this.actions?.setVoiceState(state);
   }
 
+  /**
+   * Briefings are clipboards around the viewer in a headset. A flat screen shows none: a card
+   * standing in front of the scene there would only be a popup by another name.
+   */
   setReviewCards(cards: readonly BriefingCard[]): void {
     if (this.activeXR === 'none') return;
     this.pendingReviews = cards;
@@ -687,6 +697,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
       }
     }
     this.mode = mode;
+    if (mode === 'map') this.clearSelection();
     if (!atVenue) {
       if (!this.leaving.has('venue') && !this.leaving.has('dish')) this.venue.clear();
       this.place = undefined;
@@ -748,10 +759,14 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     const portrait = clamp(0.79 / Math.max(aspect, 0.4), 1, 1.60);
     if (this.mode === 'dish') {
       if (this.dish.hasComparison) {
-        const pivot = new pc.Vec3(aspect > 1.2 ? 0.09 : 0, 0.05, 0.005);
+        const pivot = new pc.Vec3(0, 0.05, 0.005);
         return { pivot, yaw: 0, pitch: 0.73, distance: 0.94 * portrait, min: 0.21 };
       }
-      return { pivot: new pc.Vec3(-0.18, 0.075, 0.025), yaw: 0, pitch: 0.73, distance: 0.68 * portrait, min: 0.21 };
+      // A tall view sits a little further back and nearer the dish, so the menu book on the left
+      // and the dish caption on the right both stay inside the frame.
+      const tall = aspect < 0.9;
+      return { pivot: new pc.Vec3(tall ? -0.15 : -0.18, 0.075, 0.025), yaw: 0, pitch: 0.73,
+        distance: 0.68 * portrait * (tall ? 1.085 : 1), min: 0.21 };
     }
     if (this.mode === 'venue') {
       const [x, y, z] = this.venue?.spawn ?? [0, 1.55, 2];

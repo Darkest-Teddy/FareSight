@@ -1,8 +1,12 @@
-import { CRAVING_FILTERS as cravings, MBTA_SUBWAY_FARE, type Place, type Stop } from '@faresight/shared';
+import { CRAVING_FILTERS as cravings, MBTA_SUBWAY_FARE, type Place } from '@faresight/shared';
 
 export { cravings };
 
 export type Craving = typeof cravings[number][0];
+/**
+ * The menu only offers the start stop and the budget. Craving, group size and family visit have no
+ * control on screen: the voice assistant sets them, and they stay at their defaults otherwise.
+ */
 export interface Filters {
   craving: Craving;
   maxBudget: number;
@@ -10,8 +14,9 @@ export interface Filters {
   groupSize: number;
   familyVisit: boolean;
 }
+export const budgetRange = { min: 8, max: 50 } as const;
 export const initialFilters: Filters = {
-  craving: 'all', maxBudget: 50, startStopId: 'place-bucen', groupSize: 1, familyVisit: false,
+  craving: 'all', maxBudget: budgetRange.max, startStopId: 'place-bucen', groupSize: 1, familyVisit: false,
 };
 
 export function oneWayCost(place: Place, startStopId: string, groupSize = 1) {
@@ -39,11 +44,7 @@ export function matchingPlaces(places: Place[], filters: Filters) {
   ));
 }
 
-export function placesAt(places: Place[], stop: Stop, filters: Filters) {
-  return places.filter((place) => place.stop_id === stop.stop_id).sort((a, b) => {
-    const fit = (place: Place) => Number(place.stated_capacity !== undefined && place.stated_capacity < filters.groupSize);
-    return fit(a) - fit(b)
-      || oneWayCost(a, filters.startStopId, filters.groupSize) - oneWayCost(b, filters.startStopId, filters.groupSize)
-      || a.walk_from_stop_m - b.walk_from_stop_m;
-  });
+/** Whether any filter differs from its default, including the ones only the voice assistant can set. */
+export function filtersNarrowed(filters: Filters) {
+  return filters.maxBudget < budgetRange.max || filters.craving !== 'all' || filters.groupSize !== 1 || filters.familyVisit;
 }

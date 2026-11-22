@@ -15,16 +15,25 @@ export function button(label: string, action: () => void, className = '') {
 // Static line icons on a 24 px grid. Strokes take the text colour, so they follow every button state.
 const icons = {
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
-  more: '<circle cx="5" cy="12" r="1.6" class="fill"/><circle cx="12" cy="12" r="1.6" class="fill"/><circle cx="19" cy="12" r="1.6" class="fill"/>',
-  chevron: '<path d="m6 9 6 6 6-6"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  back: '<path d="M19.5 12h-15M10.5 6l-6 6 6 6"/>',
+  chevron: '<path d="m9.5 6 6 6-6 6"/>',
   list: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.3" class="fill"/><circle cx="4.5" cy="12" r="1.3" class="fill"/><circle cx="4.5" cy="18" r="1.3" class="fill"/>',
-  sliders: '<path d="M4 8h8M18 8h2M4 16h2M12 16h8"/><circle cx="15" cy="8" r="2.4"/><circle cx="9" cy="16" r="2.4"/>',
   mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>',
   alert: '<path d="M12 7v6.5M12 17v.2"/>',
-  map: '<path d="m9 4-6 2.2v13.6L9 17.6l6 2.2 6-2.2V4l-6 2.2zM9 4v13.6M15 6.2v13.6"/>',
   venue: '<path d="M4.5 10.5V20h15v-9.5M3 9l2-5h14l2 5a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0zM10 20v-5h4v5"/>',
+  pin: '<path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/>',
+  locate: '<circle cx="12" cy="12" r="5.5"/><path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4"/>',
+  budget: '<circle cx="12" cy="12" r="8.5"/><path d="M14.6 9.4c-.4-.8-1.4-1.3-2.6-1.3-1.5 0-2.6.8-2.6 1.9 0 2.7 5.3 1.3 5.3 4 0 1.2-1.1 2-2.7 2-1.3 0-2.3-.5-2.7-1.4M12 6.4v1.7M12 16v1.7"/>',
+  vr: '<path d="M4 8h16a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 20 17h-3.4a1.5 1.5 0 0 1-1.2-.6l-1.2-1.6a2.7 2.7 0 0 0-4.4 0l-1.2 1.6a1.5 1.5 0 0 1-1.2.6H4a1.5 1.5 0 0 1-1.5-1.5v-6A1.5 1.5 0 0 1 4 8z"/>',
+  reset: '<path d="M5 12a7 7 0 1 0 2.2-5.1L5 9M5 4.5V9h4.5"/>',
+  exit: '<path d="M14 4.5h4.5v15H14M10.5 8l-4 4 4 4M6.5 12H15"/>',
   upload: '<path d="M12 16V4.5M7.5 9 12 4.5 16.5 9M4.5 19.5h15"/>',
   pair: '<path d="M10 14a4 4 0 0 0 5.7 0l3.2-3.2a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3.2 3.2a4 4 0 0 0 5.7 5.7l1-1"/>',
+  sound: '<path d="M4 9.5v5h3.5L12 18V6L7.5 9.5zM15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.7 7.7 0 0 1 0 11"/>',
+  mute: '<path d="M4 9.5v5h3.5L12 18V6L7.5 9.5zM16 9.7l4.5 4.6M20.5 9.7 16 14.3"/>',
+  info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.6v.2"/>',
+  bug: '<rect x="8" y="7.5" width="8" height="11.5" rx="4"/><path d="M9.5 7.5a2.5 2.5 0 0 1 5 0M8 11.5H4.5M8 15.5H5M16 11.5h3.5M16 15.5h3M12 12v7"/>',
 } as const;
 export type IconName = keyof typeof icons;
 
@@ -46,10 +55,26 @@ export function iconButton(name: IconName, label: string, action: () => void, cl
   return node;
 }
 
-export function previewBadge() {
-  const badge = element('span', 'preview-badge', '3D');
-  badge.setAttribute('aria-hidden', 'true');
-  return badge;
+/** A menu row: icon first, then its label, which is also its accessible name. */
+export function navItem(name: IconName, label: string, action: () => void, className = '') {
+  const node = button('', action, `menu-item ${className}`.trim());
+  node.append(icon(name), element('span', 'menu-label', label));
+  return node;
+}
+
+/** A quiet utility entry in the menu: an icon over a one-word caption. */
+export function navTool(name: IconName, label: string, action: () => void) {
+  const node = button('', action, 'menu-tool');
+  node.append(icon(name), element('span', 'menu-label', label));
+  return node;
+}
+
+/** Renames a menu entry, and swaps its icon when one is given. */
+export function setNavItem(node: HTMLElement, label: string, name?: IconName) {
+  const text = node.querySelector('.menu-label');
+  if (text) text.textContent = label;
+  const glyph = name && node.querySelector('.icon');
+  if (glyph) glyph.innerHTML = icons[name];
 }
 
 export function option(value: string, label: string) {
@@ -82,23 +107,6 @@ export function link(label: string, url?: string | null) {
   return node;
 }
 
-export function replacePreservingFocus(host: HTMLElement, fallback: HTMLElement, ...children: HTMLElement[]): void {
-  const focused = document.activeElement;
-  const restore = focused instanceof HTMLElement && host.contains(focused) && focused !== host;
-  host.replaceChildren(...children);
-  if (!restore || document.activeElement === focused) return;
-  if (host.contains(focused)) { focused.focus({ preventScroll: true }); return; }
-  const key = (node: HTMLElement) => node.dataset.focusKey ?? node.dataset.control ??
-    node.getAttribute('aria-label') ?? node.getAttribute('href') ?? node.textContent;
-  const replacement = [...host.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input, select, textarea')]
-    .find((node) => node.tagName === focused.tagName && key(node) === key(focused));
-  if (replacement) replacement.focus({ preventScroll: true });
-  else {
-    fallback.tabIndex = -1;
-    fallback.focus({ preventScroll: true });
-  }
-}
-
 export function message(text: string, problem = false) {
   const node = element('p', problem ? 'message error' : 'message', text);
   node.setAttribute('role', problem ? 'alert' : 'status');
@@ -110,30 +118,6 @@ export function section(title: string) {
   node.append(element('h3', '', title));
   return node;
 }
-
-/** A titled group inside a fold or section. */
-export function block(title: string) {
-  const node = element('div', 'fold-block');
-  node.append(element('h4', '', title));
-  return node;
-}
-
-/**
- * A collapsible section. `hint` is a one-line readout shown beside the title, so the
- * collapsed row still answers the common question. The node keeps its open state when
- * its body is re-rendered.
- */
-export function fold(title: string) {
-  const node = element('details', 'fold');
-  const summary = element('summary');
-  const name = element('span', 'fold-title', title);
-  const hint = element('span', 'fold-hint');
-  summary.append(name, hint, icon('chevron'));
-  const body = element('div', 'fold-body');
-  node.append(summary, body);
-  return { node, summary, title: name, hint, body };
-}
-export type Fold = ReturnType<typeof fold>;
 
 export function errorText(error: unknown) {
   return (error instanceof Error ? error.message : String(error)).replaceAll('—', '–');
@@ -157,5 +141,3 @@ export function modal(title: string, className = '') {
   document.body.append(dialog);
   return { dialog, body, open: () => { if (!dialog.open) dialog.showModal(); } };
 }
-
-export const money = (value: number) => '$' + value.toFixed(2);

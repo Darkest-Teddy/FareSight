@@ -71,7 +71,7 @@ export class VRReviewCard {
       ctx.fillStyle = '#d2b483';
       ctx.fillRect(0, 0, w, h);
       ctx.fillStyle = ink;
-      ctx.font = '700 44px sans-serif';
+      ctx.font = '700 44px Switzer, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('CLOSE ×', w / 2, h / 2, w - 18);
@@ -158,7 +158,7 @@ export class VRReviewCard {
       };
       let y = 43;
       if (card.kicker) {
-        text(card.kicker, margin, y, '700 22px sans-serif', muted, textWidth - 130);
+        text(card.kicker, margin, y, '700 22px Switzer, sans-serif', muted, textWidth - 130);
         y += 36;
       }
       const titleFont = '700 48px Georgia, serif';
@@ -169,7 +169,7 @@ export class VRReviewCard {
         y += 52;
       }
       if (card.subtitle) {
-        const subtitleFont = '25px sans-serif';
+        const subtitleFont = '25px Switzer, sans-serif';
         ctx.font = subtitleFont;
         for (const line of wrap(ctx, card.subtitle)) {
           text(line, margin, y, subtitleFont, muted);
@@ -182,7 +182,7 @@ export class VRReviewCard {
         const cell = textWidth / card.facts.length;
         card.facts.forEach(({ label, value }, i) => {
           const x = margin + i * cell;
-          text(label, x, y, '700 20px sans-serif', muted, cell - 12);
+          text(label, x, y, '700 20px Switzer, sans-serif', muted, cell - 12);
           text(value, x, y + 27, '700 32px Georgia, serif', ink, cell - 12);
         });
         y += 72;
@@ -207,7 +207,7 @@ export class VRReviewCard {
       };
       const paragraph = (value: string, quote = false) => add(value, '28px Georgia, serif', ink, 35, quote);
       for (const section of card.sections) {
-        if (section.heading) add(section.heading, '700 25px sans-serif', ink, 39);
+        if (section.heading) add(section.heading, '700 25px Switzer, sans-serif', ink, 39);
         switch (section.kind) {
           case 'text': paragraph(section.body); break;
           case 'reviews':
@@ -215,13 +215,13 @@ export class VRReviewCard {
               paragraph(`“${review.text}”`, true);
               const attribution = [review.author, review.placeName, review.source, review.rating === undefined ? undefined : `${review.rating} / 5`,
                 review.date_label, review.sample ? 'Sample diner note' : review.unverified ? 'Unverified excerpt' : ''].filter(Boolean).join(' · ');
-              add(attribution, '700 22px sans-serif', muted, 31, true);
+              add(attribution, '700 22px Switzer, sans-serif', muted, 31, true);
               space(12);
             }
             break;
           case 'list':
             for (const item of section.items) {
-              add(`•  ${item.label}${item.badge ? `  [${item.badge}]` : ''}`, '700 25px sans-serif', ink, 33);
+              add(`•  ${item.label}${item.badge ? `  [${item.badge}]` : ''}`, '700 25px Switzer, sans-serif', ink, 33);
               if (item.detail) add(item.detail, '24px Georgia, serif', muted, 31);
               space(8);
             }
@@ -243,12 +243,12 @@ export class VRReviewCard {
               });
             };
             align(section.items.map(({ name }) => name), '700 26px Georgia, serif');
-            align(section.items.map(({ subtitle }) => subtitle), '20px sans-serif', muted);
+            align(section.items.map(({ subtitle }) => subtitle), '20px Switzer, sans-serif', muted);
             const metrics = Math.max(...section.items.map((item) => item.metrics.length));
             const metricHeights = new Map<number, number>();
             for (let i = 0; i < metrics; i++) {
               const start = columns[0].length;
-              align(section.items.map((item) => item.metrics[i]?.label), '700 19px sans-serif', muted);
+              align(section.items.map((item) => item.metrics[i]?.label), '700 19px Switzer, sans-serif', muted);
               align(section.items.map((item) => item.metrics[i]?.value), '700 24px Georgia, serif');
               metricHeights.set(start, (columns[0].length - start) * 32);
             }
@@ -292,10 +292,10 @@ export class VRReviewCard {
         y += row.height;
       }
       horizontal(891);
-      if (this.page) text('‹  PREV', margin, 913, '700 25px sans-serif');
-      if (this.page + 1 < this.pages) text('NEXT  ›', width - margin - 99, 913, '700 25px sans-serif');
+      if (this.page) text('‹  PREV', margin, 913, '700 25px Switzer, sans-serif');
+      if (this.page + 1 < this.pages) text('NEXT  ›', width - margin - 99, 913, '700 25px Switzer, sans-serif');
       ctx.textAlign = 'center';
-      text(`${this.page + 1} / ${this.pages}`, width / 2, 916, '700 21px sans-serif', muted);
+      text(`${this.page + 1} / ${this.pages}`, width / 2, 916, '700 21px Switzer, sans-serif', muted);
       ctx.textAlign = 'left';
     });
     this.setTargets(true);

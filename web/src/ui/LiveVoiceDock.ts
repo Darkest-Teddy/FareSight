@@ -8,6 +8,8 @@ export interface LiveVoiceDockActions {
   toggleMute(): void;
   sendText(text: string): boolean;
   opened?(): void;
+  /** Takes the keyboard when the dock closes while its trigger is tucked inside the closed menu. */
+  returnFocus?(): void;
 }
 
 const stateLabels: Record<VoiceState, string> = {
@@ -61,6 +63,7 @@ export class LiveVoiceDock {
     const titleWrap = element('div', 'voice-title-wrap');
     titleWrap.append(this.statusBadge, this.modelMeta);
     this.closeBtn = button('Hide', () => this.setOpen(false), 'quiet');
+    this.closeBtn.setAttribute('aria-label', 'Hide GPT Live');
     head.append(titleWrap, this.closeBtn);
     this.statusBadge.id = 'faresight-voice-state';
     this.statusBadge.setAttribute('role', 'status');
@@ -98,14 +101,15 @@ export class LiveVoiceDock {
     });
 
     this.root.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && !event.defaultPrevented) {
-        event.preventDefault();
-        this.setOpen(false);
-        this.trigger.focus();
-      }
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      // The key closes the dock and goes no further, so it does not also step the scene back.
+      event.preventDefault();
+      event.stopPropagation();
+      this.setOpen(false);
     });
 
     this.root.append(head, this.errorNote, controls, this.feed, this.form);
+    this.describeTrigger();
     this.renderEmptyFeed();
     this.renderControls();
   }
@@ -115,8 +119,19 @@ export class LiveVoiceDock {
     const restore = !open && this.root.contains(document.activeElement);
     this.root.hidden = !open;
     this.trigger.setAttribute('aria-expanded', String(open));
-    if (restore) this.trigger.focus({ preventScroll: true });
+    this.describeTrigger();
+    if (restore) this.focusTrigger();
     if (open) this.actions.opened?.();
+  }
+
+  private focusTrigger(): void {
+    if (this.trigger.offsetParent) this.trigger.focus({ preventScroll: true });
+    else this.actions.returnFocus?.();
+  }
+
+  private describeTrigger(): void {
+    // The menu row names the session's state; the tooltip says what pressing it does next.
+    this.trigger.title = this.root.hidden ? 'Open GPT Live' : 'Hide GPT Live';
   }
 
   setModel(model: string): void {

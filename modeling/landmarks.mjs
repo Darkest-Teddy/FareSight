@@ -418,13 +418,22 @@ const FENWAY_STANDS = [
 const FENWAY_STAND_HEIGHT = [17, 17, 15, 12, 12, 10, 11, 13, 16, 18, 18, 18];
 
 /**
- * The way the Citgo sign looks, as a bearing. This is the one thing here that is not as built: the
+ * The way the Citgo sign looks, as a bearing. This is the one thing here that is not as built. The
  * real sign faces 245 and 65 degrees (OSM `direction=245;65`), up and down Beacon Street, which
  * turns it nearly edge-on to the map's opening view from the south and leaves the most
- * recognisable thing on the map as a sliver. It is turned to look south-south-west instead, the
- * face Fenway Park sees. Set this to 245 for the real orientation.
+ * recognisable thing on the map as a sliver. It is turned to look out over the building's own
+ * Beacon Street front instead -- square to the roof it stands on, and the face Fenway Park sees.
+ * (An earlier pass split the difference at 200 degrees, which left the sign standing crooked on
+ * its roof, 34 degrees off the walls below it.) Set this to 245 for the real orientation.
  */
-const CITGO_FACES = 200;
+const CITGO_FACES = 166.5;
+
+/**
+ * How much larger than life the sign is drawn. Its building is drawn at 2.4; the sign is the
+ * landmark, not the building, so it gets nearly three times that and reads from the opening view:
+ * 60 ft of sign comes out a little wider than the roof under it, as it looks from Kenmore Square.
+ */
+const CITGO_SIGN_SCALE = 6.6;
 
 export const LANDMARKS = [
   {
@@ -435,15 +444,17 @@ export const LANDMARKS = [
     at: [42.3492818, -71.0962619],
     bearing: 0,
     // Small in plan: the sign really stands 97 m from Kenmore station, which is inside the
-    // station's drum at this scale, so the less ground it takes the nearer it can stay.
-    plan: 2,
-    lift: 3,
+    // station's drum at this scale, so the less ground the building takes the nearer it can stay.
+    // Across and up alike, so 660 Beacon Street keeps its real, rather squat, proportions and the
+    // sign is not left standing on a pillar.
+    plan: 2.4,
+    lift: 2.4,
     foot: [BEACON_660_OUTLINE],
     build(k, glass, surface) {
       k.prism(BEACON_660_OUTLINE, 0, 2.2, TONE.brickDark, null);
       k.prism(BEACON_660_OUTLINE, 2.2, 23.6, TONE.brick, null);
       k.prism(BEACON_660_OUTLINE.map(([e, n]) => [e * 1.04, n * 1.04]), 23.6, 25, TONE.marble, TONE.roof);
-      citgoSign(surface, k.at(0, 0), k.Y(25), CITGO_FACES, 3.9);
+      citgoSign(surface, k.at(0, 0), k.Y(25), CITGO_FACES, CITGO_SIGN_SCALE);
     },
   },
   {

@@ -156,13 +156,14 @@ export class PhysicalPlaque {
     this.surface = new CanvasSurface(device, 1024, Math.max(128, Math.round(1024 * height / width)));
 
     const fallback = this.fallback = child(this.entity, 'Procedural plaque');
-    const frame = material(kind === 'room' ? '#61432e' : brass);
-    const trim = material(kind === 'flag' ? '#544537' : '#a58a5f');
+    // Until its model arrives a venue flag is a plain ink-edged card, like the model itself.
+    const frame = material(kind === 'room' ? '#61432e' : kind === 'flag' ? cardInk : brass);
+    const trim = material(kind === 'flag' ? cardInk : '#a58a5f');
     this.fallbackMaterials = [frame, trim];
     if (kind === 'flag') this.housingMaterials = this.fallbackMaterials.map((surface) => ({ surface, color: surface.diffuse.clone() }));
     const centerY = this.faceHeight;
     const body = child(fallback, 'Framed face', [0, centerY, 0]);
-    if (kind === 'flag' || kind === 'station') {
+    if (kind === 'station') {
       const collarHeight = centerY - height / 2 + 0.003;
       shape(fallback, 'Swivel collar', 'cylinder', trim, [0, collarHeight / 2, 0], [0.016, collarHeight, 0.016]);
     }
@@ -269,7 +270,7 @@ export class PhysicalPlaque {
       const scale = Math.min(1, availableHeight / nominalHeight);
       for (const [index, line] of lines.entries()) {
         const size = (line.size ?? 60) * scale;
-        const family = index === 0 ? 'Georgia, serif' : 'system-ui, sans-serif';
+        const family = index === 0 ? 'Georgia, serif' : 'Switzer, system-ui, sans-serif';
         ctx.font = `${line.weight ?? 600} ${size}px ${family}`;
         ctx.textBaseline = 'top';
         ctx.fillStyle = line.color ?? ink;
@@ -298,7 +299,12 @@ export class PhysicalPlaque {
     category?: string; lineColor?: string; selected?: boolean; has3D?: boolean;
   } = {}): void {
     const { category, lineColor, selected, has3D } = options;
-    this.surface.draw(JSON.stringify([name, detail, category, lineColor, selected, has3D]), (ctx, width, height) => {
+    if (this.kind === 'flag') {
+      this.drawFlag(name, detail, category, !!selected, !!has3D);
+      return;
+    }
+    // Only the flag (a restaurant) wears a "3D" chip; a station callout never does.
+    this.surface.draw(JSON.stringify([name, detail, category, lineColor, selected]), (ctx, width, height) => {
       const padding = width * 0.046;
       const contentWidth = width - padding * 2;
       ctx.fillStyle = card;
@@ -312,31 +318,13 @@ export class PhysicalPlaque {
       }
 
       ctx.textBaseline = 'middle';
-      const banner = this.kind === 'flag';
-      const previewWidth = height * (banner ? 0.52 : 0.43);
-      const previewHeight = height * (banner ? 0.36 : 0.28);
-      const previewX = width - padding - previewWidth;
       const titleY = height * 0.34;
-      if (has3D) {
-        if (banner) {
-          ctx.fillStyle = sunflower;
-          ctx.fillRect(12, 10, width - 24, 7);
-        }
-        ctx.fillStyle = sunflower;
-        ctx.fillRect(previewX, titleY - previewHeight / 2, previewWidth, previewHeight);
-        ctx.fillRect(width - 14, 16, 4, height - 32);
-        ctx.fillStyle = cardInk;
-        ctx.font = `800 ${height * (banner ? 0.25 : 0.20)}px system-ui, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.fillText('3D', previewX + previewWidth / 2, titleY, previewWidth - 8);
-        ctx.textAlign = 'left';
-      }
       ctx.fillStyle = cardInk;
-      ctx.font = `700 ${height * 0.31}px system-ui, sans-serif`;
-      ctx.fillText(name, padding, titleY, contentWidth - (has3D ? previewWidth + 20 : 0));
+      ctx.font = `700 ${height * 0.31}px Switzer, system-ui, sans-serif`;
+      ctx.fillText(name, padding, titleY, contentWidth);
 
       const baseline = height * 0.73;
-      ctx.font = `600 ${height * 0.21}px system-ui, sans-serif`;
+      ctx.font = `600 ${height * 0.21}px Switzer, system-ui, sans-serif`;
       if (category) {
         const badgeWidth = Math.min(contentWidth * 0.62, ctx.measureText(detail).width + 32);
         ctx.fillStyle = cardInset;
@@ -351,6 +339,83 @@ export class PhysicalPlaque {
       } else {
         ctx.fillStyle = selected ? cardInk : cardMuted;
         ctx.fillText(detail, padding, baseline, contentWidth);
+      }
+    });
+  }
+
+  /**
+   * A venue flag's face: the name, what a visit costs, and what kind of place it is, on a paper
+   * card. The card's outline and rounded corners are the model's; this only fills it in.
+   *
+   * State is carried by fill and weight, never glow. A venue with a 3D room wears the same ink
+   * "3D" chip as the station labels on the map. The venue being pointed at turns the whole card
+   * sunflower inside a heavy ink rule -- the one place the highlight colour appears.
+   */
+  private drawFlag(name: string, detail: string, category: string | undefined, selected: boolean, has3D: boolean): void {
+    this.surface.draw(JSON.stringify(['flag', name, detail, category, selected, has3D]), (ctx, width, height) => {
+      ctx.fillStyle = selected ? sunflower : card;
+      ctx.fillRect(0, 0, width, height);
+      if (selected) {
+        const rule = height * 0.05;
+        ctx.strokeStyle = cardInk;
+        ctx.lineWidth = rule;
+        ctx.beginPath();
+        // Matches the model's corner: the face is 204 by 64 with a radius of 10.
+        ctx.roundRect(rule / 2, rule / 2, width - rule, height - rule, height * (10 / 64) - rule / 2);
+        ctx.stroke();
+      }
+
+      // Shorten with an ellipsis rather than letting the canvas squash a long name unreadably thin.
+      const fit = (text: string, room: number): string => {
+        if (ctx.measureText(text).width <= room * 1.08) return text;
+        let cut = text.length;
+        while (cut > 1 && ctx.measureText(`${text.slice(0, cut).trimEnd()}…`).width > room) cut--;
+        return `${text.slice(0, cut).trimEnd()}…`;
+      };
+
+      const padding = width * 0.052;
+      const contentWidth = width - padding * 2;
+      const titleY = height * 0.37;
+      const chipHeight = height * 0.27;
+      const chipWidth = chipHeight * 1.72;
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+      if (has3D) {
+        const x = width - padding - chipWidth;
+        ctx.fillStyle = cardInk;
+        ctx.beginPath();
+        ctx.roundRect(x, titleY - chipHeight / 2, chipWidth, chipHeight, chipHeight * 0.32);
+        ctx.fill();
+        ctx.fillStyle = card;
+        ctx.font = `800 ${chipHeight * 0.66}px Switzer, system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('3D', x + chipWidth / 2, titleY + chipHeight * 0.03);
+        ctx.textAlign = 'left';
+      }
+      const titleRoom = contentWidth - (has3D ? chipWidth + padding * 0.5 : 0);
+      ctx.fillStyle = cardInk;
+      // A long name steps down in size before it is cut short.
+      for (const size of [0.30, 0.27, 0.24]) {
+        ctx.font = `700 ${height * size}px Switzer, system-ui, sans-serif`;
+        if (ctx.measureText(name).width <= titleRoom * 1.08) break;
+      }
+      ctx.fillText(fit(name, titleRoom), padding, titleY, titleRoom);
+
+      const detailY = height * 0.725;
+      ctx.font = `600 ${height * 0.185}px Switzer, system-ui, sans-serif`;
+      const detailRoom = category ? contentWidth * 0.6 : contentWidth;
+      ctx.fillStyle = selected ? cardInk : priceInk;
+      ctx.fillText(fit(detail, detailRoom), padding, detailY, detailRoom);
+      if (category) {
+        const used = Math.min(detailRoom, ctx.measureText(detail).width);
+        const categoryRoom = contentWidth - used - padding * 0.6;
+        ctx.font = `700 ${height * 0.15}px Switzer, system-ui, sans-serif`;
+        ctx.letterSpacing = `${height * 0.012}px`;
+        ctx.fillStyle = selected ? cardInk : cardMuted;
+        ctx.textAlign = 'right';
+        ctx.fillText(fit(category, categoryRoom), width - padding, detailY, categoryRoom);
+        ctx.textAlign = 'left';
+        ctx.letterSpacing = '0px';
       }
     });
   }

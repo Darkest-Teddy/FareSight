@@ -1,56 +1,52 @@
 import {
-  buildMbtaTripPlannerUrl, computeTripEstimate, haversineMeters, ROUTE_COLORS, RIDE_TIMES, type Dish,
-  type GenerationJob, type LiveReviewsResponse, type MbtaSource, type Place, type Stop,
+  buildMbtaTripPlannerUrl, computeTripEstimate, haversineMeters, ROUTE_COLORS, type Dish,
+  type GenerationJob, type MbtaSource, type Place, type RestaurantManifest, type Stop,
 } from '@faresight/shared';
 import { createFareSightEngine, type FareSightSceneEngine, type SceneMode } from '../xr';
 import { SoundEngine } from '../audio/SoundEngine';
 import { api, type PairMessage, type Trip } from '../api/client';
 import { offlineCatalog, offlineManifest } from '../data/fallbackData';
-import { countPreviewsByStop, describe3DCount, isSplat } from '../data/preview3D';
-import { buildComparisonBriefingCard, buildPlaceBriefingCard, loadLiveReviews, loadPlaceDecision, maxBriefingCards, placeDecision, type BriefingCard, type BriefingMode } from '../data/reviewBriefing';
+import { countPreviewsByStop, isSplat } from '../data/preview3D';
+import { buildComparisonBriefingCard, loadPlaceDecision, maxBriefingCards, type BriefingCard, type BriefingMode } from '../data/reviewBriefing';
 import { LiveController, type AppControlSurface } from '../live/LiveController';
 import { RealtimeVoice } from '../voice/RealtimeVoice';
 import { AdminModal } from './AdminModal';
 import { attribution } from './AttributionModal';
-import { button, element, errorText, httpUrl, icon, iconButton, link, message, modal, previewBadge, type IconName } from './dom';
-import { FilterBar } from './FilterBar';
+import { CornerMenu } from './CornerMenu';
+import { button, element, errorText, httpUrl, icon, link, message, modal, navItem, navTool, setNavItem } from './dom';
+import { FilterControls } from './FilterControls';
 import { LiveVoiceDock } from './LiveVoiceDock';
-import { ReviewBriefingModal } from './ReviewBriefingModal';
+import { lineDots } from './lineDots';
 import { PairingModal } from './PairingModal';
-import { lineDots, PlaceDrawer, type DishComparison, type Seating, type StationData, type ViewData } from './PlaceDrawer';
-import { initialFilters, matchingPlaces, placesAt, type Filters } from './state';
+import type { DishComparison, Load, Seating } from './viewState';
+import { filtersNarrowed, initialFilters, matchingPlaces, type Filters } from './state';
 import { UploadPipelineModal } from './UploadPipelineModal';
 
-const sceneTitles: Record<SceneMode, string> = { map: 'Map', station: 'Station', venue: 'Venue', dish: 'Dish' };
 const pollInterval = 18_000;
-const tabIcons: Record<string, IconName> = { Explore: 'map', Filters: 'sliders', Venue: 'venue', Upload: 'upload', Pair: 'pair' };
 
 export class AppShell {
   private readonly canvas = element('canvas', 'viewport');
   private readonly canvasNotice = element('div', 'canvas-notice');
   private readonly status = element('span', 'service-status');
-  private readonly statusText = element('span', 'status-text');
-  private readonly menuStatus = element('span', 'service-status');
+  private readonly statusText = element('span');
   private readonly xrStatus = element('span', 'xr-status', 'Starting 3D');
   private readonly notice = element('div', 'notice');
-  private readonly breadcrumbs = element('nav', 'breadcrumbs');
-  private readonly stationBoard = element('section', 'station-board panel');
-  private readonly stopsToggle: HTMLButtonElement;
+  private readonly brand = element('h1', 'brand');
+  private readonly backNav = element('nav', 'scene-nav');
+  private readonly backButton: HTMLButtonElement;
+  private readonly backLabel = element('span', 'back-label');
+  private readonly stationBoard = element('section', 'station-board');
+  private readonly menu: CornerMenu;
   private readonly stationList = element('div', 'station-board-list');
   private readonly routeFeedback = element('div');
-  private readonly filterBar: FilterBar;
-  private readonly drawer: PlaceDrawer;
+  private readonly filterControls: FilterControls;
   private readonly pairing: PairingModal;
   private readonly uploader: UploadPipelineModal;
   private readonly credits: ReturnType<typeof attribution>;
   private readonly liveController: LiveController;
   private readonly liveClient: RealtimeVoice;
   private readonly liveDock: LiveVoiceDock;
-  private readonly reviewModal: ReviewBriefingModal;
   private readonly briefings = new Map<string, BriefingCard>();
-  private comparedPlaces: Place[] = [];
-  private comparisonRun = 0;
-  private comparisonLoading = false;
   private readonly debug = modal('Debug');
   private readonly renderStats = element('p', 'readout');
   private readonly debugLogs = element('pre', 'log-view');
@@ -58,9 +54,6 @@ export class AppShell {
   private readonly audioButton: HTMLButtonElement;
   private readonly vrButton: HTMLButtonElement;
   private readonly xrExit: HTMLButtonElement;
-  private readonly moreButton: HTMLButtonElement;
-  private readonly moreMenu = element('div', 'command-menu');
-  private readonly mobileButtons = new Map<string, HTMLButtonElement>();
   private readonly sound = new SoundEngine();
   private readonly logs: string[] = [];
   private readonly mobile = matchMedia('(max-width: 768px)');
@@ -78,6 +71,9 @@ export class AppShell {
   private place?: Place;
   private dish?: Dish;
   private comparison?: DishComparison;
+  private comparedPlaces: Place[] = [];
+  private comparisonRun = 0;
+  private comparisonLoading = false;
   private dishRequest = 0;
   private inside = false;
   private fit = false;
@@ -85,21 +81,19 @@ export class AppShell {
   private rotation = 0;
   private virtualTable = true;
   private muted = true;
-  private drawerOpen = false;
-  private sheetExpanded = false;
   private filterOpen = false;
   private stopsOpen = false;
-  private stationData: StationData = { predictions: {}, alerts: {} };
-  private stationRequest = 0;
+  private chimeRequest = 0;
   private tripRequest = 0;
   private manifestRequest = 0;
-  private manifest: ViewData['manifest'] = {};
-  private trip: ViewData['trip'] = {};
+  private manifest: Load<RestaurantManifest> = {};
+  private trip: Load<Trip> = {};
   private origin?: { lat: number; lon: number };
   private catalogState: 'loading' | 'live' | 'offline' = 'loading';
   private vehicleSource?: MbtaSource | 'unavailable';
   private noticeTimer?: number;
   private syncingTransit = false;
+  private transitFailures = 0;
   private xrMode: 'none' | 'vr' | 'ar' = 'none';
   private highlightedStops: string[] = [];
   private highlightedPlaces: string[] = [];
@@ -107,55 +101,37 @@ export class AppShell {
 
   constructor(private readonly root: HTMLElement) {
     root.classList.add('app-shell');
-    // The map is the hero: a brand pill and one action float over it, everything else opens on demand.
-    const head = element('header', 'top-bar');
-    const brand = button('FareSight', () => this.showMap(), 'wordmark');
-    brand.title = 'Back to the map';
+    // The map is the hero. The chrome keeps to the corners: the brand, or a back button once you are
+    // deeper than the map, top-left; one menu bottom-right that opens on demand.
     const mark = element('span', 'brand-mark');
     mark.setAttribute('aria-hidden', 'true');
-    brand.prepend(mark);
-    const name = element('h1', 'brand');
-    name.append(brand);
-    this.breadcrumbs.setAttribute('aria-label', 'Scene navigation');
-    // The dot carries the MBTA state. Its wording shows on hover or focus, and stays visible when something is wrong.
-    this.status.tabIndex = 0;
+    this.brand.append(mark, 'FareSight');
+    this.backNav.setAttribute('aria-label', 'Scene navigation');
+    this.backButton = button('', () => this.stepBack(), 'scene-back');
+    this.backButton.append(icon('back'), this.backLabel);
+    this.backNav.append(this.backButton);
+    // The MBTA state is the last line of the menu. A problem also marks the closed menu button.
     this.statusText.setAttribute('role', 'status');
     this.status.append(element('span', 'status-dot'), this.statusText);
-    const pill = element('div', 'brand-pill');
-    pill.append(name, this.status, this.breadcrumbs);
-    this.stopsToggle = button('Stops', () => this.setStopsOpen(!this.stopsOpen, true), 'stops-toggle');
-    this.stopsToggle.prepend(icon('list'));
-    this.stopsToggle.append(icon('chevron'));
-    this.stopsToggle.setAttribute('aria-controls', 'stop-list');
-    this.stopsToggle.setAttribute('aria-expanded', 'false');
-    const lead = element('div', 'top-left');
-    lead.append(pill, this.stopsToggle);
-    const operations = element('div', 'top-actions');
-    this.vrButton = button('Enter VR', () => void this.launchVR(), 'accent');
+    this.vrButton = navItem('vr', 'Enter VR', () => void this.launchVR());
     // Shown once the viewer reports what this device supports, so the label never flips on screen.
     this.vrButton.hidden = true;
-    this.xrExit = button('Exit XR', () => this.engine?.exitXR(), 'accent');
+    this.xrExit = navItem('exit', 'Exit XR', () => this.engine?.exitXR(), 'accent');
     this.xrExit.hidden = true;
-    this.pairButton = button('Pair Quest', () => this.pairing.open(), 'quiet desktop-action');
-    this.audioButton = button('Sound effects', () => this.toggleAudio(), 'quiet switch');
+    this.pairButton = navTool('pair', 'Pair', () => this.pairing.open());
+    this.pairButton.title = 'Pair a Quest headset';
+    this.audioButton = navTool('mute', 'Sound', () => this.toggleAudio());
     this.audioButton.setAttribute('aria-pressed', 'false');
+    // Toggling sound leaves the menu open, so the change can be seen.
+    this.audioButton.dataset.stay = 'true';
     const admin = new AdminModal(() => void this.loadCatalog());
     this.credits = attribution(() => admin.open());
-    this.reviewModal = new ReviewBriefingModal({
-      dismiss: (cardId) => this.dismissReviewCard(cardId),
-      openVenue: (id) => { void this.openBriefingVenue(id); },
-      openDish: (id, dishId) => { void this.openBriefingVenue(id, dishId); },
-      compareDishes: (id, dishId, comparePlaceId, compareDishId) => { void this.openBriefingVenue(id, dishId, compareDishId, comparePlaceId); },
-      viewOnMap: (stopId) => {
-        this.showMap();
-        this.engine?.focusMapStopCamera(stopId);
-      },
-    });
     this.liveController = new LiveController(this.createControlSurface());
     this.liveClient = new RealtimeVoice({
       onState: (state, detail) => {
         this.liveDock.setState(state, detail);
         this.engine?.setVoiceState(state);
+        this.renderMenuBadge();
       },
       onNotice: (detail) => this.liveDock.setNotice(detail),
       onMicrophone: (hasMic, muted, requesting) => this.liveDock.setMicrophone(hasMic, muted, requesting),
@@ -174,39 +150,8 @@ export class AppShell {
       toggleMute: () => this.liveClient.setMuted(!this.liveClient.isMuted),
       sendText: (text) => this.liveClient.sendText(text),
       opened: () => this.settleOverlays('voice'),
+      returnFocus: () => this.menu.focusTrigger(),
     });
-    // Secondary tools live in one menu so the map keeps a single clear call to action.
-    this.moreMenu.id = 'command-menu';
-    this.moreMenu.hidden = true;
-    const menuFoot = element('p', 'menu-status');
-    menuFoot.append(this.menuStatus, this.xrStatus);
-    this.moreMenu.append(
-      this.pairButton,
-      button('Upload 3D', () => this.uploader.open(this.place?.id), 'quiet desktop-action'),
-      this.audioButton, button('Debug', () => this.openDebug(), 'quiet desktop-debug'),
-      button('Credits', this.credits.open, 'quiet'),
-      menuFoot,
-    );
-    this.moreButton = iconButton('more', 'More', () => this.setMenuOpen(this.moreMenu.hidden), 'menu-toggle');
-    this.moreButton.setAttribute('aria-controls', this.moreMenu.id);
-    this.moreButton.setAttribute('aria-expanded', 'false');
-    const more = element('div', 'command-more');
-    more.append(this.moreButton, this.moreMenu);
-    this.moreMenu.addEventListener('click', (event) => {
-      if (event.target instanceof HTMLButtonElement && event.target !== this.audioButton) this.setMenuOpen(false);
-    });
-    document.addEventListener('pointerdown', (event) => {
-      if (!this.moreMenu.hidden && !more.contains(event.target as Node)) this.setMenuOpen(false);
-    });
-    more.addEventListener('keydown', (event) => {
-      if (event.key !== 'Escape' || this.moreMenu.hidden) return;
-      event.preventDefault();
-      this.setMenuOpen(false);
-      this.moreButton.focus();
-    });
-    operations.append(this.vrButton, this.xrExit, this.liveDock.trigger, more);
-    head.append(lead, operations);
-
     this.canvas.setAttribute('aria-label', 'FareSight interactive 3D view');
     this.canvas.tabIndex = 0;
     this.canvasNotice.replaceChildren(message('Loading 3D viewer…'));
@@ -214,85 +159,45 @@ export class AppShell {
     this.notice.hidden = true;
     this.notice.setAttribute('role', 'status');
 
-    const boardHead = element('header', 'station-board-heading');
-    boardHead.append(element('h2', '', 'Explore by stop'), element('p', 'muted', 'Pick a stop to see what is nearby.'));
     this.stationBoard.id = 'stop-list';
     this.stationBoard.setAttribute('aria-label', 'Boston stops');
-    this.stationBoard.append(boardHead, this.stationList, this.routeFeedback);
-    this.stationBoard.addEventListener('keydown', (event) => {
-      if (event.key !== 'Escape' || this.mobile.matches || !this.stopsOpen) return;
-      event.preventDefault();
-      this.setStopsOpen(false);
-      this.stopsToggle.focus();
-    });
+    this.stationBoard.append(this.stationList, this.routeFeedback);
 
-    this.filterBar = new FilterBar(this.filters, (patch) => this.updateFilters(patch),
-      () => void this.locate(), (open) => this.setFilterOpen(open));
-    this.drawer = new PlaceDrawer({
-      showBriefing: (place) => this.showPlaceBriefing(place),
-      toggleComparison: (place) => {
-        if (this.comparedPlaces.some(({ id }) => id === place.id)) this.setComparedPlaces(this.comparedPlaces.filter(({ id }) => id !== place.id));
-        else if (this.comparedPlaces.length < 3) this.setComparedPlaces([...this.comparedPlaces, place]);
-        else this.notify('Compare up to three restaurants. Remove one to add another.');
-      },
-      clearComparison: () => this.setComparedPlaces([]),
-      openComparison: () => void this.openRestaurantComparison(),
-      close: () => {
-        this.drawerOpen = false;
-        this.renderPanels();
-        // The current step of the trail reopens the card, so that is where focus lands on larger screens.
-        (this.mobile.matches ? this.mobileButtons.get('Venue') : this.breadcrumbs.querySelector<HTMLElement>('[aria-current]'))?.focus();
-      },
-      toggleSheet: () => { this.sheetExpanded = !this.sheetExpanded; this.renderPanels(); },
-      showPlace: (place) => { void this.showVenue(place); },
-      enterRoom: () => void this.enterRoom(),
-      openDish: (dish, compareId, comparePlaceId) => void this.showDish(dish, compareId, comparePlaceId),
-      changeFit: (enabled, seating) => void this.setFit(enabled, seating),
-      rotate: (degrees) => this.setDishRotation(degrees),
-      table: (useVirtual) => this.setTable(useVirtual),
-      sendPlace: () => this.sendCurrent(),
-      sendTrip: () => this.sendTrip(),
-      clearFilters: () => this.updateFilters({ craving: 'all', maxBudget: 50, groupSize: 1, familyVisit: false }),
-      retryStation: () => void this.refreshStation(),
-      retryTrip: () => void this.refreshTrip(),
-      retryManifest: () => void this.refreshManifest(),
-    });
+    this.filterControls = new FilterControls(this.filters, (patch) => this.updateFilters(patch), () => void this.locate());
     this.pairing = new PairingModal((data) => void this.receivePair(data), (paired) => {
-      this.pairButton.textContent = paired ? 'Paired' : 'Pair Quest';
-      this.mobileButtons.get('Pair')?.setAttribute('aria-label', paired ? 'Paired devices' : 'Pair device');
+      setNavItem(this.pairButton, paired ? 'Paired' : 'Pair');
     });
     this.uploader = new UploadPipelineModal({
       places: () => this.places,
       published: (job, open, current) => this.handlePublication(job, open, current),
     });
-    const tabs = element('nav', 'phone-tabs');
-    tabs.setAttribute('aria-label', 'Phone companion');
-    for (const [label, action] of [
-      ['Explore', () => this.showMap()],
-      ['Filters', () => this.setFilterOpen(!this.filterOpen)],
-      ['Venue', () => this.openCompanionVenue()],
-      ['Upload', () => this.uploader.open(this.place?.id)],
-      ['Pair', () => this.pairing.open()],
-    ] as const) {
-      const tab = button(label, action, 'phone-tab');
-      tab.prepend(icon(tabIcons[label]));
-      tabs.append(tab);
-      this.mobileButtons.set(label, tab);
-    }
-
-    root.replaceChildren(this.canvas, this.canvasNotice, head, this.stationBoard, this.filterBar.root, this.drawer.root,
-      this.reviewModal.root, this.liveDock.root, tabs, this.notice);
-    document.addEventListener('keydown', (event) => {
-      if (!(event.target instanceof Element && event.target.closest('dialog[open]'))) this.reviewModal.dismissOnEscape(event);
+    this.menu = new CornerMenu({
+      filters: this.filterControls.root,
+      stops: this.stationBoard,
+      primary: [this.liveDock.trigger, this.vrButton, this.xrExit],
+      tools: [
+        this.pairButton,
+        navTool('upload', 'Upload', () => this.uploader.open(this.place?.id)),
+        this.audioButton,
+        navTool('info', 'Credits', this.credits.open),
+        navTool('bug', 'Debug', () => this.openDebug()),
+      ],
+      status: this.status,
+      setOpen: (open) => this.setFilterOpen(open, false),
+      showStops: (open) => (open ? this.setStopsOpen(true, true) : this.setFilterOpen(true, false)),
     });
-    this.debug.body.append(this.renderStats, this.debugLogs,
+    this.liveDock.trigger.classList.add('menu-item');
+
+    // The chrome comes first in the document, so Tab reaches Back and the menu before the map's labels.
+    root.replaceChildren(this.brand, this.backNav, this.menu.root, this.liveDock.root, this.canvas, this.canvasNotice, this.notice);
+    this.debug.body.append(this.renderStats, this.xrStatus, this.debugLogs,
       button('Reset camera', () => this.engine?.resetCamera()),
       button('Send debug logs', () => void this.sendDebugLogs(), 'quiet'));
     this.mobile.addEventListener('change', () => this.renderPanels());
     this.sound.setMuted(true);
     this.sound.onStateChange = () => this.renderAudioState();
-    this.filterBar.setStops(this.stops);
-    this.renderBreadcrumbs();
+    this.filterControls.setStops(this.stops);
+    this.renderBack();
     this.applyFilters();
     this.renderStatus();
     this.renderPanels();
@@ -301,10 +206,13 @@ export class AppShell {
   async start() {
     void this.loadCatalog();
     void this.refreshTransit();
+    // Trains are polled on their own, faster timer: MBTA refreshes positions every few seconds,
+    // and the map glides each train from one fix to the next, so fresher fixes mean truer motion.
+    window.setInterval(() => {
+      if (document.visibilityState === 'visible') void this.refreshTransit();
+    }, 6_000);
     window.setInterval(() => {
       if (document.visibilityState !== 'visible') return;
-      void this.refreshTransit();
-      if (this.stop) void this.refreshStation(false);
       if (this.place) void this.refreshTrip(false);
     }, pollInterval);
     window.addEventListener('online', () => {
@@ -313,6 +221,14 @@ export class AppShell {
       if ((this.mode === 'venue' || this.mode === 'dish') && this.manifest.offline) void this.refreshManifest();
     });
     window.addEventListener('resize', () => this.engine?.resize());
+    // Escape steps back one level. It only acts while the 3D view or the back button has the keyboard,
+    // so a menu, panel, field or dialog that closes on Escape keeps the key to itself.
+    window.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || this.mode === 'map' || document.querySelector('dialog[open]')) return;
+      const focus = document.activeElement;
+      if (focus && focus !== document.body && focus !== this.canvas && focus !== this.backButton) return;
+      this.stepBack();
+    });
     window.addEventListener('pagehide', (event) => {
       this.liveClient.destroy();
       if (!event.persisted) {
@@ -342,7 +258,7 @@ export class AppShell {
           this.root.dataset.xr = this.xrMode;
           this.vrButton.hidden = this.xrMode !== 'none';
           this.xrExit.hidden = this.xrMode === 'none';
-          this.vrButton.textContent = state.vrSupported ? 'Enter VR' : 'Reset view';
+          setNavItem(this.vrButton, state.vrSupported ? 'Enter VR' : 'Reset view', state.vrSupported ? 'vr' : 'reset');
           this.vrButton.classList.toggle('accent', state.vrSupported);
           this.vrButton.dataset.supported = String(state.vrSupported);
           this.xrStatus.textContent = state.activeMode === 'ar' ? 'AR table active'
@@ -370,19 +286,15 @@ export class AppShell {
     } catch (error) {
       this.engine?.destroy();
       this.engine = undefined;
-      this.canvasNotice.replaceChildren(message('3D viewer unavailable. Use the stop list to keep exploring.', true));
+      // Stations, venues and dishes are 3D scenes, so without the viewer only the stop list remains.
+      this.canvasNotice.replaceChildren(message('3D viewer unavailable on this device, so stations and menus cannot open.', true));
       this.log(errorText(error));
       this.vrButton.hidden = true;
       this.xrStatus.textContent = '3D viewer unavailable';
       this.root.dataset.viewer = 'failed';
-      // Without the map there is nothing to click, so the list becomes the way in.
+      // The stop list still shows how many places match at each stop.
       this.setStopsOpen(true);
     }
-  }
-
-  private setMenuOpen(open: boolean) {
-    this.moreMenu.hidden = !open;
-    this.moreButton.setAttribute('aria-expanded', String(open));
   }
 
   private findStop(id: string) { return this.stops.find((stop) => stop.stop_id === id); }
@@ -393,10 +305,18 @@ export class AppShell {
         : this.vehicleSource === 'simulated' ? 'Simulated trains'
           : this.vehicleSource === 'unavailable' ? 'Trains unavailable' : 'Checking MBTA';
     const source = this.catalogState === 'offline' ? 'offline' : this.vehicleSource ?? 'pending';
-    if (this.statusText.textContent !== text) this.statusText.textContent = this.menuStatus.textContent = text;
-    this.status.dataset.source = this.menuStatus.dataset.source = source;
-    // Only a problem earns words on the pill. Everything else is a dot with a tooltip.
+    if (this.statusText.textContent !== text) this.statusText.textContent = text;
+    this.status.dataset.source = source;
+    // A problem turns the dot red and ringed, and marks the closed menu button too.
     this.status.dataset.alert = String(source === 'offline' || source === 'unavailable');
+    this.renderMenuBadge();
+  }
+
+  /** Red for an MBTA problem; sunflower while a voice session runs or the budget is narrowed. */
+  private renderMenuBadge() {
+    const voice = this.liveClient.state;
+    const active = filtersNarrowed(this.filters) || voice === 'listening' || voice === 'thinking' || voice === 'speaking' || voice === 'connecting';
+    this.menu.setBadge(this.status.dataset.alert === 'true' ? 'alert' : active ? 'active' : 'none');
   }
 
   private async loadCatalog() {
@@ -417,10 +337,10 @@ export class AppShell {
     }
     if (!this.stops.length) this.routeFeedback.replaceChildren(message('The catalog has no stops.'), button('Reload stops', () => void this.loadCatalog(), 'quiet'));
     this.renderStatus();
-    this.filterBar.setStops(this.stops);
+    this.filterControls.setStops(this.stops);
     if (this.engineReady) this.engine?.setStops(this.stops);
     this.applyFilters();
-    this.renderBreadcrumbs();
+    this.renderBack();
   }
 
   private async refreshTransit() {
@@ -429,11 +349,14 @@ export class AppShell {
     try {
       const { vehicles, source } = await api.vehicles();
       this.vehicleSource = source;
+      this.transitFailures = 0;
       if (this.engineReady) this.engine?.setLiveVehicles(vehicles.map((vehicle) => ({
         id: vehicle.id, route_id: vehicle.route_id, lat: vehicle.lat, lon: vehicle.lon, bearing: vehicle.bearing ?? undefined,
         line_color: ROUTE_COLORS[vehicle.route_id] ?? '#A8B3CF', label: vehicle.route_id,
       })));
     } catch {
+      // One dropped request leaves the trains where they are; only a run of failures clears them.
+      if (++this.transitFailures < 3) return;
       this.vehicleSource = 'unavailable';
       if (this.engineReady) this.engine?.setLiveVehicles([]);
     } finally {
@@ -442,29 +365,27 @@ export class AppShell {
     }
   }
 
-  private renderBreadcrumbs() {
-    const names = [sceneTitles.map, this.stop?.name ?? sceneTitles.station, this.place?.name ?? sceneTitles.venue, this.dish?.name ?? sceneTitles.dish];
-    // The trail lists only places you can go back to. On a fresh map there is nothing to show.
-    const nodes = (Object.keys(sceneTitles) as SceneMode[]).flatMap((mode, index) => {
-      const available = mode === 'map' || (mode === 'station' && this.stop) || (mode === 'venue' && this.place) || (mode === 'dish' && this.dish);
-      if (!available) return [];
-      const node = button(names[index], () => this.navigate(mode), 'crumb');
-      node.title = names[index];
-      if (mode === this.mode) node.setAttribute('aria-current', 'page');
-      if (!index) return [node];
-      const divider = element('span', 'crumb-divider');
-      divider.setAttribute('aria-hidden', 'true');
-      return [divider, node];
-    });
-    this.breadcrumbs.replaceChildren(...nodes);
-    this.breadcrumbs.hidden = nodes.length < 2;
-    // On phones the trail scrolls sideways; keep its newest step in view.
-    this.breadcrumbs.scrollLeft = this.breadcrumbs.scrollWidth;
+  /** The back button names where one step back goes: the map, the station, the restaurant. */
+  private renderBack() {
+    const target = this.mode === 'dish' ? this.place?.name ?? 'Restaurant'
+      : this.mode === 'venue' ? this.stop?.name ?? 'Station'
+        : this.mode === 'station' ? 'Map' : undefined;
+    const held = document.activeElement === this.backButton;
+    this.backNav.hidden = !target;
+    this.brand.hidden = !!target;
+    if (target) {
+      this.backLabel.textContent = target;
+      this.backButton.setAttribute('aria-label', `Back to ${target}`);
+      this.backButton.title = `Back to ${target} (Esc)`;
+    } else if (held) {
+      // Back on the map the button is gone, so the keyboard lands on the map itself.
+      this.canvas.focus({ preventScroll: true });
+    }
   }
 
   private renderStationBoard(matched: ReadonlySet<string>) {
     const counts = countPreviewsByStop(this.places, matched);
-    const key = JSON.stringify([this.filters.familyVisit, this.highlightedStops, ...this.stops.map((stop) => [stop.stop_id, counts.get(stop.stop_id)])]);
+    const key = JSON.stringify([this.highlightedStops, ...this.stops.map((stop) => [stop.stop_id, counts.get(stop.stop_id)])]);
     if (this.stationList.dataset.summary === key) return;
     this.stationList.dataset.summary = key;
     this.stationList.replaceChildren();
@@ -472,13 +393,17 @@ export class AppShell {
     for (const stop of this.stops) {
       const previews = counts.get(stop.stop_id);
       const count = previews?.matching ?? 0;
-      if (this.filters.familyVisit && count === 0) continue;
-      const row = button('', () => this.showStation(stop), 'station-row');
+      // Picking a stop takes you into its scene, which closes the menu. Without the 3D viewer
+      // there is no scene to open, so the list stays up.
+      const row = button('', () => {
+        this.showStation(stop);
+        if (!this.engineReady) this.setStopsOpen(true);
+      }, 'station-row');
+      row.dataset.stay = 'true';
       const name = element('strong');
       name.append(element('span', 'station-name', stop.name));
-      if (previews?.published3D) name.append(previewBadge());
       row.append(lineDots(stop), name, element('span', 'station-count', String(count)));
-      row.setAttribute('aria-label', `${stop.name}, ${count} matching ${count === 1 ? 'place' : 'places'}${describe3DCount(previews)}`);
+      row.setAttribute('aria-label', `${stop.name}, ${count} matching ${count === 1 ? 'place' : 'places'}`);
       row.dataset.stop = stop.stop_id;
       row.dataset.highlighted = String(highlighted.has(stop.stop_id));
       // Mirror list focus on the 3D map so the two read as one control.
@@ -486,90 +411,41 @@ export class AppShell {
       for (const type of ['pointerleave', 'blur']) row.addEventListener(type, () => this.engine?.setHoveredStop(undefined));
       this.stationList.append(row);
     }
-    if (this.filters.familyVisit && !this.stationList.children.length) {
-      this.stationList.append(message('No stops match the family visit filters.'));
-    }
   }
 
+  /** The menu is open while it shows the filters (its main level) or the stop list. */
   private renderPanels() {
-    this.root.dataset.filterOpen = String(this.filterOpen);
     this.root.dataset.scene = this.mode;
-    // Phones keep the list as the Explore sheet. Larger screens open it from the Stops toggle.
-    this.stationBoard.hidden = this.mode !== 'map' || !(this.stopsOpen || this.mobile.matches);
-    this.stopsToggle.hidden = this.mode !== 'map';
-    this.stopsToggle.setAttribute('aria-expanded', String(this.stopsOpen));
-    this.filterBar.setOpen(this.filterOpen);
-    const shown = this.drawerOpen && this.mode !== 'map' && !(this.mobile.matches && this.filterOpen);
-    this.root.dataset.drawer = String(shown);
-    this.drawer.mountComparison(shown ? undefined : this.stationBoard);
-    if (shown) this.renderDrawer();
-    else this.drawer.hide();
-    this.drawer.expanded(this.sheetExpanded);
-    this.mobileButtons.get('Explore')?.setAttribute('aria-pressed', String(!this.filterOpen && this.mode === 'map'));
-    this.mobileButtons.get('Filters')?.setAttribute('aria-pressed', String(this.filterOpen));
-    this.mobileButtons.get('Venue')?.setAttribute('aria-pressed', String(shown));
+    this.menu.render(this.filterOpen || this.stopsOpen, this.stopsOpen);
   }
 
-  private renderDrawer(focus = false) {
-    this.drawer.setComparison(this.comparedPlaces, this.comparisonLoading);
-    focus &&= !this.liveDock.root.contains(document.activeElement);
-    if (!this.drawerOpen || (this.mobile.matches && this.filterOpen)) return;
-    if (this.mode === 'station' && this.stop) {
-      const highlights = new Set(this.highlightedPlaces);
-      const places = placesAt(this.filtered, this.stop, this.filters);
-      const shown = new Set(places.map(({ id }) => id));
-      if (this.xrMode === 'none' && !this.mobile.matches) {
-        places.push(...this.places.filter(({ id, stop_id }) => stop_id === this.stop?.stop_id && highlights.has(id) && !shown.has(id)));
-      }
-      this.drawer.station(this.stop, places, this.filters, focus, highlights);
-      this.updateStationDrawer();
-    }
-    if ((this.mode === 'venue' || this.mode === 'dish') && this.place) {
-      this.drawer.venue({
-        place: this.place, stop: this.stop, filters: this.filters, manifest: this.manifest, trip: this.trip, dish: this.dish,
-        places: this.places, comparison: this.comparison, fit: this.fit, seating: this.seating, rotation: this.rotation, inside: this.inside,
-        table: this.virtualTable ? 'virtual' : 'passthrough', originName: this.findStop(this.filters.startStopId)?.name,
-        highlightedDishId: this.highlightedDishId,
-      }, focus);
-    }
-  }
-
-  private setFilterOpen(open: boolean) {
-    const refocus = !open && this.filterBar.holdsFocus();
+  /** Opens or closes the menu on its main level, where the filters are. */
+  private setFilterOpen(open: boolean, focus = true) {
+    const opening = open && !this.menu.isOpen;
     this.filterOpen = open;
+    this.stopsOpen = false;
     this.renderPanels();
-    if (open) this.settleOverlays('filters');
-    else if (this.mobile.matches) this.mobileButtons.get('Filters')?.focus();
-    else if (refocus) this.filterBar.focusSummary();
+    if (opening) this.settleOverlays('menu');
+    if (open && focus) this.filterControls.focusFirst();
   }
 
+  /** The stop list is the menu's second level, so showing it opens the menu too. */
   private setStopsOpen(open: boolean, focus = false) {
     this.stopsOpen = open;
+    this.filterOpen = false;
     this.renderPanels();
-    if (!open) return;
-    this.settleOverlays('stops');
-    if (focus) this.stationList.querySelector<HTMLElement>('.station-row')?.focus({ preventScroll: true });
+    if (open) this.settleOverlays('menu');
+    if (open && focus) this.stationList.querySelector<HTMLElement>('.station-row')?.focus({ preventScroll: true });
   }
 
-  /** Floating panels never stack: opening one closes any other it would cover. */
-  private settleOverlays(opened: 'stops' | 'filters' | 'voice') {
-    if (this.mobile.matches) return;
-    const panels = { stops: this.stationBoard, filters: this.filterBar.panel, voice: this.liveDock.root };
-    const box = panels[opened].getBoundingClientRect();
-    if (!box.width) return;
-    const gap = 8;
-    let changed = false;
-    for (const name of ['stops', 'filters', 'voice'] as const) {
-      if (name === opened) continue;
-      const other = panels[name].getBoundingClientRect();
-      if (!other.width || box.right + gap < other.left || box.left - gap > other.right
-        || box.bottom + gap < other.top || box.top - gap > other.bottom) continue;
-      if (name === 'stops') this.stopsOpen = false;
-      else if (name === 'filters') this.filterOpen = false;
-      else this.liveDock.setOpen(false);
-      changed = true;
+  /** A phone has room for one opened thing in the bottom corner: the menu or the voice transcript. */
+  private settleOverlays(opened: 'menu' | 'voice') {
+    if (!this.mobile.matches) return;
+    if (opened === 'menu') this.liveDock.setOpen(false);
+    else if (this.filterOpen || this.stopsOpen) {
+      this.filterOpen = this.stopsOpen = false;
+      this.renderPanels();
     }
-    if (changed) this.renderPanels();
   }
 
   private updateFilters(patch: Partial<Filters>) {
@@ -586,9 +462,9 @@ export class AppShell {
   private applyFilters() {
     this.filtered = matchingPlaces(this.places, this.filters);
     const matched = new Set(this.filtered.map((place) => place.id));
-    this.filterBar.render(this.filters, this.filtered.length);
+    this.filterControls.render(this.filters, this.filtered.length);
+    this.renderMenuBadge();
     this.renderStationBoard(matched);
-    this.renderDrawer();
     if (!this.engineReady) return;
     this.engine?.setFilters(this.filters);
     this.engine?.setPlaces(this.places, matched);
@@ -624,18 +500,47 @@ export class AppShell {
 
   private navigate(mode: SceneMode) {
     if (mode === 'map') this.showMap();
-    if (mode === 'station' && this.stop) this.showStation(this.stop);
+    if (mode === 'station') {
+      // The map keeps no selection, so a headset's Station button on the map opens the start stop.
+      const stop = this.stop ?? this.findStop(this.filters.startStopId) ?? this.stops[0];
+      if (stop) this.showStation(stop);
+    }
     if (mode === 'venue' && this.place) void this.showVenue(this.place);
     if (mode === 'dish' && this.dish) void this.showDish(this.dish, this.comparison?.dish.id, this.comparison?.place.id);
   }
 
+  /** One step back towards the map: dish, venue, station, map. */
+  private stepBack() {
+    if (this.mode === 'dish') this.navigate('venue');
+    else if (this.mode === 'venue') this.navigate('station');
+    else if (this.mode === 'station') this.showMap();
+  }
+
+  /**
+   * The map is a clean slate. Every way home ends here (the back button, Escape, a headset's
+   * own buttons, the voice assistant), so this is where the selection is dropped: no stop, venue
+   * or dish stays chosen, and no panel stays open.
+   */
   private showMap() {
     ++this.navigation;
     if (this.mode !== 'map') this.sound.playBack();
     this.mode = 'map';
+    this.stop = undefined;
+    this.place = undefined;
+    this.dish = undefined;
+    this.comparison = undefined;
+    this.highlightedDishId = undefined;
+    this.manifest = {};
+    this.trip = {};
+    this.inside = this.fit = false;
+    ++this.dishRequest;
+    ++this.tripRequest;
+    ++this.manifestRequest;
+    ++this.chimeRequest;
     this.filterOpen = false;
-    this.drawerOpen = false;
-    this.renderBreadcrumbs();
+    // Without the 3D map the stop list is the only way in, so it is the one thing left open.
+    this.stopsOpen = this.root.dataset.viewer === 'failed';
+    this.renderBack();
     this.renderPanels();
     this.renderScene();
   }
@@ -643,10 +548,7 @@ export class AppShell {
   private showStation(stop: Stop) {
     ++this.navigation;
     const changed = this.stop?.stop_id !== stop.stop_id || this.mode !== 'station';
-    const sheet = this.mobile.matches;
-    const arriving = sheet && this.mode === 'map';
-    this.drawer.root.classList.toggle('arriving', arriving);
-    if (arriving) this.drawer.root.addEventListener('animationend', () => this.drawer.root.classList.remove('arriving'), { once: true });
+    // Places are picked from the pins in the 3D neighbourhood; nothing slides in over it.
     this.stop = stop;
     this.place = undefined;
     this.dish = undefined;
@@ -655,63 +557,31 @@ export class AppShell {
     this.inside = this.fit = false;
     this.mode = 'station';
     this.filterOpen = false;
-    this.drawerOpen = sheet || (this.xrMode === 'none' && this.comparedPlaces.length > 0);
-    this.sheetExpanded = false;
-    this.renderBreadcrumbs();
+    this.stopsOpen = false;
+    this.renderBack();
     this.renderPanels();
-    this.renderDrawer(changed);
     if (changed) {
       this.sound.playSelect();
       this.sound.playPinsRise();
-      this.stationData = { predictions: {}, alerts: {} };
-      this.updateStationDrawer();
-      void this.refreshStation();
+      void this.chimeForArrivals(stop);
       this.renderScene();
     }
   }
 
-  private updateStationDrawer() {
-    if (!this.stop) return;
-    const campus = RIDE_TIMES[initialFilters.startStopId]?.[this.stop.stop_id]?.minutes;
-    this.drawer.updateStation(this.stop, this.stationData, this.filters.familyVisit ? campus : undefined);
-  }
-
-  private async refreshStation(reset = true) {
-    if (!this.stop || this.mode !== 'station') return;
-    const stop = this.stop;
-    const id = ++this.stationRequest;
-    if (reset) {
-      this.stationData = { predictions: {}, alerts: {} };
-      this.updateStationDrawer();
-    }
-    const [predictions, alerts] = await Promise.allSettled([api.predictions(stop.stop_id), api.alerts()]);
-    if (id !== this.stationRequest || this.stop?.stop_id !== stop.stop_id || this.mode !== 'station') return;
-    this.stationData = {
-      predictions: predictions.status === 'fulfilled' ? { data: predictions.value } : { error: 'Train predictions are unavailable. Try refreshing.' },
-      alerts: alerts.status === 'fulfilled' ? { data: alerts.value } : { error: 'Unable to check alerts. Check MBTA for current service.' },
-    };
-    this.updateStationDrawer();
-    if (reset && predictions.status === 'fulfilled' && predictions.value.predictions.some((entry) => entry.arrival_min !== null)) this.sound.playTrainChime();
-  }
-
-  private openCompanionVenue() {
-    if (this.mode !== 'map') {
-      this.filterOpen = false;
-      this.drawerOpen = true;
-      this.sheetExpanded = true;
-      this.renderPanels();
-    } else {
-      const stop = this.findStop(this.filters.startStopId) ?? this.stops[0];
-      if (stop) this.showStation(stop);
-      else this.notify('No venues are available. Reload the stop list.');
-    }
+  /** Arriving at a station with a timed train on its way rings the train chime. */
+  private async chimeForArrivals(stop: Stop) {
+    const request = ++this.chimeRequest;
+    if (this.muted) return;
+    const arrivals = await api.predictions(stop.stop_id).catch(() => undefined);
+    if (request !== this.chimeRequest || this.mode !== 'station' || this.stop?.stop_id !== stop.stop_id) return;
+    if (arrivals?.predictions.some((entry) => entry.arrival_min !== null)) this.sound.playTrainChime();
   }
 
   private async showVenue(place: Place, options?: { inside?: boolean; current?: () => boolean }) {
     const current = options?.current ?? (() => true);
     if (!current()) return;
     const changed = this.place?.id !== place.id;
-    let prepared: ViewData['manifest'] | undefined;
+    let prepared: Load<RestaurantManifest> | undefined;
     if (options?.current && (changed || !this.manifest.data)) {
       const requestedFrom = this.navigation;
       prepared = await this.loadManifest(place);
@@ -737,12 +607,10 @@ export class AppShell {
     this.dishRequest++;
     this.mode = 'venue';
     this.filterOpen = false;
-    this.drawerOpen = true;
-    this.sheetExpanded = false;
+    this.stopsOpen = false;
     if (changed || cameFromDish) this.sound.playSelect();
-    this.renderBreadcrumbs();
+    this.renderBack();
     this.renderPanels();
-    this.renderDrawer(true);
     this.renderScene();
     void this.refreshTrip();
     const navigation = this.navigation;
@@ -782,7 +650,6 @@ export class AppShell {
       }
       if (this.dish) apply(this.dish);
     } else if (this.comparison?.place.id !== placeId) return;
-    this.renderDrawer();
     if (this.mode === 'venue' || this.mode === 'dish') this.renderScene();
   }
 
@@ -794,11 +661,10 @@ export class AppShell {
     const manifest = await this.loadManifest(place);
     if (request !== this.manifestRequest || !this.isCurrentVenue(navigation, place.id)) return;
     this.manifest = manifest;
-    this.renderDrawer();
     if (this.mode === 'venue' || this.mode === 'dish') this.renderScene();
   }
 
-  private async loadManifest(place: Place): Promise<ViewData['manifest']> {
+  private async loadManifest(place: Place): Promise<Load<RestaurantManifest>> {
     try {
       const data = await api.manifest(place.id);
       for (const { dish } of data.menu_items) {
@@ -818,11 +684,8 @@ export class AppShell {
     const from = this.filters.startStopId;
     const origin = this.origin;
     const id = ++this.tripRequest;
-    if (reset) {
-      this.trip = {};
-      this.renderDrawer();
-    }
-    let state: ViewData['trip'];
+    if (reset) this.trip = {};
+    let state: Load<Trip>;
     try {
       state = { data: await api.trip(from, place, origin) };
     } catch {
@@ -832,7 +695,6 @@ export class AppShell {
     }
     if (id !== this.tripRequest || this.place?.id !== place.id) return;
     this.trip = state;
-    this.renderDrawer();
   }
 
   private async enterRoom() {
@@ -844,7 +706,6 @@ export class AppShell {
     ++this.navigation;
     this.inside = true;
     this.sound.playSelect();
-    this.renderDrawer();
     this.renderScene();
   }
 
@@ -869,8 +730,6 @@ export class AppShell {
       const item = manifest?.data?.menu_items.find((entry) => entry.dish.id === compareId);
       if (!venue || !item || !isSplat(item.dish_asset)) {
         this.notify('The comparison dish does not have a published 3D preview.');
-        const select = this.drawer.root.querySelector<HTMLSelectElement>('select[data-control="compare"]');
-        if (select) select.value = this.comparison?.dish.id ?? '';
         return false;
       }
       comparison = { place: venue, dish: item.dish, asset: item.dish_asset, offline: manifest?.offline };
@@ -880,12 +739,11 @@ export class AppShell {
     this.dish = dish;
     this.comparison = comparison;
     if (previous !== dish.id) this.rotation = 0;
-    this.drawerOpen = true;
     this.filterOpen = false;
+    this.stopsOpen = false;
     this.sound.playSelect();
-    this.renderBreadcrumbs();
+    this.renderBack();
     this.renderPanels();
-    this.renderDrawer(previous !== dish.id);
     this.renderScene();
     return true;
   }
@@ -893,17 +751,15 @@ export class AppShell {
   private async setFit(enabled: boolean, seating: Seating) {
     this.fit = enabled;
     this.seating = seating;
-    this.renderDrawer();
     if (enabled && !this.inside) await this.enterRoom();
     else this.engine?.setWillWeFit(enabled, this.filters.groupSize, seating);
   }
 
+  /** The venues the voice assistant is comparing. There is no tray on screen; the result is a briefing. */
   private setComparedPlaces(places: Place[]): void {
     this.comparisonRun++;
     this.comparisonLoading = false;
     this.comparedPlaces = places;
-    this.renderDrawer();
-    if (places.length && this.mode === 'map' && !this.mobile.matches && !this.stopsOpen) this.setStopsOpen(true);
   }
 
   private async openRestaurantComparison(current = () => true): Promise<boolean> {
@@ -917,7 +773,6 @@ export class AppShell {
     const navigation = this.navigation;
     const request = ++this.comparisonRun;
     this.comparisonLoading = true;
-    this.drawer.setComparison(this.comparedPlaces, true);
     try {
       const decisions = await Promise.all(pairs.map(({ place, stop }) => loadPlaceDecision(place, stop, filters)));
       if (!current() || request !== this.comparisonRun || navigation !== this.navigation) return false;
@@ -930,33 +785,8 @@ export class AppShell {
       if (current() && request === this.comparisonRun && navigation === this.navigation) this.notify(errorText(error));
       return false;
     } finally {
-      if (request === this.comparisonRun) {
-        this.comparisonLoading = false;
-        this.drawer.setComparison(this.comparedPlaces, false);
-      }
+      if (request === this.comparisonRun) this.comparisonLoading = false;
     }
-  }
-
-  private showPlaceBriefing(place: Place): void {
-    const stop = this.findStop(place.stop_id);
-    if (!stop) return;
-    const filters = this.filters;
-    const navigation = this.navigation;
-    let details = placeDecision(place, stop, filters);
-    let web: LiveReviewsResponse | undefined;
-    let card = buildPlaceBriefingCard(details);
-    this.showReviewCard(card);
-    const update = () => {
-      if (!this.isCurrentVenue(navigation, place.id) || this.briefings.get(card.id) !== card) return;
-      card = buildPlaceBriefingCard(details, web);
-      this.briefings.set(card.id, card);
-      this.renderReviewCards();
-    };
-    void loadPlaceDecision(place, stop, filters).then((fresh) => { details = fresh; update(); }).catch(() => {});
-    void loadLiveReviews(place.id).then((fresh) => {
-      web = fresh;
-      update();
-    }).catch(() => {});
   }
 
   private showReviewCard(card: BriefingCard, mode: BriefingMode = 'add'): void {
@@ -966,32 +796,18 @@ export class AppShell {
       if (!oldest.done) this.briefings.delete(oldest.value);
     }
     this.briefings.set(card.id, card);
-    this.renderReviewCards(card.id);
+    this.renderReviewCards();
   }
 
-  private renderReviewCards(activeId?: string): void {
-    const cards = [...this.briefings.values()];
-    if (this.xrMode === 'none') this.reviewModal.show(cards, activeId);
-    else this.reviewModal.hide();
-    this.engine?.setReviewCards(cards);
+  /** Briefings are clipboards around the viewer in a headset. A flat screen keeps them for VR but shows none. */
+  private renderReviewCards(): void {
+    this.engine?.setReviewCards([...this.briefings.values()]);
   }
 
   private dismissReviewCard(cardId?: string): void {
     if (cardId === undefined) this.briefings.clear();
     else this.briefings.delete(cardId);
     this.renderReviewCards();
-  }
-
-  private async openBriefingVenue(placeId: string, dishId?: string, compareDishId?: string, comparePlaceId?: string): Promise<void> {
-    const place = this.places.find(({ id }) => id === placeId);
-    if (!place) return;
-    const opening = this.showVenue(place, { inside: true });
-    const navigation = this.navigation;
-    await opening;
-    if (!dishId || !this.isCurrentVenue(navigation, placeId)) return;
-    const dish = this.manifest.data?.menu_items.find((item) => item.dish.id === dishId && item.dish_asset)?.dish;
-    if (dish) await this.showDish(dish, compareDishId, comparePlaceId);
-    else this.notify('This dish does not have a published 3D preview.');
   }
 
   private isCurrentVenue(navigation: number, placeId: string): boolean {
@@ -1002,7 +818,6 @@ export class AppShell {
     this.virtualTable = useVirtual;
     this.engine?.setPassthroughFallback(useVirtual);
     if (announce && !useVirtual && this.xrMode !== 'ar') this.notify('Passthrough takes effect in an immersive AR session.');
-    this.renderDrawer();
   }
 
   private renderScene() {
@@ -1029,7 +844,7 @@ export class AppShell {
           await opened;
         } else await engine.setScene(mode);
       } catch (error) {
-        if (version === this.sceneVersion) this.notify('Could not display this 3D view. The details are still available.');
+        if (version === this.sceneVersion) this.notify('Could not display this 3D view.');
         this.log(errorText(error));
       }
     })();
@@ -1064,26 +879,15 @@ export class AppShell {
   }
 
   private renderAudioState(): void {
-    // The switch keeps its label; only its pressed state says whether sound is actually playing.
-    this.audioButton.setAttribute('aria-pressed', String(!this.muted && this.sound.running));
+    // The entry keeps its label. Its icon and pressed state say whether sound is actually playing.
+    const playing = !this.muted && this.sound.running;
+    this.audioButton.setAttribute('aria-pressed', String(playing));
+    setNavItem(this.audioButton, 'Sound', playing ? 'sound' : 'mute');
   }
 
   private setDishRotation(degrees: number): void {
     this.rotation = degrees;
     this.engine?.setDishRotation(degrees * Math.PI / 180);
-    this.drawer.setRotation(degrees);
-  }
-
-  private sendCurrent() {
-    if (!this.place) return;
-    const sent = this.pairing.send(this.dish ? { type: 'open_dish', place_id: this.place.id, dish_id: this.dish.id }
-      : { type: 'open_place', place_id: this.place.id });
-    if (sent) this.notify('Sent to the paired device.');
-  }
-
-  private sendTrip() {
-    if (!this.trip.data) { this.notify('Wait for the trip estimate before sending.'); return; }
-    if (this.pairing.send({ type: 'send_trip', trip: this.trip.data })) this.notify('Trip sent to the paired device.');
   }
 
   private async receivePair(message: PairMessage) {
@@ -1184,12 +988,13 @@ export class AppShell {
         comparePlaceId: this.comparison?.place.id,
         inside: this.inside,
         fit: this.fit,
+        // The drawer is gone; the assistant's view of it stays closed.
+        drawerOpen: false,
+        sheetExpanded: false,
         seating: this.seating,
         rotation: this.rotation,
         virtualTable: this.virtualTable,
         muted: this.muted || !this.sound.running,
-        drawerOpen: this.drawerOpen,
-        sheetExpanded: this.sheetExpanded,
         filterOpen: this.filterOpen,
         xrMode: this.xrMode,
         manifest: this.manifest.data,
@@ -1205,13 +1010,7 @@ export class AppShell {
       showStation: (stop) => this.showStation(stop),
       showVenue: (place, options) => this.showVenue(place, options),
       showDish: (dish, compareId, comparePlaceId, current) => this.showDish(dish, compareId, comparePlaceId, current),
-      setComparedPlaces: (places) => {
-        if (places.length && !this.drawerOpen && this.mode !== 'map' && this.xrMode === 'none' && !this.mobile.matches) {
-          this.drawerOpen = true;
-          this.renderPanels();
-        }
-        this.setComparedPlaces(places);
-      },
+      setComparedPlaces: (places) => this.setComparedPlaces(places),
       openRestaurantComparison: (current) => this.openRestaurantComparison(current),
       locateNearestStop: (current) => this.locate(current),
       applyLiveMenuPrices: (placeId, prices) => this.applyLiveMenuPrices(placeId, prices),
@@ -1224,17 +1023,10 @@ export class AppShell {
       setHighlightedPlaces: (placeIds) => {
         this.highlightedPlaces = [...placeIds];
         this.engine?.setHighlightedPlaces(this.highlightedPlaces);
-        if (placeIds.length && this.mode === 'station' && this.xrMode === 'none' && !this.mobile.matches && !this.drawerOpen) {
-          this.drawerOpen = true;
-          this.renderPanels();
-        } else {
-          this.renderDrawer();
-        }
       },
       setHighlightedDish: (dishId) => {
         this.highlightedDishId = dishId;
         this.engine?.setHighlightedDish(dishId);
-        this.renderDrawer();
       },
       clearHighlights: () => {
         this.highlightedStops = [];
@@ -1244,14 +1036,10 @@ export class AppShell {
         this.engine?.setHighlightedPlaces([]);
         this.engine?.setHighlightedDish(undefined);
         this.renderStationBoard(new Set(this.filtered.map((p) => p.id)));
-        this.renderDrawer();
       },
-      focusMenu: (dishId) => {
-        if (this.mobile.matches) this.sheetExpanded = true;
-        this.drawerOpen = true;
-        this.renderPanels();
-        this.drawer.focusMenu(dishId);
-      },
+      // Dishes are picked from the menu book in the scene; there is no menu panel to focus or drawer to move.
+      focusMenu: () => {},
+      setDrawerState: () => {},
       setFit: (enabled, seating) => this.setFit(enabled, seating),
       showReviewCard: (card, mode) => this.showReviewCard(card, mode),
       dismissReviewCard: (cardId) => this.dismissReviewCard(cardId),
@@ -1262,13 +1050,6 @@ export class AppShell {
       },
       focusMapStopCamera: (stopId) => this.engine?.focusMapStopCamera(stopId),
       resetCamera: () => this.engine?.resetCamera(),
-      setDrawerState: (action) => {
-        if (action === 'close') this.drawerOpen = false;
-        else if (action === 'open') this.drawerOpen = true;
-        else if (action === 'expand') { this.drawerOpen = true; this.sheetExpanded = true; }
-        else if (action === 'collapse') { this.sheetExpanded = false; }
-        this.renderPanels();
-      },
       setFilterOpen: (open) => this.setFilterOpen(open),
       setAudioSfx: (enabled) => {
         this.setAudio(enabled);
