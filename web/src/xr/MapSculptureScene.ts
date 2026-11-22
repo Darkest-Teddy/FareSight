@@ -90,8 +90,15 @@ const trainLift = 0.0014;
 const trainScaleLength = 0.0014;
 const trainScaleCross = 0.0024;
 
-/** Its geometry starts 1.12 m up from its own origin, so the body is dropped to sit on the rail. */
-const trainFloorOffset = -1.12 * trainScaleCross;
+/**
+ * No floor offset: the model's own geometry already starts at y=0, so its origin is its railhead.
+ *
+ * This previously dropped the train by 1.12 m of model space, taken from the first POSITION
+ * accessor's minimum. That accessor is the bodyshell, which does start at 1.12; the wheels and
+ * underframe reach all the way down to 0. Trusting it sank every train through the plate it was
+ * meant to be riding on.
+ */
+const trainFloorOffset = 0;
 const maxSnapError = 0.03 ** 2;
 const burstTime = 0.7;
 const mapRevealTime = 1.45;

@@ -321,34 +321,32 @@ function landmarks(surface, accent) {
 }
 
 /**
- * A station bead: a white disc with the line's colour inset on top.
+ * A station marker, painted into the surface of the line rather than parked on top of it.
  *
- * Both discs are raised clear of the plate so neither z-fights with it, and the white ring is
- * wider than the plate itself, which is what makes a stop legible at map scale.
+ * Earlier this was a raised puck with walls, which read as a separate object dropped onto the
+ * track and stood proud enough that passing trains clipped through it. These are flat discs lying
+ * in the plate's own top face: a white ring with the route colour inside it, so a stop looks like
+ * part of the line.
+ *
+ * They still sit a hair above the plate -- far too little to see, but enough to keep the depth
+ * buffer from tearing between two coplanar surfaces.
  */
-const dotOuter = 0.0068;
-const dotInner = 0.0042;
+const dotOuter = 0.0062;
+const dotInner = 0.0036;
+const dotLift = 0.00012;
 
 function stationDot(white, colour, [x, , z], deck, tint) {
-  const base = deck + 0.0004;
-  const lip = base + 0.0014;
-  // White body.
-  loft(white, [circle(x, base, z, dotOuter, 20), circle(x, lip, z, dotOuter, 20)], '#f4f6fa', {
-    bottom: false,
-    top: false,
-  });
-  // The white rim left showing around the coloured centre.
-  const outer = circle(x, lip, z, dotOuter, 20);
-  const inner = circle(x, lip, z, dotInner, 20);
-  for (let j = 0; j < 20; j++) {
-    const k = (j + 1) % 20;
+  const ringY = deck + dotLift;
+  const coreY = deck + dotLift * 2;
+  const outer = circle(x, ringY, z, dotOuter, 24);
+  const inner = circle(x, ringY, z, dotInner, 24);
+  // White ring: the annulus between the two radii, no sides.
+  for (let j = 0; j < 24; j++) {
+    const k = (j + 1) % 24;
     face(white, [outer[j], inner[j], inner[k], outer[k]], '#f4f6fa');
   }
-  // Coloured cap, a hair proud of the white so it never z-fights.
-  const cap = lip + 0.0003;
-  loft(colour, [circle(x, lip, z, dotInner, 20), circle(x, cap, z, dotInner, 20)], tint, {
-    bottom: false,
-  });
+  // Route colour filling the middle.
+  face(colour, circle(x, coreY, z, dotInner, 24), tint);
 }
 
 // Center and half-width of the Charles, from the Allston bend to the harbor mouth.
