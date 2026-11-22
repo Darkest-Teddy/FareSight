@@ -28,6 +28,9 @@ export class VenueSplatScene {
   private asset: XRAssetData | null = null;
   private currentRoomReady = false;
   private cardsVisible = false;
+  private menuVisible = false;
+  // Nothing has been captured for this place yet: no room scan and no dishes.
+  private comingSoon = false;
   private galleryVisible = false;
   private fitVisible = false;
   private revision = 0;
@@ -55,7 +58,7 @@ export class VenueSplatScene {
 
   get hasRoom(): boolean { return this.currentRoomReady; }
 
-  get targets(): HitTarget[] { return this.menu.targets; }
+  get targets(): HitTarget[] { return this.comingSoon ? [] : this.menu.targets; }
 
   private makePlaque(parent: pc.Entity, name: string, width: number, height: number, position?: XYZ): PhysicalPlaque {
     return new PhysicalPlaque(this.device, parent, name, width, height, 'room', this.plaqueModel, this.reveal, position);
@@ -78,16 +81,20 @@ export class VenueSplatScene {
   async open(place: XRPlaceData, manifest: XRManifestData | null, neighborhood = ''): Promise<void> {
     const revision = ++this.revision;
     const asset = manifest?.room_asset ?? place.rooms.find((room) => isSplat(room.asset))?.asset ?? null;
-    const contentChanged = this.place !== place || this.manifest !== manifest;
+    const dishes = menuDishes(place, manifest);
+    const comingSoon = !asset && !dishes.length;
+    const contentChanged = this.place !== place || this.manifest !== manifest || this.comingSoon !== comingSoon;
     const sameRoom = this.place?.id === place.id && this.asset?.url === asset?.url &&
       this.asset?.scale_factor === asset?.scale_factor && this.asset?.scale_status === asset?.scale_status;
     this.place = place;
     this.manifest = manifest;
     this.asset = asset;
     if (!sameRoom) this.currentRoomReady = false;
-    this.menu.setMenu(place, menuDishes(place, manifest), neighborhood);
+    this.comingSoon = comingSoon;
+    this.menu.setMenu(place, dishes, neighborhood);
     this.positionCards();
     if (contentChanged) this.buildGallery();
+    this.updateMenu();
     this.updateGallery();
     this.updateFit();
 
@@ -102,10 +109,18 @@ export class VenueSplatScene {
     this.splats.setVisible('room', showRoom);
     if (this.cardsVisible === showCards) return;
     this.cardsVisible = showCards;
-    if (showCards) this.reveal.show(this.menu.entity, 0.74);
-    else this.reveal.hide(this.menu.entity, 0.54);
+    this.updateMenu();
     this.updateGallery();
     this.updateFit();
+  }
+
+  /** An empty menu says nothing, so a place that is still coming soon is left with its one sign. */
+  private updateMenu(): void {
+    const visible = this.cardsVisible && !this.comingSoon;
+    if (this.menuVisible === visible) return;
+    this.menuVisible = visible;
+    if (visible) this.reveal.show(this.menu.entity, 0.74);
+    else this.reveal.hide(this.menu.entity, 0.54);
   }
 
   private updateGallery(): void {
@@ -135,6 +150,7 @@ export class VenueSplatScene {
     this.place = undefined;
     this.manifest = null;
     this.asset = null;
+    this.comingSoon = false;
     this.fitKey = '';
     this.setPresentation(false, false);
     for (const entity of [this.menu.entity, this.galleryRoot, this.peopleRoot]) {
@@ -161,7 +177,7 @@ export class VenueSplatScene {
     this.clearGallery();
     const place = this.place;
     if (!place) return;
-    const photos = place.photos.slice(0, 5);
+    const photos = this.comingSoon ? [] : place.photos.slice(0, 5);
     const radius = 1.65;
     const count = Math.max(photos.length, 1);
     this.gallery = Array.from({ length: count }, (_, index) => {
@@ -170,7 +186,13 @@ export class VenueSplatScene {
         [Math.sin(angle) * radius, 0, -Math.cos(angle) * radius]);
       panel.entity.setLocalEulerAngles(0, -angle * pc.math.RAD_TO_DEG, 0);
       this.mountPlaque(panel);
-      if (!photos[index]) {
+      if (this.comingSoon) {
+        panel.setText([
+          { text: place.name, size: 85, weight: 700, wrap: true },
+          { text: 'COMING SOON', color: '#725b43', size: 46 },
+          { text: 'Add photos in Vantage Contribute.', size: 52, wrap: true },
+        ]);
+      } else if (!photos[index]) {
         panel.setText([
           { text: place.name, size: 85, weight: 700, wrap: true },
           { text: place.category.replaceAll('_', ' ').toUpperCase(), color: '#725b43', size: 46 },
