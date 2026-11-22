@@ -21,7 +21,7 @@ const iconPaths = {
   headset: 'M4 7h16a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-4l-2-2h-4l-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2zM7 12h.01M17 12h.01',
   sound: 'M11 5 6 9H3v6h3l5 4zM15 9a4 4 0 0 1 0 6m3-9a8 8 0 0 1 0 12',
   'sound-off': 'M11 5 6 9H3v6h3l5 4zM16 9l5 6m0-6-5 6',
-  bug: 'M7 10a5 5 0 0 1 10 0v5a5 5 0 0 1-10 0zM9 6 7 3m8 3 2-3M3 9l4 2m10 0 4-2M3 14h4m10 0h4M4 20l4-3m8 0 4 3M12 11v9',
+  locate: 'M12 2v4m0 12v4M2 12h4m12 0h4M19 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0zM12 12h.01',
   info: 'M12 11v5m0-8h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
   'chevron-right': 'm9 6 6 6-6 6',
   close: 'm6 6 12 12M18 6 6 18',

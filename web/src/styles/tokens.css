@@ -11,6 +11,7 @@
   --muted: #a8b3cf;
   --accent: #4fe3ff;
   --price: #ffb547;
+  --positive: #75e4ad;
   --error: #ffb2ac;
   --edge: #384561;
   --edge-soft: #2c3752;
@@ -29,7 +30,6 @@
   --ease-out: cubic-bezier(.2,.8,.2,1);
   --ease-spring: cubic-bezier(.3,1.3,.5,1);
   --dur-1: 120ms;
-  --dur-2: 220ms;
   --dur-3: 380ms;
   --rail: 1.25rem;
   --phone-bar: 3.8rem;

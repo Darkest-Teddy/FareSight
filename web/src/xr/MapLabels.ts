@@ -85,7 +85,7 @@ export class MapLabels {
     for (const label of this.labels) {
       const previews = counts.get(label.stop.stop_id);
       const count = previews?.matching ?? 0;
-      const text = `${count} ${count === 1 ? 'spot' : 'spots'}`;
+      const text = `${count} ${count === 1 ? 'place' : 'places'}`;
       const hasPreview = Boolean(previews?.published3D);
       const name = `${label.stop.name}, ${count} matching ${count === 1 ? 'place' : 'places'}${describe3DCount(previews)}. Open station.`;
       if (label.count.textContent === text && label.preview.hidden === !hasPreview && label.node.ariaLabel === name) continue;

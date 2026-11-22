@@ -6,6 +6,7 @@ export interface LiveVoiceDockActions {
   stop(): void;
   toggleMute(): void;
   sendText(text: string): boolean;
+  onOpen(): void;
 }
 
 const stateLabels: Record<VoiceState, string> = {
@@ -16,9 +17,8 @@ export class LiveVoiceDock {
   readonly trigger: HTMLButtonElement;
   readonly root = element('section', 'voice-dock panel');
   private readonly triggerDot = element('span', 'voice-dot');
-  private readonly triggerLabel = element('span', '', stateLabels.idle);
+  private readonly triggerLabel = element('span', 'voice-trigger-label', stateLabels.idle);
   private readonly statusBadge = element('span', 'voice-state', 'Ready');
-  private readonly modelMeta = element('span', 'voice-model', 'gpt-live-1.1');
   private readonly errorNote = element('p', 'message error');
   private readonly feed = element('div', 'voice-feed');
   private readonly connectBtn: HTMLButtonElement;
@@ -33,6 +33,7 @@ export class LiveVoiceDock {
 
   constructor(private readonly actions: LiveVoiceDockActions, private readonly mobile: MediaQueryList) {
     this.trigger = button('', () => this.handleTriggerClick(), 'voice-trigger');
+    this.trigger.setAttribute('aria-label', stateLabels.idle);
     this.trigger.setAttribute('aria-expanded', 'false');
     this.trigger.setAttribute('aria-controls', 'faresight-voice-dock');
     this.triggerDot.setAttribute('aria-hidden', 'true');
@@ -43,12 +44,10 @@ export class LiveVoiceDock {
     this.root.hidden = true;
 
     const head = element('header', 'voice-head');
-    const titleWrap = element('div', 'voice-title-wrap');
-    titleWrap.append(element('h2', '', 'Ask FareSight'), this.modelMeta);
     this.closeBtn = button('', () => this.dismiss(), 'quiet icon-button');
     this.closeBtn.setAttribute('aria-label', 'Hide voice controls');
     this.closeBtn.append(icon('close'));
-    head.append(titleWrap, this.closeBtn);
+    head.append(element('h2', '', 'Ask FareSight'), this.closeBtn);
     this.statusBadge.setAttribute('role', 'status');
     this.errorNote.setAttribute('role', 'alert');
     this.errorNote.hidden = true;
@@ -80,13 +79,6 @@ export class LiveVoiceDock {
       if (this.actions.sendText(text)) this.input.value = '';
     });
 
-    this.root.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation();
-        this.dismiss();
-      }
-    });
-
     this.root.append(head, this.errorNote, controls, this.feed, this.form);
     this.renderEmptyFeed();
   }
@@ -103,18 +95,15 @@ export class LiveVoiceDock {
     }
   }
 
-  private dismiss(): void {
+  dismiss(): void {
     this.setOpen(false);
     this.trigger.focus();
   }
 
   setOpen(open: boolean): void {
+    if (open) this.actions.onOpen();
     this.root.hidden = !open;
     this.trigger.setAttribute('aria-expanded', String(open));
-  }
-
-  setModel(model: string): void {
-    this.modelMeta.textContent = model;
   }
 
   setState(state: VoiceState, detail?: string): void {
@@ -131,6 +120,7 @@ export class LiveVoiceDock {
     this.endBtn.textContent = state === 'connecting' ? 'Cancel' : 'End session';
     this.form.hidden = !live;
     this.triggerLabel.textContent = stateLabels[state];
+    this.trigger.setAttribute('aria-label', stateLabels[state]);
     this.statusBadge.textContent = state === 'error' ? 'Connection error' : state === 'idle' ? 'Ready' : stateLabels[state];
     this.errorNote.textContent = detail ?? '';
     this.errorNote.hidden = !detail;

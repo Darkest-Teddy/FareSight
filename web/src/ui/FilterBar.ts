@@ -1,6 +1,11 @@
 import { MBTA_SUBWAY_FARE, type Stop } from '@faresight/shared';
 import { button, element, field, icon, option } from './dom';
-import { cravings, initialFilters, type Filters } from './state';
+import { cravings, initialFilters, type Craving, type Filters } from './state';
+
+// One or two words each, so the eight cravings sit in an even 4 × 2 grid; the full name stays the accessible label.
+const shortCraving: Record<Craving, string> = {
+  all: 'All', ramen: 'Ramen', cheap: 'Cheap eats', study: 'Study', groups: 'Karaoke', music: 'Music', shops: 'Shops', parks: 'Parks',
+};
 
 export class FilterBar {
   readonly root = element('section', 'filter panel');
@@ -18,7 +23,6 @@ export class FilterBar {
   private readonly minus: HTMLButtonElement;
   private readonly plus: HTMLButtonElement;
   private readonly desktop = matchMedia('(min-width: 769px)');
-  private readonly reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   private filters: Filters;
 
   constructor(filters: Filters, update: (patch: Partial<Filters>) => void, locate: () => void, close: () => void) {
@@ -34,39 +38,22 @@ export class FilterBar {
     this.chipStrip.setAttribute('aria-label', 'Craving');
     this.indicator.setAttribute('aria-hidden', 'true');
     this.chipStrip.append(this.indicator);
-    const chipSizes = new ResizeObserver(() => this.alignIndicator(true));
+    const chipSizes = new ResizeObserver(() => this.alignIndicator());
     chipSizes.observe(this.chipStrip);
     for (const [id, title] of cravings) {
-      const chip = button(title, () => update({ craving: id }), 'chip');
+      const chip = button(shortCraving[id], () => update({ craving: id }), 'chip');
+      chip.setAttribute('aria-label', title);
+      chip.title = title;
       this.chips.set(id, chip);
       this.chipStrip.append(chip);
       chipSizes.observe(chip);
     }
-    this.chipStrip.addEventListener('scroll', () => this.updateChipEdges(), { passive: true });
-    this.chipStrip.addEventListener('wheel', (event) => {
-      if (!this.desktop.matches || event.ctrlKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
-      const { scrollLeft, scrollWidth, clientWidth } = this.chipStrip;
-      if (event.deltaY < 0 ? scrollLeft <= 0 : scrollWidth - clientWidth - scrollLeft < 1) return;
-      const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16
-        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? clientWidth : 1;
-      event.preventDefault();
-      this.chipStrip.scrollLeft += event.deltaY * unit;
-    }, { passive: false });
-    void document.fonts.ready.then(() => this.alignIndicator(true));
-
     this.start.addEventListener('change', () => update({ startStopId: this.start.value }));
     const origin = element('div', 'origin-controls');
     const gps = button('', locate, 'quiet gps');
     gps.setAttribute('aria-label', 'Use GPS');
     gps.title = 'Use GPS';
-    const svg = 'http://www.w3.org/2000/svg';
-    const target = document.createElementNS(svg, 'svg');
-    target.setAttribute('viewBox', '0 0 24 24');
-    target.setAttribute('aria-hidden', 'true');
-    const path = document.createElementNS(svg, 'path');
-    path.setAttribute('d', 'M12 2v4m0 12v4M2 12h4m12 0h4M19 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0zM12 12h.01');
-    target.append(path);
-    gps.append(target, element('span', '', 'Use GPS'));
+    gps.append(icon('locate'), element('span', '', 'Use GPS'));
     origin.append(field('Start from', this.start), gps);
 
     this.budget.type = 'range';
@@ -124,7 +111,6 @@ export class FilterBar {
   }
 
   render(filters: Filters) {
-    const cravingChanged = this.filters.craving !== filters.craving;
     this.filters = filters;
     this.start.value = filters.startStopId;
     this.budget.value = String(filters.maxBudget);
@@ -139,7 +125,7 @@ export class FilterBar {
     this.reset.hidden = (Object.keys(initialFilters) as (keyof Filters)[]).every((key) => filters[key] === initialFilters[key]);
     if (this.reset.hidden && resetFocused) this.chips.get(filters.craving)?.focus({ preventScroll: true });
     this.updateSummary();
-    this.alignIndicator(cravingChanged);
+    this.alignIndicator();
   }
 
   private updateSummary() {
@@ -148,30 +134,12 @@ export class FilterBar {
     this.summaryText.textContent = `${stop ? `From ${stop} · ` : ''}Under $${maxBudget} · ${groupSize} ${groupSize === 1 ? 'person' : 'people'}${familyVisit ? ' · Family' : ''}`;
   }
 
-  private updateChipEdges() {
-    const { scrollLeft, scrollWidth, clientWidth } = this.chipStrip;
-    this.chipStrip.toggleAttribute('data-fade-start', scrollLeft > 1);
-    this.chipStrip.toggleAttribute('data-fade-end', scrollWidth - clientWidth - scrollLeft > 1);
-  }
-
-  private alignIndicator(reveal = false) {
+  private alignIndicator() {
     const chip = this.chips.get(this.filters.craving);
     if (!this.desktop.matches || !chip?.offsetWidth) return;
-    const ready = this.indicator.hasAttribute('data-ready');
-    const left = chip.offsetLeft;
-    const width = chip.offsetWidth;
-    this.indicator.style.width = `${width}px`;
-    this.indicator.style.transform = `translateX(${left}px)`;
-    if (!ready) {
-      this.indicator.getBoundingClientRect();
-      this.indicator.setAttribute('data-ready', '');
-    }
-    if (reveal || !ready) {
-      const { scrollLeft, clientWidth } = this.chipStrip;
-      const edge = 10;
-      const x = Math.max(left + width + edge - clientWidth, Math.min(scrollLeft, left - edge));
-      this.chipStrip.scrollTo({ left: x, behavior: ready && !this.reducedMotion.matches ? 'smooth' : 'instant' });
-    }
-    this.updateChipEdges();
+    this.indicator.style.width = `${chip.offsetWidth}px`;
+    this.indicator.style.height = `${chip.offsetHeight}px`;
+    this.indicator.style.transform = `translate(${chip.offsetLeft}px, ${chip.offsetTop}px)`;
+    this.indicator.setAttribute('data-ready', '');
   }
 }

@@ -57,7 +57,7 @@
   gap: 8px;
   min-height: 40px;
   padding-block: 6px;
-  border-bottom: 1px solid var(--hairline, rgb(255 255 255 / 9%));
+  border-bottom: 1px solid var(--hairline);
 }
 .arrival-row:last-child { border-bottom: 0; }
 .arrival-row .route-dot { width: 7px; height: 7px; align-self: center; }
@@ -82,6 +82,12 @@
 }
 .venue-actions .briefing-launch { margin: 0; }
 .venue-actions .compare-place { margin-inline-start: 0; }
+.venue-actions .quiet {
+  border-color: var(--hairline);
+  border-radius: var(--radius-control);
+  background: var(--fill-1);
+}
+.venue-actions .quiet:hover:not(:disabled) { background: var(--fill-2); }
 .compare-place { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
 .compare-symbol { font-size: 16px; line-height: 1; }
 .place-name { font-weight: 600; overflow-wrap: anywhere; }
@@ -102,47 +108,46 @@
     scrollbar-width: thin;
   }
   [data-scene=venue] .filter-chip-row, [data-scene=dish] .filter-chip-row { display: none; }
-  .filter-chip-row .filter-reset { min-height: 32px; }
+  /* Desktop: the grid spans the full width; Reset, shown only when filters differ from defaults, sits under it. */
+  .filter-chip-row { display: grid; gap: 2px; }
+  .filter-chip-row .filter-reset { justify-self: end; min-height: 24px; padding: 2px 4px; }
+  /* The cravings form one segmented control: an even 4 × 2 grid on a single track. */
   .filter .chips {
-    --fade-start: 0px;
-    --fade-end: 0px;
     position: relative;
-    display: flex;
-    flex-wrap: nowrap;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 2px;
-    overflow: auto hidden;
-    scrollbar-width: none;
-    scroll-snap-type: x proximity;
-    scroll-padding-inline: 10px;
+    padding: 3px;
+    border-radius: 12px;
+    background: var(--fill-1);
     isolation: isolate;
-    mask-image: linear-gradient(to right, transparent, #000 var(--fade-start), #000 calc(100% - var(--fade-end)), transparent);
   }
-  .filter .chips[data-fade-start] { --fade-start: 10px; }
-  .filter .chips[data-fade-end] { --fade-end: 10px; }
   .chip-indicator[data-ready] {
     display: block;
     position: absolute;
     z-index: -1;
-    inset: 0 auto 0 0;
+    inset: 0 auto auto 0;
     pointer-events: none;
-    border-radius: var(--radius-pill, 999px);
-    background: var(--fill-3, rgb(255 255 255 / 14%));
-    transition: transform 320ms var(--ease-spring, cubic-bezier(.3,1.3,.5,1)),
-      width 320ms var(--ease-spring, cubic-bezier(.3,1.3,.5,1));
+    border-radius: 9px;
+    background: var(--fill-3);
+    transition: transform 320ms var(--ease-spring),
+      width 320ms var(--ease-spring),
+      height 320ms var(--ease-spring);
   }
   .filter .chip, .filter .chip[aria-pressed=true] {
-    flex: none;
-    min-height: 32px;
-    padding: 4px 10px;
+    min-width: 0;
+    min-height: 30px;
+    padding: 4px 2px;
     border: 0;
-    border-radius: var(--radius-pill, 999px);
+    border-radius: 9px;
+    white-space: nowrap;
+    text-align: center;
     background: transparent;
     color: var(--muted);
     font-size: 12px;
     font-weight: 600;
-    scroll-snap-align: start;
   }
-  .filter .chip:hover:not(:disabled) { color: var(--text); background: var(--fill-1, rgb(255 255 255 / 5%)); }
+  .filter .chip:hover:not(:disabled) { color: var(--text); background: var(--fill-2); }
   .filter .chip[aria-pressed=true] { color: var(--text); }
   .filter .chip:focus-visible { outline-offset: -2px; }
 
@@ -184,9 +189,9 @@
     width: 30px;
     height: 18px;
     padding: 2px;
-    border: 1px solid var(--hairline, rgb(255 255 255 / 9%));
-    border-radius: var(--radius-pill, 999px);
-    background: var(--fill-3, rgb(255 255 255 / 14%));
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-pill);
+    background: var(--fill-3);
     cursor: pointer;
   }
   .filter .check input::after {
@@ -203,16 +208,17 @@
 
   .filter :is(.filter-summary, .gps, .step, select),
   .drawer-scroll :is(select, .menu-preview, input:not([type=checkbox], [type=range]), textarea) {
-    border: 1px solid var(--hairline, rgb(255 255 255 / 9%));
-    border-radius: var(--radius-control, 10px);
-    background: var(--fill-1, rgb(255 255 255 / 5%));
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-control);
+    background: var(--fill-1);
   }
   .filter :is(.filter-summary, .gps, .step):hover:not(:disabled),
-  .drawer-scroll .menu-preview:hover:not(:disabled) { background: var(--fill-2, rgb(255 255 255 / 9%)); }
-  .filter select option, .drawer-scroll select :is(option, optgroup) { background: var(--panel, #141b33); }
+  .drawer-scroll .menu-preview:hover:not(:disabled) { background: var(--fill-2); }
+  .filter select option, .drawer-scroll select :is(option, optgroup) { background: var(--panel); }
 
   .filter input[type=range], .rotation-field input[type=range] {
-    --range-track: linear-gradient(to right, var(--accent) var(--fill, 0%), var(--fill-3, rgb(255 255 255 / 14%)) var(--fill, 0%));
+    --fill: 0%;
+    --range-track: linear-gradient(to right, var(--accent) var(--fill), var(--fill-3) var(--fill));
     appearance: none;
     display: block;
     min-height: 24px;
@@ -253,46 +259,26 @@
     gap: 8px;
     margin: 16px 0 0;
     padding: 16px 0 0;
-    border-top: 1px solid var(--hairline, rgb(255 255 255 / 9%));
+    border-top: 1px solid var(--hairline);
   }
   .drawer-scroll .station-places:first-child { margin-top: 12px; padding-top: 0; border-top: 0; }
-  .place-compare-row {
-    align-items: center;
-    gap: 0;
-    border-radius: calc(var(--radius-card, 14px) - 2px);
-    background: var(--fill-1, rgb(255 255 255 / 5%));
-    transition: background-color var(--dur-1, 120ms) var(--ease-out, ease-out);
-  }
-  .place-compare-row:is(:hover, :focus-within) { background: var(--fill-2, rgb(255 255 255 / 9%)); }
-  .place-compare-row .place-row {
+  .station-places .place-row {
     min-height: 56px;
-    padding: 8px 6px 8px 12px;
+    padding: 8px 12px;
     border: 0;
-    border-radius: inherit;
-    background: transparent;
+    border-radius: calc(var(--radius-card) - 2px);
+    background: var(--fill-1);
     font-size: 13px;
+    transition: background-color var(--dur-1) var(--ease-out);
   }
-  .place-row:focus-visible, .place-compare-row .compare-place:focus-visible { outline-offset: -2px; }
+  .station-places .place-row:is(:hover, :focus-visible) { background: var(--fill-2); }
+  .place-row:focus-visible { outline-offset: -2px; }
   .place-row[data-highlighted=true] { box-shadow: inset 0 0 0 1px rgb(255 181 71 / 70%); }
   .place-row .price { flex: none; text-align: end; }
   .place-row small { margin-top: 3px; font-size: 11.5px; }
-  .place-compare-row .compare-compact {
-    min-width: 32px;
-    min-height: 36px;
-    margin-inline: 0 4px;
-    padding: 0;
-    border-radius: var(--radius-control, 10px);
-  }
-  .compare-compact .compare-label { display: none; }
-  @media (hover: hover) and (pointer: fine) {
-    .place-compare-row:is(:hover, :focus-within) .compare-compact[aria-pressed=false] {
-      color: var(--text);
-    }
-  }
-  .place-compare-row .compare-place:hover:not(:disabled) { background: var(--fill-3, rgb(255 255 255 / 14%)); }
   .drawer-scroll .preview-badge {
-    border-color: var(--hairline, rgb(255 255 255 / 9%));
-    background: var(--fill-1, rgb(255 255 255 / 5%));
+    border-color: var(--hairline);
+    background: var(--fill-1);
     color: var(--muted);
   }
 
@@ -302,11 +288,11 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
     margin: 4px 0;
     padding: 10px 0;
-    border-radius: var(--radius-card, 14px);
-    background: var(--fill-1, rgb(255 255 255 / 5%));
+    border-radius: var(--radius-card);
+    background: var(--fill-1);
   }
   .venue-stats > div { display: grid; grid-row: span 2; grid-template-rows: subgrid; padding-inline: 8px; }
-  .venue-stats > div + div { border-inline-start: 1px solid var(--hairline, rgb(255 255 255 / 9%)); }
+  .venue-stats > div + div { border-inline-start: 1px solid var(--hairline); }
   .venue-stats .drawer-section-label { white-space: nowrap; letter-spacing: .04em; }
   .venue-stats dd {
     position: relative;
@@ -332,7 +318,7 @@
     width: 72%;
     height: 18px;
     border-radius: 5px;
-    background: linear-gradient(105deg, var(--fill-1, rgb(255 255 255 / 5%)), var(--fill-3, rgb(255 255 255 / 14%)), var(--fill-1, rgb(255 255 255 / 5%)));
+    background: linear-gradient(105deg, var(--fill-1), var(--fill-3), var(--fill-1));
     background-size: 200% 100%;
     animation: stat-loading 1.6s linear infinite;
   }
@@ -340,20 +326,20 @@
 
   .venue-actions .accent {
     width: 100%;
-    border-radius: var(--radius-control, 10px);
+    border-radius: var(--radius-control);
     font-size: 13px;
   }
   .venue-actions .quiet { min-height: 36px; }
   .venue-actions > :where(.quiet, span) { flex: 1 1 auto; }
   .venue-actions > span > button { width: 100%; }
-  .venue-actions .quiet, .menu-row .menu-preview { border-radius: var(--radius-control, 10px); }
-  .menu-row { min-height: 56px; padding: 8px 0; border-color: var(--hairline, rgb(255 255 255 / 9%)); }
+  .menu-row .menu-preview { border-radius: var(--radius-control); }
+  .menu-row { min-height: 56px; padding: 8px 0; border-color: var(--hairline); }
   .menu-row:last-child:not([data-highlighted=true]) { border-bottom: 0; }
   .menu-row[data-highlighted=true] {
     margin-inline: -8px;
     width: calc(100% + 16px);
     padding: 8px;
-    border-radius: var(--radius-control, 10px);
+    border-radius: var(--radius-control);
   }
   .menu-row .menu-preview { min-height: 32px; padding: 6px 8px; color: var(--text); font-size: 12px; }
   .menu-row > div { min-width: 0; overflow-wrap: anywhere; }
@@ -363,7 +349,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chip-indicator[data-ready], .place-compare-row { transition: none; }
+  .chip-indicator[data-ready], .station-places .place-row { transition: none; }
   .venue-stats dd[data-loading]::after { animation: none; }
 }
 

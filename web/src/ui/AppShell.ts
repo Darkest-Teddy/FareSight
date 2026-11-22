@@ -23,7 +23,6 @@ import { UploadPipelineModal } from './UploadPipelineModal';
 
 const sceneTitles: Record<SceneMode, string> = { map: 'Map', station: 'Station', venue: 'Venue', dish: 'Dish' };
 const sceneDepth: Record<SceneMode, number> = { map: 0, station: 1, venue: 2, dish: 3 };
-const parentScene = { station: 'map', venue: 'station', dish: 'venue' } as const;
 const pollInterval = 18_000;
 
 function brandMark() {
@@ -93,6 +92,9 @@ export class AppShell {
   private filtered = this.places;
   private filters: Filters = { ...initialFilters };
   private mode: SceneMode = 'map';
+  private mapScroll = 0;
+  private stationReturn?: { stopId: string; placeId: string; scrollTop: number };
+  private venueReturn?: { placeId: string; dishId: string; scrollTop: number };
   private stop?: Stop;
   private place?: Place;
   private dish?: Dish;
@@ -136,8 +138,9 @@ export class AppShell {
     this.xrExit = button('Exit XR', () => this.engine?.exitXR(), 'accent');
     this.xrExit.hidden = true;
     this.pairButton = labelAndIcon(button('', () => this.pairing.open(), 'quiet desktop-action'), 'Pair a headset', 'headset');
-    this.audioButton = labelAndIcon(button('', () => this.toggleAudio(), 'quiet'), 'Sound off', 'sound-off');
-    this.audioButton.setAttribute('aria-pressed', 'false');
+    this.audioButton = labelAndIcon(button('', () => this.toggleAudio(), 'quiet'), 'Sound', 'sound-off');
+    this.audioButton.setAttribute('role', 'menuitemcheckbox');
+    this.audioButton.setAttribute('aria-checked', 'false');
     const admin = new AdminModal(() => void this.loadCatalog());
     this.credits = attribution(() => admin.open());
     this.reviewModal = new ReviewBriefingModal({
@@ -158,7 +161,7 @@ export class AppShell {
         this.engine?.setVoiceState(state);
       },
       onTranscript: (entry) => this.liveDock.appendTranscript(entry),
-      onModel: (model) => this.liveDock.setModel(model),
+      onModel: () => {},
       onTool: (name, args) => this.liveController.executeRealtime(name, args),
       getContext: () => this.liveController.describeContext(),
     });
@@ -171,19 +174,41 @@ export class AppShell {
         this.liveDock.setMuted(next);
       },
       sendText: (text) => this.liveClient.sendText(text),
+      onOpen: () => this.setMenuOpen(false),
     }, this.mobile);
     this.moreMenu.id = 'command-menu';
     this.moreMenu.hidden = true;
+    this.moreMenu.setAttribute('role', 'menu');
+    this.moreMenu.setAttribute('aria-label', 'More');
     this.moreMenu.append(
       labelAndIcon(button('', () => this.uploader.open(this.place?.id), 'quiet desktop-action'), 'Upload 3D capture', 'upload'),
       this.pairButton, this.audioButton,
       labelAndIcon(button('', this.credits.open, 'quiet'), 'Credits', 'info'),
     );
+    for (const item of this.moreMenu.querySelectorAll('button')) {
+      if (item !== this.audioButton) item.setAttribute('role', 'menuitem');
+      item.tabIndex = -1;
+    }
     this.moreButton = button('', () => this.setMenuOpen(this.moreMenu.hidden), 'quiet icon-button menu-toggle');
     this.moreButton.append(icon('more'));
     this.moreButton.setAttribute('aria-label', 'More');
     this.moreButton.setAttribute('aria-controls', this.moreMenu.id);
     this.moreButton.setAttribute('aria-expanded', 'false');
+    this.moreButton.setAttribute('aria-haspopup', 'menu');
+    this.moreMenu.addEventListener('keydown', (event) => {
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      const items = this.visibleMenuItems();
+      const current = items.indexOf(document.activeElement as HTMLButtonElement);
+      const direction = event.key === 'ArrowUp' ? -1 : 1;
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+        : (current + direction + items.length) % items.length;
+      event.preventDefault();
+      items[next]?.focus();
+    });
+    this.moreMenu.addEventListener('focusout', (event) => {
+      if (event.relatedTarget === this.moreButton || this.moreMenu.contains(event.relatedTarget as Node | null)) return;
+      this.setMenuOpen(false);
+    });
     this.moreMenu.addEventListener('click', (event) => {
       const item = (event.target as Element).closest('button');
       if (item && item !== this.audioButton) {
@@ -294,7 +319,14 @@ export class AppShell {
       }
       if (event.key !== 'Escape') return;
       if (document.querySelector('dialog[open]')) return;
+      if (event.repeat) return;
+      if (!this.liveDock.root.hidden) {
+        event.preventDefault();
+        this.liveDock.dismiss();
+        return;
+      }
       if (!this.moreMenu.hidden) {
+        event.preventDefault();
         this.setMenuOpen(false);
         this.moreButton.focus();
         return;
@@ -397,6 +429,11 @@ export class AppShell {
     if (open) this.liveDock.setOpen(false);
     this.moreMenu.hidden = !open;
     this.moreButton.setAttribute('aria-expanded', String(open));
+    if (open) this.visibleMenuItems()[0]?.focus();
+  }
+
+  private visibleMenuItems() {
+    return Array.from(this.moreMenu.querySelectorAll('button')).filter((item) => item.offsetWidth > 0);
   }
 
   private findStop(id: string) { return this.stops.find((stop) => stop.stop_id === id); }
@@ -511,6 +548,7 @@ export class AppShell {
 
   private renderPanels() {
     const previous = this.renderedMode;
+    if (previous === 'map' && this.mode !== 'map') this.mapScroll = this.stationBoard.scrollTop;
     this.renderedMode = this.mode;
     this.root.dataset.filterOpen = String(this.filterOpen);
     this.root.dataset.scene = this.mode;
@@ -534,16 +572,12 @@ export class AppShell {
     const easing = getComputedStyle(this.sidebarHead).getPropertyValue('--ease-out').trim();
     if (previous) {
       const forward = sceneDepth[this.mode] > sceneDepth[previous];
-      const panel = this.mode === 'map' ? [this.stationBoard] : this.drawer.root.querySelectorAll('.drawer-heading, .drawer-scroll');
+      const panel = this.mode === 'map' ? this.stationBoard : this.drawer.root;
       const from = reduced ? { opacity: 0 } : { opacity: 0, transform: `translateX(${forward ? 24 : -24}px)` };
-      for (const node of panel) this.panelAnimations.push(node.animate([from, { opacity: 1 }], { duration: reduced ? 120 : 220, easing }));
-      const heading = this.mode === 'map' ? this.sidebarBrand : this.sidebarBackLabel;
-      this.panelAnimations.push(heading.animate([{ opacity: .4 }, { opacity: 1 }], { duration: 120, easing }));
-    }
-    if (this.mode === 'map' && !reduced) {
-      const rows = [...this.stationList.querySelectorAll('.station-row')].slice(0, 8);
-      for (const [index, row] of rows.entries()) {
-        this.panelAnimations.push(row.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160, delay: index * 24, easing, fill: 'backwards' }));
+      this.panelAnimations.push(panel.animate([from, { opacity: 1 }], { duration: reduced ? 120 : 220, easing }));
+      if (!reduced) {
+        const heading = this.mode === 'map' ? this.sidebarBrand : this.sidebarBackLabel;
+        this.panelAnimations.push(heading.animate([{ opacity: .4 }, { opacity: 1 }], { duration: 120, easing }));
       }
     }
   }
@@ -618,17 +652,36 @@ export class AppShell {
   }
 
   private goBack() {
-    if (this.mode !== 'map') this.navigate(parentScene[this.mode]);
+    if (this.mode === 'station') {
+      this.showMap(true);
+    } else if (this.mode === 'venue' && this.stop) {
+      const previous = this.stationReturn;
+      const restore = previous?.stopId === this.stop.stop_id ? previous : undefined;
+      const placeId = restore?.placeId ?? this.place?.id;
+      this.showStation(this.stop, Boolean(restore));
+      if (placeId) this.drawer.restorePosition(restore?.scrollTop, `[data-place="${CSS.escape(placeId)}"]`);
+    } else if (this.mode === 'dish' && this.place) {
+      const previous = this.venueReturn;
+      const restore = previous?.placeId === this.place.id ? previous : undefined;
+      const dishId = restore?.dishId ?? this.dish?.id;
+      void this.showVenue(this.place);
+      if (dishId) {
+        this.drawer.restorePosition(restore?.scrollTop, `[data-dish-id="${CSS.escape(dishId)}"] .menu-preview`);
+      }
+    }
   }
 
-  private showMap() {
-    const restoreFocus = !this.mobile.matches && this.mode !== 'map' && this.sidebarHead.parentElement?.contains(document.activeElement);
+  private showMap(back = false) {
+    const restoreFocus = !this.mobile.matches && this.mode !== 'map'
+      && (back || this.sidebarHead.parentElement?.contains(document.activeElement));
     if (this.mode !== 'map') this.sound.playBack();
+    this.stationReturn = this.venueReturn = undefined;
     this.mode = 'map';
     this.filterOpen = false;
     this.drawerOpen = false;
     this.renderBreadcrumbs();
     this.renderPanels();
+    if (back) this.stationBoard.scrollTop = this.mapScroll;
     if (restoreFocus) {
       const row = [...this.stationList.querySelectorAll<HTMLButtonElement>('.station-row')].find((entry) => entry.dataset.stop === this.stop?.stop_id);
       const heading = this.stationBoard.querySelector('h1');
@@ -638,9 +691,11 @@ export class AppShell {
     this.renderScene();
   }
 
-  private showStation(stop: Stop) {
+  private showStation(stop: Stop, keepArrivals = false) {
     const changed = this.stop?.stop_id !== stop.stop_id || this.mode !== 'station';
     const arriving = this.mobile.matches && this.mode === 'map';
+    this.stationReturn = this.venueReturn = undefined;
+    if (changed && !keepArrivals) this.stationData = { predictions: {}, alerts: {} };
     this.drawer.root.classList.toggle('arriving', arriving);
     if (arriving) this.drawer.root.addEventListener('animationend', () => this.drawer.root.classList.remove('arriving'), { once: true });
     this.stop = stop;
@@ -659,9 +714,7 @@ export class AppShell {
     if (changed) {
       this.sound.playSelect();
       this.sound.playPinsRise();
-      this.stationData = { predictions: {}, alerts: {} };
-      this.updateStationDrawer();
-      void this.refreshStation();
+      void this.refreshStation(!keepArrivals);
       this.renderScene();
     }
   }
@@ -706,6 +759,9 @@ export class AppShell {
   private async showVenue(place: Place, options?: { inside?: boolean }) {
     const changed = this.place?.id !== place.id;
     const cameFromDish = this.mode === 'dish';
+    if (this.stop?.stop_id !== place.stop_id) this.stationReturn = undefined;
+    else if (this.mode === 'station') this.stationReturn = { stopId: place.stop_id, placeId: place.id, scrollTop: this.drawer.scrollTop };
+    this.venueReturn = undefined;
     if (changed) {
       this.manifest = {};
       this.trip = {};
@@ -730,7 +786,7 @@ export class AppShell {
     this.renderPanels();
     this.renderDrawer(true);
     this.renderScene();
-    void this.refreshTrip();
+    void this.refreshTrip(changed || !cameFromDish);
     if (changed || !this.manifest.data) await this.refreshManifest();
   }
 
@@ -814,6 +870,7 @@ export class AppShell {
       comparison = { place: venue, dish: item.dish, asset: item.dish_asset, offline: manifest?.offline };
     }
     const previous = this.dish?.id;
+    if (this.mode === 'venue') this.venueReturn = { placeId: place.id, dishId: dish.id, scrollTop: this.drawer.scrollTop };
     this.mode = 'dish';
     this.dish = dish;
     this.comparison = comparison;
@@ -995,8 +1052,8 @@ export class AppShell {
     this.sound.setMuted(this.muted);
     this.sound.toggleAmbientHum(!this.muted);
     if (!this.muted) void this.sound.unlock().then(() => this.sound.playSelect()).catch((error) => this.log(errorText(error)));
-    labelAndIcon(this.audioButton, this.muted ? 'Sound off' : 'Sound on', this.muted ? 'sound-off' : 'sound');
-    this.audioButton.setAttribute('aria-pressed', String(!this.muted));
+    labelAndIcon(this.audioButton, 'Sound', this.muted ? 'sound-off' : 'sound');
+    this.audioButton.setAttribute('aria-checked', String(!this.muted));
   }
 
   private sendCurrent() {

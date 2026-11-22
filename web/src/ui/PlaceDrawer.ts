@@ -125,7 +125,7 @@ function visitDetails(place: Place) {
 }
 
 export class PlaceDrawer {
-  readonly root = element('aside', 'place-drawer panel');
+  readonly root = element('section', 'place-drawer panel');
   private readonly title = element('h2');
   private readonly caption = element('p', 'drawer-caption');
   private readonly content = element('div', 'drawer-scroll');
@@ -209,13 +209,12 @@ export class PlaceDrawer {
     if (focused) (places.length ? (compare.disabled ? clear : compare) : this.title).focus({ preventScroll: true });
   }
 
-  private compareButton(place: Place, compact = false) {
+  private compareButton(place: Place) {
     const selected = this.comparedPlaces.some(({ id }) => id === place.id);
     const symbol = selected ? '✓' : '+';
     const label = selected ? 'Comparing' : 'Compare';
     const toggle = button('', () => this.actions.toggleComparison(place), 'quiet compare-place');
     toggle.append(element('span', 'compare-symbol', symbol), element('span', 'compare-label', label));
-    if (compact) toggle.classList.add('compare-compact');
     toggle.dataset.compareVenue = place.id;
     toggle.setAttribute('aria-label', `${selected ? 'Remove from comparison' : 'Compare'} ${place.name}`);
     toggle.setAttribute('aria-pressed', String(selected));
@@ -228,10 +227,17 @@ export class PlaceDrawer {
     this.grip.textContent = expanded ? 'Collapse sheet' : 'Expand sheet';
   }
 
+  get scrollTop() { return this.content.scrollTop; }
+
+  restorePosition(scrollTop: number | undefined, selector: string) {
+    const target = this.content.querySelector<HTMLElement>(selector);
+    if (scrollTop !== undefined) this.content.scrollTop = scrollTop;
+    target?.focus({ preventScroll: scrollTop !== undefined });
+  }
+
   station(stop: Stop, places: Place[], filters: Filters, focus = false, highlightedPlaces?: ReadonlySet<string>) {
     const active = document.activeElement as HTMLElement | null;
     const focusedPlace = this.stationList.contains(active) ? active?.dataset.place : undefined;
-    const compareFocus = this.stationList.contains(active) ? active?.dataset.compareVenue : undefined;
     const key = 'station:' + stop.stop_id;
     const isNewView = this.viewKey !== key;
     this.root.hidden = false;
@@ -270,18 +276,11 @@ export class PlaceDrawer {
       const walk = Math.max(1, Math.round(place.walk_from_stop_m / 80));
       label.append(name, element('small', '', `${walk} min walk`));
       item.append(label, element('strong', 'price', money(oneWayCost(place, filters.startStopId, filters.groupSize))));
-      const row = element('div', 'place-compare-row');
-      row.append(item, this.compareButton(place, true));
-      list.append(row);
+      list.append(item);
     }
     this.stationList.replaceChildren(list);
-    if (compareFocus || focusedPlace) {
-      [...list.querySelectorAll<HTMLButtonElement>('.place-row, .compare-place')].find((item) =>
-        (compareFocus && item.dataset.compareVenue === compareFocus) || (focusedPlace && item.dataset.place === focusedPlace),
-      )?.focus({ preventScroll: true });
-    }
+    if (focusedPlace) list.querySelector<HTMLButtonElement>(`[data-place="${CSS.escape(focusedPlace)}"]`)?.focus({ preventScroll: true });
     if (firstHighlighted) firstHighlighted.scrollIntoView({ block: 'nearest', behavior: reducedMotion.matches ? 'instant' : 'smooth' });
-    if (isNewView) this.animateView('.station-places > .place-compare-row, .station-places > .message, .station-arrivals, .station-alerts');
     if (focus) {
       this.title.tabIndex = -1;
       this.title.focus({ preventScroll: true });
@@ -290,9 +289,13 @@ export class PlaceDrawer {
 
   updateStation(stop: Stop, data: StationData, campusMinutes?: number) {
     if (this.viewKey !== 'station:' + stop.stop_id) return;
+    const active = document.activeElement;
+    const restoreFocus = this.arrivals.contains(active);
     const arrivals = element('section', 'detail-section station-arrivals');
     const heading = element('header', 'station-arrivals-heading');
-    heading.append(element('h3', '', 'Next trains'));
+    const title = element('h3', '', 'Next trains');
+    title.tabIndex = -1;
+    heading.append(title);
     arrivals.append(heading);
     if (campusMinutes !== undefined) arrivals.append(element('p', 'muted', `${formatMinutes(campusMinutes)} from BU Central · estimate`));
     if (data.predictions.data) {
@@ -332,9 +335,11 @@ export class PlaceDrawer {
       this.alertSummary.textContent = data.alerts.error ? 'Service alerts unavailable' : 'Checking service alerts…';
       this.alertText.replaceChildren(message(data.alerts.error ?? 'Checking service alerts…', Boolean(data.alerts.error)));
     }
-    const restoreRetry = this.arrivals.contains(document.activeElement) && document.activeElement?.tagName === 'BUTTON';
     this.arrivals.replaceChildren(arrivals);
-    if (restoreRetry) arrivals.querySelector('button')?.focus({ preventScroll: true });
+    if (restoreFocus) {
+      const retry = active instanceof HTMLButtonElement ? arrivals.querySelector('button') : null;
+      (retry ?? title).focus({ preventScroll: true });
+    }
   }
 
   venue(data: ViewData, focus = false) {
@@ -384,7 +389,6 @@ export class PlaceDrawer {
     this.updateCost(data);
     this.updateTrip(data);
     this.updateModels(data);
-    if (isNewView) this.animateView('.venue-intro, .detail-section');
     if (focus) {
       this.title.tabIndex = -1;
       this.title.focus({ preventScroll: true });
@@ -418,21 +422,6 @@ export class PlaceDrawer {
     }
   }
 
-  private animateView(selector: string) {
-    const key = this.viewKey;
-    requestAnimationFrame(() => {
-      if (!desktop.matches || this.root.hidden || this.viewKey !== key) return;
-      const noMotion = reducedMotion.matches;
-      const easing = getComputedStyle(this.root).getPropertyValue('--ease-out').trim() || 'cubic-bezier(.2,.8,.2,1)';
-      const frames = noMotion ? [{ opacity: 0 }, { opacity: 1 }]
-        : [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }];
-      [...this.content.querySelectorAll<HTMLElement>(selector)].filter((item) => item.offsetHeight).slice(0, 8)
-        .forEach((item, index) => item.animate(frames, {
-          easing, duration: noMotion ? 120 : 220, delay: noMotion ? 0 : index * 24, fill: 'backwards',
-        }));
-    });
-  }
-
   private updateCost({ place, filters, trip, dish }: ViewData) {
     const node = section('Cost breakdown');
     const group = filters.groupSize;
@@ -461,6 +450,8 @@ export class PlaceDrawer {
   }
 
   private updateTrip({ place, stop, trip, originName, dish }: ViewData) {
+    const active = document.activeElement;
+    const restoreFocus = this.tripDetails.contains(active);
     const node = section('Trip breakdown');
     this.doorToDoor.toggleAttribute('data-loading', !trip.data && !trip.error);
     this.doorToDoor.toggleAttribute('data-unavailable', !trip.data && Boolean(trip.error));
@@ -487,6 +478,12 @@ export class PlaceDrawer {
       catch { node.append(link('Open full directions on MBTA', fallback)); }
     }
     this.tripDetails.replaceChildren(node);
+    if (restoreFocus) {
+      const retry = active instanceof HTMLButtonElement ? node.querySelector('button') : null;
+      const target = retry ?? node.querySelector('a') ?? node.querySelector('h3')!;
+      if (target instanceof HTMLHeadingElement) target.tabIndex = -1;
+      target.focus({ preventScroll: true });
+    }
   }
 
   private updateModels(data: ViewData) {
