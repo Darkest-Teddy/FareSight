@@ -1,15 +1,60 @@
 // City blocks along the network, shaped by real Boston footprints.
 //
-// Earlier passes drew rotated boxes, which read as one building repeated. These use the actual
-// OpenStreetMap outlines already in the repo (osm-data.json — 2354 footprints across the five
-// station crops, about 1000 of them not rectangles). Each becomes a reusable template carrying its
-// outline, storey count, roof shape and use, and is then placed where that kind of building
-// actually belongs in Boston.
+// Earlier passes drew rotated boxes, which read as one building repeated. These use actual
+// OpenStreetMap outlines (city-footprints.json, a pinned snapshot of the osm-data.json footprints
+// across the five station crops, about 1000 of them not rectangles). Each becomes a reusable
+// template carrying its outline, storey count, roof shape and use, and is then placed where that
+// kind of building actually belongs in Boston.
 //
 // Footprints are scaled to the sculpture, not to reality: at true scale a city block is a speck
 // beside a 0.015-wide track plate. The shape and proportions are authentic; absolute size is not.
 import { readFileSync } from 'node:fs';
-import { face, norm, rng, sub } from './geometry.mjs';
+import { Surface, earClip, face, norm, rgb, rng, sub } from './geometry.mjs';
+import { ringDistance } from './landmarks.mjs';
+import { inWater } from './water.mjs';
+
+// ---------------------------------------------------------------------------------------------
+// The colour of the city. One material, one hue family: a light slate with a blue bias, pale
+// enough to sit behind the network on a cream backdrop. These are surface colours, before
+// lighting -- the app's lights lift a roof well above its albedo and leave a shaded wall below it.
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The roof of an ordinary block at the heart of the network. Under the studio lights it reads
+ * about #C5CCD8; the walls beneath it are a step darker (see TRIM_GAIN) and, turned away from the
+ * key light, read about #8A9096.
+ */
+const SLATE_HEART = '#BBC8DD';
+
+/**
+ * What a roof becomes at the rim: paler, less blue and close to the plate's own value, so the
+ * city thins into the ground instead of ending in a row of full-strength blocks. Lit, it reads
+ * about #DAD9D5.
+ */
+const SLATE_RIM = '#D2D3D0';
+
+/** The building tone that lands exactly on those colours. District tones run 0.22 to 0.5. */
+const TONE_MID = 0.35;
+
+/**
+ * How far one building's brightness may differ from the next: the change per unit of tone, so a
+ * building 0.1 lighter in tone is TONE_GAIN x 10 percent brighter.
+ */
+const TONE_GAIN = 0.6;
+
+/**
+ * The same for the trim within one building. Every part of a building is drawn at an offset from
+ * its wall -- plinth -0.03, cornice +0.05, roof +0.09, mast +0.12 -- and this turns the offset
+ * into brightness. It is what keeps the massing detailed once it is pale, and what sets the walls
+ * below the roofs.
+ */
+const TRIM_GAIN = 1.2;
+
+/** The trim offset of a flat roof, which is the part the two colours above describe. */
+const TRIM_ROOF = 0.09;
+
+/** The share of both contrasts left at the rim, where the massing should flatten out. */
+const RIM_CONTRAST = 0.4;
 
 const blockGap = 0.009;
 
@@ -81,10 +126,10 @@ const districts = [
 /**
  * How central a point is, 1 at the heart of the network and 0 out at the rim.
  *
- * Drives three things at once: outer buildings are smaller, lower and dimmer, so the city thins
- * toward the edges instead of stopping dead. The dimming is the "fade" -- tone walks down toward
- * the background colour, so the rim dissolves rather than ending in a hard line of full-bright
- * blocks competing with the network for attention.
+ * Drives three things at once: outer buildings are smaller, lower and paler, so the city thins
+ * toward the edges instead of stopping dead. The paling is the "fade" -- colour walks toward the
+ * ground and contrast drops, so the rim dissolves rather than ending in a hard line of
+ * full-strength blocks competing with the network for attention.
  */
 function centrality(x, z) {
   const reach = Math.hypot((x - 0.06) / 0.62, z / 0.46);
@@ -104,107 +149,82 @@ function districtAt(x, z) {
   return best;
 }
 
-/** Normalised outlines from the OSM crops, grouped so a district can ask for its own kinds. */
+/**
+ * Normalised outlines from the OSM crops, grouped so a district can ask for its own kinds.
+ *
+ * Read from a pinned snapshot, not from osm-data.json. Every building on the map is drawn from
+ * this list through one random stream, so adding a single footprint to it reshuffles the whole
+ * city. osm-data.json is re-fetched whenever a station island needs its crop corrected; the
+ * snapshot holds the footprints the shipped sculpture was cast from, already filtered to outlines
+ * of 12 corners or fewer (a 179-point outline is invisible detail at this scale) with building
+ * parts left out, so the map stays the same map.
+ */
 function footprintLibrary() {
-  const raw = JSON.parse(readFileSync(new URL('osm-data.json', import.meta.url)));
+  const { footprints } = JSON.parse(
+    readFileSync(new URL('city-footprints.json', import.meta.url)),
+  );
   const library = [];
-  for (const area of Object.values(raw.areas))
-    for (const b of area.buildings) {
-      const ring = b.ring;
-      // Keep the vertex count sane: a 179-point outline is invisible detail at this scale.
-      if (!Array.isArray(ring) || ring.length < 3 || ring.length > 12) continue;
-      if (b.part) continue;
-      const cx = ring.reduce((n, p) => n + p[0], 0) / ring.length;
-      const cz = ring.reduce((n, p) => n + p[1], 0) / ring.length;
-      const local = ring.map(([x, z]) => [x - cx, z - cz]);
-      // Normalise by area, not by longest radius. Boston has many long narrow buildings; scaling
-      // those by their max radius turns them into slivers with no visible mass, which is exactly
-      // how the first attempt failed. Area keeps every footprint reading at a comparable weight.
-      let twice = 0;
-      for (let i = 0; i < local.length; i++) {
-        const a = local[i];
-        const b = local[(i + 1) % local.length];
-        twice += a[0] * b[1] - b[0] * a[1];
-      }
-      const area = Math.abs(twice) / 2;
-      if (!(area > 4)) continue;
-      // Reject the most extreme slivers outright; a 4:1 shed is noise at this scale.
-      const xs = local.map((q) => q[0]);
-      const zs = local.map((q) => q[1]);
-      const w = Math.max(...xs) - Math.min(...xs);
-      const d = Math.max(...zs) - Math.min(...zs);
-      if (Math.max(w, d) / Math.max(1e-6, Math.min(w, d)) > 2.8) continue;
-      const span = Math.sqrt(area);
-      // Force one winding. OSM supplies both, and with single-sided materials a clockwise ring
-      // builds its walls facing inward: the building is there but you look straight through it.
-      const wound = twice < 0 ? [...local].reverse() : local;
-      library.push({
-        // Unit outline: sqrt(area) is 1, so a caller scales by the footprint weight it wants.
-        shape: wound.map(([x, z]) => [x / span, z / span]),
-        levels: Number.isFinite(b.levels) && b.levels > 0 ? b.levels : null,
-        roof: b.roofShape ?? 'flat',
-        kind: b.kind ?? 'yes',
-        material: b.material ?? null,
-      });
+  for (const b of footprints) {
+    const ring = b.ring;
+    const cx = ring.reduce((n, p) => n + p[0], 0) / ring.length;
+    const cz = ring.reduce((n, p) => n + p[1], 0) / ring.length;
+    const local = ring.map(([x, z]) => [x - cx, z - cz]);
+    // Normalise by area, not by longest radius. Boston has many long narrow buildings; scaling
+    // those by their max radius turns them into slivers with no visible mass, which is exactly
+    // how the first attempt failed. Area keeps every footprint reading at a comparable weight.
+    let twice = 0;
+    for (let i = 0; i < local.length; i++) {
+      const a = local[i];
+      const c = local[(i + 1) % local.length];
+      twice += a[0] * c[1] - c[0] * a[1];
     }
+    const area = Math.abs(twice) / 2;
+    if (!(area > 4)) continue;
+    // Reject the most extreme slivers outright; a 4:1 shed is noise at this scale.
+    const xs = local.map((q) => q[0]);
+    const zs = local.map((q) => q[1]);
+    const w = Math.max(...xs) - Math.min(...xs);
+    const d = Math.max(...zs) - Math.min(...zs);
+    if (Math.max(w, d) / Math.max(1e-6, Math.min(w, d)) > 2.8) continue;
+    const span = Math.sqrt(area);
+    // Force one winding. OSM supplies both, and with single-sided materials a clockwise ring
+    // builds its walls facing inward: the building is there but you look straight through it.
+    const wound = twice < 0 ? [...local].reverse() : local;
+    library.push({
+      // Unit outline: sqrt(area) is 1, so a caller scales by the footprint weight it wants.
+      shape: wound.map(([x, z]) => [x / span, z / span]),
+      levels: Number.isFinite(b.levels) && b.levels > 0 ? b.levels : null,
+      roof: b.roofShape ?? 'flat',
+      kind: b.kind ?? 'yes',
+    });
+  }
   return library;
 }
 
 /**
- * Ear clipping, so concave outlines — Boston has many — cap correctly. A naive triangle fan folds
- * over itself on anything non-convex, which is most L-shaped and stepped footprints.
+ * The slate for a building of brightness `tone`, on a part of it `trim` lighter or darker than
+ * its walls, standing `edge` of the way in from the rim (1 at the heart).
+ *
+ * The hue comes from where the building stands, sliding from the rim colour to the heart colour.
+ * Tone and trim only make it lighter or darker, and by less the further out it is.
  */
-function earClip(poly) {
-  const live = poly.map((_, i) => i);
-  const turn = (a, b, c) =>
-    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-  let signed = 0;
-  for (let i = 0; i < poly.length; i++) {
-    const a = poly[i];
-    const b = poly[(i + 1) % poly.length];
-    signed += a[0] * b[1] - b[0] * a[1];
-  }
-  if (signed < 0) live.reverse();
-  const tris = [];
-  let guard = poly.length * poly.length + 16;
-  while (live.length > 3 && guard-- > 0) {
-    let cut = false;
-    for (let i = 0; i < live.length; i++) {
-      const ai = live[(i + live.length - 1) % live.length];
-      const bi = live[i];
-      const ci = live[(i + 1) % live.length];
-      const a = poly[ai];
-      const b = poly[bi];
-      const c = poly[ci];
-      if (turn(a, b, c) <= 0) continue;
-      let clear = true;
-      for (const j of live) {
-        if (j === ai || j === bi || j === ci) continue;
-        const q = poly[j];
-        if (turn(a, b, q) >= 0 && turn(b, c, q) >= 0 && turn(c, a, q) >= 0) {
-          clear = false;
-          break;
-        }
-      }
-      if (!clear) continue;
-      tris.push([ai, bi, ci]);
-      live.splice(i, 1);
-      cut = true;
-      break;
-    }
-    if (!cut) break;
-  }
-  if (live.length === 3) tris.push([live[0], live[1], live[2]]);
-  return tris;
-}
-
-const slate = (t) => {
-  const v = Math.max(0.1, Math.min(0.66, t));
-  const c = (k) =>
-    Math.round(255 * Math.min(1, v * k))
-      .toString(16)
-      .padStart(2, '0');
-  return '#' + c(0.86) + c(0.93) + c(1.08);
+const slate = (tone, trim, edge) => {
+  const rim = rgb(SLATE_RIM);
+  const heart = rgb(SLATE_HEART);
+  const lift =
+    1 +
+    ((tone - TONE_MID) * TONE_GAIN + (trim - TRIM_ROOF) * TRIM_GAIN) *
+      (RIM_CONTRAST + (1 - RIM_CONTRAST) * edge);
+  return (
+    '#' +
+    rim
+      .map((c, k) =>
+        Math.round(255 * Math.max(0, Math.min(1, (c + (heart[k] - c) * edge) * lift)))
+          .toString(16)
+          .padStart(2, '0'),
+      )
+      .join('')
+  );
 };
 
 /** A normalised outline grown or shrunk about its own centre, for plinths and cornices. */
@@ -260,7 +280,7 @@ function mast(surface, x, z, foot, head, width, taper, colour) {
 }
 
 /** Rooftop plant: the lift overrun and air handling that makes a real roof uneven. */
-function rooftop(surface, shape, x, z, size, spin, deck, tone, random) {
+function rooftop(surface, shape, x, z, size, spin, deck, shade, random) {
   const boxes = 1 + ((random() * 2.4) | 0);
   for (let n = 0; n < boxes; n++) {
     const k = 0.2 + random() * 0.26;
@@ -269,12 +289,12 @@ function rooftop(surface, shape, x, z, size, spin, deck, tone, random) {
     const ox = x + Math.cos(random() * Math.PI * 2) * size * drift;
     const oz = z + Math.sin(random() * Math.PI * 2) * size * drift;
     const tall = 0.0016 + random() * 0.0042;
-    raise(surface, lean, ox, oz, size, spin, deck, deck + tall, slate(tone + 0.03));
+    raise(surface, lean, ox, oz, size, spin, deck, deck + tall, shade(0.03));
     capRing(
       surface,
       liftRing(lean, ox, oz, deck + tall, size, spin),
       earClip(lean),
-      slate(tone + 0.05),
+      shade(0.05),
       true,
     );
   }
@@ -289,14 +309,15 @@ function rooftop(surface, shape, x, z, size, spin, deck, tone, random) {
  * Detail is spent by height -- a three-storey block gets a plinth and a cornice, a fifty-storey
  * tower gets setbacks and an antenna -- so the triangles go where they are actually visible.
  *
- * Colours are unchanged throughout; this is geometry only.
+ * `tone` is the building's own brightness and `edge` how central it stands; between them they
+ * pick every colour on it. `ground` is where it leaves its contact shadow.
  */
-function build(surface, template, x, z, size, spin, height, tone, slabTop, random) {
+function build(surface, template, x, z, size, spin, height, tone, edge, slabTop, random, ground) {
   const { shape, roof } = template;
   const base = slabTop;
-  // Every shade in this building is the original slate at a different brightness, so trim reads
+  // Every shade in this building is the same slate at a different brightness, so trim reads
   // as trim rather than as a different material.
-  const shade = (d) => slate(tone + d);
+  const shade = (d) => slate(tone, d, edge);
   const colour = shade(0);
   const tris = earClip(shape);
 
@@ -314,7 +335,13 @@ function build(surface, template, x, z, size, spin, height, tone, slabTop, rando
   const plinthTop = base + Math.min(height * 0.16, 0.0045);
   const plinth = swell(shape, 1.075);
   raise(surface, plinth, x, z, size, spin, base, plinthTop, shade(-0.03));
-  capRing(surface, liftRing(plinth, x, z, base, size, spin), earClip(plinth), shade(-0.03), false);
+  const plinthTris = earClip(plinth);
+  capRing(surface, liftRing(plinth, x, z, base, size, spin), plinthTris, shade(-0.03), false);
+  // The ledge where the plinth stands proud of the shaft. Left open, it shows the ground through
+  // the building's foot -- unnoticeable on a dark ground, a pale seam on a light one.
+  capRing(surface, liftRing(plinth, x, z, plinthTop, size, spin), plinthTris, shade(-0.03), true);
+  // The halo it stands in, hugging the plinth.
+  ground.footprintShadow(liftRing(plinth, x, z, 0, size, spin).map((p) => [p[0], p[2]]));
 
   if (pitched) {
     const wallTop = base + height * 0.78;
@@ -388,7 +415,7 @@ function build(surface, template, x, z, size, spin, height, tone, slabTop, rando
 
   // Plant on anything tall enough to need it.
   if (midRise && random() < 0.55) {
-    rooftop(surface, waist, x, z, waistSize, spin, deckY, tone, random);
+    rooftop(surface, waist, x, z, waistSize, spin, deckY, shade, random);
   }
 
   // Masts and spires: the thing that gives a skyline its ragged top edge.
@@ -406,7 +433,100 @@ function build(surface, template, x, z, size, spin, height, tone, slabTop, rando
   }
 }
 
-export function cityBlocks(surface, lines, slabTop) {
+// ---------------------------------------------------------------------------------------------
+// Thinning. The layout below fills four bands either side of every line, which is the right way to
+// find places for buildings and far too many buildings to look at: at that density the blocks hide
+// the lines they are there to give a setting to, and a landmark is lost among them.
+//
+// So the layout is kept exactly as it was -- same seed, same places, same shapes -- and only some
+// of what it lays out is built. Which ones is decided over the whole city at once: the most
+// substantial buildings are taken first, and each one taken clears a space round itself, so what
+// is left is evenly spread and made of blocks big enough to read as buildings. Landmarks and the
+// explorable stations get a clearing of their own, and the river is kept clear to its banks.
+// ---------------------------------------------------------------------------------------------
+
+/** Open ground left round a landmark's foot, beyond the building's own reach. */
+const LANDMARK_CLEARING = 0.016;
+
+/** Open ground left round an explorable station's drum (radius 0.0192), likewise. */
+const DRUM_CLEARING = 0.0192 + 0.014;
+
+/**
+ * The gap two neighbouring buildings must leave between them, at the heart of the network and at
+ * its rim. The layout's own gap is 0.009 everywhere; these are what thin it. Wider at the rim, so
+ * the city trails off instead of stopping.
+ */
+const SPACING_HEART = 0.0105;
+const SPACING_RIM = 0.032;
+
+/** Ground left open between a building and the river bank, beyond the building's own reach. */
+const BANK = 0.004;
+
+/** Buildings with less reach than this are specks at map scale, and go first. */
+const SMALLEST_REACH = 0.0085;
+
+/**
+ * Which of the laid-out buildings to build. `blocks` is every building the layout placed, in
+ * order; the result is the set of their indices that survive.
+ */
+function thin(blocks, { keepOut = [], drums = [], water = [] }) {
+  const standing = blocks.filter((b) => {
+    if (b.reach < SMALLEST_REACH) return false;
+    // Nothing is built in the river, or with a corner over the bank.
+    if (inWater(water, b.x, b.z)) return false;
+    for (let n = 0; n < 12; n++) {
+      const a = (n / 12) * Math.PI * 2;
+      if (inWater(water, b.x + Math.cos(a) * (b.reach + BANK), b.z + Math.sin(a) * (b.reach + BANK))) return false;
+    }
+    for (const ring of keepOut) if (ringDistance(ring, b.x, b.z) < b.reach + LANDMARK_CLEARING) return false;
+    for (const [x, z] of drums) if (Math.hypot(b.x - x, b.z - z) < b.reach + DRUM_CLEARING) return false;
+    return true;
+  });
+  // Substance first: a broad or tall building says more about the city than a small low one. But
+  // not strictly, or only the big blocks would survive and the city would lose its grain: each
+  // building's weight is scaled by a number fixed by its place in the layout, so some modest ones
+  // outrank their neighbours. Nothing here is random, and the index breaks ties, so the choice is
+  // the same on every run.
+  const luck = (index) => (Math.imul(index + 1, 2654435761) >>> 0) / 4294967296;
+  const weight = (b) => b.reach * (1 + b.height / 0.03) * (0.55 + 0.9 * luck(b.index));
+  standing.sort((a, b) => weight(b) - weight(a) || a.index - b.index);
+  const kept = [];
+  for (const b of standing) {
+    const spacing = SPACING_RIM + (SPACING_HEART - SPACING_RIM) * b.edge;
+    if (kept.every((k) => Math.hypot(k.x - b.x, k.z - b.z) >= k.reach + b.reach + spacing)) kept.push(b);
+  }
+  return new Set(kept.map((b) => b.index));
+}
+
+/** A surface and a ground that take a building and keep nothing: where the thinned ones go. */
+const nowhere = { surface: new Surface(0, 'Unbuilt'), ground: { footprintShadow() {} } };
+
+/**
+ * Lay the city out and build what survives the thinning. `clear` says what to leave room for:
+ * `keepOut`, the plan outlines of the landmarks; `drums`, the explorable stations; and `water`,
+ * the reaches of the river.
+ *
+ * The layout runs twice on the same seed. The first pass builds nothing and only reports where
+ * every building would go; the second builds the survivors. Running the whole layout both times is
+ * what keeps each surviving building identical to the one the unthinned city had in that place:
+ * every building draws from one random stream, so skipping one would reshuffle all that follow.
+ */
+export function cityBlocks(surface, lines, slabTop, ground, clear = {}) {
+  const blocks = [];
+  layOut(lines, slabTop, (block) => {
+    blocks.push(block);
+    return nowhere;
+  });
+  const kept = thin(blocks, clear);
+  layOut(lines, slabTop, (block) => (kept.has(block.index) ? { surface, ground } : nowhere));
+  return { placed: blocks.length, kept: kept.size };
+}
+
+/**
+ * The layout itself. `site(block)` is asked, for each building in turn, which surface and ground
+ * it should be built on.
+ */
+function layOut(lines, slabTop, site) {
   const random = rng(20260221);
   const library = footprintLibrary();
   // Boston is a low-rise city with a small cluster of towers, and the OSM sample says so:
@@ -538,9 +658,11 @@ export function cityBlocks(surface, lines, slabTop) {
             (0.006 + storeys ** 0.8 * 0.0042) * (0.58 + edge * 0.42),
           );
           const spin = random() * Math.PI * 2;
-          // Fade: tone falls toward the background at the rim, so the city dissolves outward.
-          const tone = (district.tone[0] + random() * district.tone[1]) * (0.4 + edge * 0.6);
-          build(surface, template, x, z, size, spin, height, tone, slabTop, random);
+          // The building's own tone. The fade toward the rim is not here: slate() does it, from
+          // how central the building stands.
+          const tone = district.tone[0] + random() * district.tone[1];
+          const { surface, ground } = site({ index: count, x, z, reach, height, edge });
+          build(surface, template, x, z, size, spin, height, tone, edge, slabTop, random, ground);
 
           const k = bucket(x, z);
           if (!placed.has(k)) placed.set(k, []);

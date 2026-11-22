@@ -2,7 +2,7 @@ import * as pc from 'playcanvas';
 import type { VoiceState } from '../voice/RealtimeVoice';
 import type { JarvisReveal } from './JarvisReveal';
 import { clampForearmClearance, forearmTarget, type ForearmPose } from './forearmMount';
-import { assetBase, brass, calloutAmber, child, damp, ivory, material, pickBounds, shape, target, wrapAngle,
+import { assetBase, brass, child, damp, ivory, material, pickBounds, shape, sunflower, target, wrapAngle,
   type HitTarget, type ModelLibrary, type PickBounds, type XYZ } from './sceneSupport';
 
 interface PanelLine {
@@ -16,8 +16,14 @@ interface PanelLine {
 const paper = '#f4ecdc';
 const ink = '#221b15';
 const bronze = '#80603a';
-const slate = '#1c222d';
-const previewCyan = '#4cd4ff';
+// Callout plaques use the app's paper tokens (web/src/styles/tokens.css): a card face, ink text,
+// muted detail, and sunflower for the one thing to notice, the 3D badge.
+const card = '#FFFDF8';
+const cardInk = '#22252B';
+const cardMuted = '#6B665C';
+const cardEdge = '#CFC5B0';
+const cardInset = '#F1EBDF';
+const priceInk = '#8A5300';
 
 export class CanvasSurface {
   readonly canvas = document.createElement('canvas');
@@ -295,10 +301,10 @@ export class PhysicalPlaque {
     this.surface.draw(JSON.stringify([name, detail, category, lineColor, selected, has3D]), (ctx, width, height) => {
       const padding = width * 0.046;
       const contentWidth = width - padding * 2;
-      ctx.fillStyle = slate;
+      ctx.fillStyle = card;
       ctx.fillRect(0, 0, width, height);
-      ctx.strokeStyle = selected ? ivory : brass;
-      ctx.lineWidth = 4;
+      ctx.strokeStyle = selected ? cardInk : cardEdge;
+      ctx.lineWidth = selected ? 6 : 4;
       ctx.strokeRect(12, 12, width - 24, height - 24);
       if (lineColor) {
         ctx.fillStyle = lineColor;
@@ -313,23 +319,19 @@ export class PhysicalPlaque {
       const titleY = height * 0.34;
       if (has3D) {
         if (banner) {
-          ctx.fillStyle = '#38d6ff';
+          ctx.fillStyle = sunflower;
           ctx.fillRect(12, 10, width - 24, 7);
         }
-        ctx.fillStyle = banner ? '#38d6ff' : '#103447';
+        ctx.fillStyle = sunflower;
         ctx.fillRect(previewX, titleY - previewHeight / 2, previewWidth, previewHeight);
-        ctx.strokeStyle = previewCyan;
-        ctx.lineWidth = 3;
-        ctx.strokeRect(previewX, titleY - previewHeight / 2, previewWidth, previewHeight);
-        ctx.fillStyle = 'rgba(76, 212, 255, 0.65)';
         ctx.fillRect(width - 14, 16, 4, height - 32);
-        ctx.fillStyle = banner ? '#0b1824' : previewCyan;
+        ctx.fillStyle = cardInk;
         ctx.font = `800 ${height * (banner ? 0.25 : 0.20)}px system-ui, sans-serif`;
         ctx.textAlign = 'center';
         ctx.fillText('3D', previewX + previewWidth / 2, titleY, previewWidth - 8);
         ctx.textAlign = 'left';
       }
-      ctx.fillStyle = ivory;
+      ctx.fillStyle = cardInk;
       ctx.font = `700 ${height * 0.31}px system-ui, sans-serif`;
       ctx.fillText(name, padding, titleY, contentWidth - (has3D ? previewWidth + 20 : 0));
 
@@ -337,17 +339,17 @@ export class PhysicalPlaque {
       ctx.font = `600 ${height * 0.21}px system-ui, sans-serif`;
       if (category) {
         const badgeWidth = Math.min(contentWidth * 0.62, ctx.measureText(detail).width + 32);
-        ctx.fillStyle = '#3c3024';
+        ctx.fillStyle = cardInset;
         ctx.fillRect(padding, baseline - height * 0.13, badgeWidth, height * 0.26);
-        ctx.fillStyle = calloutAmber;
+        ctx.fillStyle = priceInk;
         ctx.fillText(detail, padding + 16, baseline, badgeWidth - 32);
 
-        ctx.fillStyle = ivory;
+        ctx.fillStyle = cardMuted;
         ctx.textAlign = 'right';
         ctx.fillText(category, width - padding, baseline, contentWidth - badgeWidth - 24);
         ctx.textAlign = 'left';
       } else {
-        ctx.fillStyle = selected ? ivory : brass;
+        ctx.fillStyle = selected ? cardInk : cardMuted;
         ctx.fillText(detail, padding, baseline, contentWidth);
       }
     });
@@ -649,7 +651,7 @@ export class XRActionBar {
     const active = key.name.toLowerCase() === this.mode;
     const label = key.name === 'Table' ? (this.roomBackdrop && this.ar ? 'PASS' : 'ROOM')
       : key.name === 'Debug' ? 'VOICE' : key.name.toUpperCase();
-    const finish = disabled ? '#a9a297' : voiceOn ? (pressed ? '#83eaff' : previewCyan)
+    const finish = disabled ? '#a9a297' : voiceOn ? (pressed ? '#C2EBCD' : '#9FD8B0')
       : pressed || active ? '#efb762' : '#efe4ce';
     key.surface.draw(`${label}:${finish}`, (ctx, w, h) => {
       ctx.fillStyle = finish;

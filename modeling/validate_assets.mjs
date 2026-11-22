@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { places } from '../server/src/db/seed.ts';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { ringDistance } from './landmarks.mjs';
+import { charlesRiver, inWater } from './water.mjs';
 
 const dir = fileURLToPath(new URL('output/', import.meta.url));
 const { areas } = JSON.parse(
@@ -57,7 +59,7 @@ const vendorModels = [
   'mbta-train-orange',
   'mbta-train-blue',
 ];
-const jsonNames = ['station-anchors', 'segment-anchors', 'mbta-3d-paths'];
+const jsonNames = ['station-anchors', 'segment-anchors', 'mbta-3d-paths', 'landmark-anchors'];
 const expected = [
   ...[...genModels, ...vendorModels].map((n) => n + '.glb'),
   ...Object.keys(gaussians).map((n) => n + '.ply'),
@@ -232,9 +234,8 @@ function parseModel(name) {
     : name.startsWith('boston')
       // Floor lowered from 15000: the sculpture now uses flat track plates instead of swept
       // tubes and has no deck, street grid or river, so the honest triangle count is far lower.
-      // The ceiling is the one that matters for performance and is unchanged.
-      // 13 draws: the ground needs a material of its own so it can render unlit and its rim can
-      // reach the backdrop exactly. Everything else still shares.
+      // The ceiling is the one that matters for performance and is unchanged. Thirteen primitives:
+      // the twelve opaque surfaces and the translucent ground plate, which has to be its own.
       ? [4000, 55000, 13]
       : uiModels.includes(name)
         ? [1, 5000, 20]
@@ -264,16 +265,11 @@ const map = models['boston-map-sculpture'];
 // the backdrop. Checked as a range: wide enough to prove the ground and its skirt are present,
 // tight enough to catch runaway geometry. The track geometry itself is bounded separately by
 // the per-line checks further down.
-// Extent is now set by the track and the buildings, not the ground: the blob is cut to the city
-// and the lines run out past its edge, so the model reaches roughly as far as clipToFootprint
-// allows the rails to go.
-// Extent is set by the track, the buildings, and the ground's faded rim, which reaches a little
-// past the outermost block. The rails themselves are clipped to +/-0.738 x +/-0.513.
 assert.ok(
-  map.bounds.min[0] >= -0.90 && map.bounds.min[0] <= -0.70 &&
-    map.bounds.max[0] <= 0.90 && map.bounds.max[0] >= 0.70 &&
-    map.bounds.min[2] >= -0.68 && map.bounds.min[2] <= -0.48 &&
-    map.bounds.max[2] <= 0.68 && map.bounds.max[2] >= 0.48,
+  map.bounds.min[0] >= -1.12 && map.bounds.min[0] <= -0.88 &&
+    map.bounds.max[0] <= 1.12 && map.bounds.max[0] >= 0.88 &&
+    map.bounds.min[2] >= -0.92 && map.bounds.min[2] <= -0.62 &&
+    map.bounds.max[2] <= 0.92 && map.bounds.max[2] >= 0.62,
   'sculpture footprint ' + reportBounds(map.bounds),
 );
 // Floats above zero now: the lowest geometry is the station skirts, not a deck resting on y=0.
@@ -397,8 +393,90 @@ for (const line of paths) {
   void ys;
   offsets.set(line.color, offset + spans * 16 + 8);
 }
-for (const [color, count] of offsets)
-  assert.equal(count, map.meshes.get('Lacquer ' + color).positions.length / 3);
+// After the plates, each line's surface holds its casing: per line, two flanges and two outer
+// walls along every span, wrapped round both ends. It sits beside the plate and never above it.
+for (const [color, count] of offsets) {
+  const positions = map.meshes.get('Lacquer ' + color).positions;
+  const sameColor = paths.filter((l) => l.color === color);
+  const casing = sameColor.reduce((n, l) => n + (l.points.length - 1) * 16 + 32, 0);
+  assert.equal(positions.length / 3, count + casing, color + ' casing vertices');
+  const level = sameColor[0].points[0][1];
+  assert.ok(sameColor.every((l) => l.points.every((p) => p[1] === level)));
+  for (let i = count * 3; i < positions.length; i += 3) {
+    const y = positions[i + 1];
+    assert.ok(
+      Math.abs(y - (level - 0.0014)) < 1e-6 || Math.abs(y - (level + 0.0014 - 0.0004)) < 1e-6,
+      color + ' casing height ' + y,
+    );
+  }
+}
+// The ground is the one translucent surface: a sheet under the city whose colour and opacity are
+// in its vertex colours, with the contact shadows a hair above it. Everything else is opaque, and
+// neither the city nor the landmarks light themselves.
+{
+  const plate = map.meshes.get('Ground plate');
+  assert.ok(plate, 'ground plate');
+  assert.equal(plate.mat.alphaMode, 'BLEND');
+  assert.ok(!plate.mat.emissiveFactor);
+  const heights = new Set();
+  for (let i = 1; i < plate.positions.length; i += 3) heights.add(plate.positions[i].toFixed(5));
+  assert.deepEqual([...heights].sort(), ['0.03940', '0.03960'], 'plate and shadow levels');
+  for (const [name, { mat }] of map.meshes) {
+    if (name !== 'Ground plate') assert.equal(mat.alphaMode ?? 'OPAQUE', 'OPAQUE', name);
+    if (/^(City blocks|Landmark)/.test(name)) assert.ok(!mat.emissiveFactor, name + ' is self-lit');
+  }
+}
+// Landmarks stand where they really are. An anchor's coordinates, projected, must land exactly as
+// far from where the landmark was built as the generator says it moved it; that move is only ever
+// the little it takes to clear the oversized network; and afterwards nothing stands on a line:
+// every foot is clear of every track by more than the half-width of a plate and its casing.
+{
+  const landmarks = load('landmark-anchors');
+  const ids = landmarks.map((l) => l.id);
+  assert.equal(new Set(ids).size, ids.length, 'landmark ids');
+  for (const id of ['citgo', 'fenway', 'prudential', 'clarendon', 'statehouse', 'customhouse', 'bunkerhill'])
+    assert.ok(ids.includes(id), 'landmark ' + id);
+  const stone = ['Landmark stone', 'Landmark glass'].map((name) => map.meshes.get(name));
+  assert.ok(stone.every(Boolean), 'landmark surfaces');
+  for (const l of landmarks) {
+    const x = ((l.lon + 71.095) * 111320 * Math.cos((42.354 * Math.PI) / 180)) / 6500;
+    const z = (-(l.lat - 42.354) * 110540) / 6500;
+    const moved = Math.hypot(l.position[0] - x, l.position[2] - z) * 6500;
+    approx(moved, l.movedMetres, 1, l.id + ' is not where its coordinates put it');
+    assert.ok(l.movedMetres <= 100, l.id + ' moved ' + l.movedMetres + ' m from its true position');
+    assert.ok(l.min[1] >= 0.04 - 1e-6 && l.max[1] > l.min[1] + 0.004 && l.max[1] <= 0.18, l.id + ' height');
+    for (const line of paths)
+      for (let i = 1; i < line.points.length; i++)
+        for (let step = 0; step <= 8; step++) {
+          const px = line.points[i - 1][0] + ((line.points[i][0] - line.points[i - 1][0]) * step) / 8;
+          const pz = line.points[i - 1][2] + ((line.points[i][2] - line.points[i - 1][2]) * step) / 8;
+          for (const ring of l.foot)
+            assert.ok(ringDistance(ring, px, pz) > 0.0054 + 0.001, l.id + ' stands on ' + line.name);
+        }
+  }
+}
+// The Charles is the surveyed river, in the right place: points known to be on the water are in
+// it, points known to be on its banks are not, and no landmark but the bridge stands in it.
+{
+  const river = charlesRiver();
+  const at = (lat, lon) => [
+    ((lon + 71.095) * 111320 * Math.cos((42.354 * Math.PI) / 180)) / 6500,
+    (-(lat - 42.354) * 110540) / 6500,
+  ];
+  for (const [name, lat, lon, wet] of [
+    ['mid-span of the Longfellow Bridge', 42.3615, -71.0752, true],
+    ['mid-span of the Harvard Bridge', 42.3545, -71.0915, true],
+    ['the basin off MIT', 42.3555, -71.09, true],
+    ['the Weeks Footbridge', 42.3683, -71.1187, true],
+    ['the MIT Great Dome', 42.359756, -71.092061, false],
+    ['the Hatch Shell', 42.3573, -71.0737, false],
+    ['Kenmore station', 42.348949, -71.095169, false],
+  ])
+    assert.equal(inWater(river.reaches, ...at(lat, lon)), wet, name + (wet ? ' should be water' : ' should be land'));
+  for (const l of load('landmark-anchors'))
+    if (l.id !== 'zakim')
+      for (const [x, z] of l.foot.flat()) assert.ok(!inWater(river.reaches, x, z), l.id + ' stands in the river');
+}
 function topAt(meshes, x, z) {
   let height = -Infinity;
   for (const { positions: p, indices, offset } of meshes.values()) {

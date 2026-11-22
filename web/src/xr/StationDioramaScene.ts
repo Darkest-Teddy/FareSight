@@ -3,7 +3,7 @@ import { has3D } from '../data/preview3D';
 import type { XRFilterSummary, XRPlaceData, XRStopData } from './bridgeTypes';
 import { PhysicalPlaque } from './CanvasPanel3D';
 import { jarvisPoints, type JarvisReveal } from './JarvisReveal';
-import { assetBase, brass, child, clamp, damp, fetchAssetJson, ivory, material, pickBounds, shape,
+import { assetBase, brass, child, clamp, damp, fetchAssetJson, highlightInk, ink, ivory, material, pickBounds, shape, sunflower,
   type DebugLog, type HitTarget, type ModelLibrary, type PickBounds, type XYZ } from './sceneSupport';
 
 interface SegmentProjection {
@@ -87,10 +87,12 @@ const pinRevealTime = 0.45;
 const stationRevealTime = 1.48;
 const stemColor = new pc.Color().fromString(brass);
 const mutedColor = new pc.Color().fromString('#93979c');
-const beaconColor = '#38d6ff';
-const highlightBeaconColor = '#ffb547';
-const cyanColor = new pc.Color().fromString(beaconColor);
-const highlightColor = new pc.Color().fromString(highlightBeaconColor);
+// A 3D-venue locator is an ink ring under a sunflower column: the ring gives it an edge on any
+// roof or street colour, the column gives it the warmth. Neither relies on glow, which does not
+// read against the paper backdrop.
+const ringColor = new pc.Color().fromString(ink);
+const columnColor = new pc.Color().fromString(sunflower);
+const highlightColor = new pc.Color().fromString(highlightInk);
 const fallbackGrabSize: XYZ = [0.914, 0.54, 0.98];
 const fallbackGrabCenter: XYZ = [0, 0.09, 0.02];
 const defaultFilters: XRFilterSummary = { craving: '', maxBudget: 20, startStopId: '', groupSize: 1, familyVisit: false };
@@ -111,7 +113,7 @@ function categoryTag(place: XRPlaceData & { cravings?: readonly string[] }): str
 }
 
 function beaconMaterial(opacity = 1): pc.StandardMaterial {
-  const surface = material(beaconColor, 0.94, opacity);
+  const surface = material(ink, 0.94, opacity);
   surface.useLighting = false;
   surface.diffuse.set(0, 0, 0);
   surface.update();
@@ -375,13 +377,13 @@ export class StationDioramaScene {
     if (!locator) return;
     const isHighlighted = this.highlighted.has(pin.place.id);
     const brightness = isHighlighted ? 1 : pc.math.lerp(0.15, 1, pin.visibility);
-    const tint = isHighlighted ? highlightColor : cyanColor;
+    const tint = isHighlighted ? highlightColor : ringColor;
     locator.surface.emissive.copy(tint);
     locator.pulseSurface.emissive.copy(tint);
-    locator.sleeveSurface.emissive.copy(tint);
+    locator.sleeveSurface.emissive.copy(columnColor);
     locator.surface.emissiveIntensity = isHighlighted ? 1.35 : brightness;
     locator.surface.update();
-    locator.sleeveSurface.opacity = (isHighlighted ? 0.68 : 0.48) * brightness;
+    locator.sleeveSurface.opacity = (isHighlighted ? 0.82 : 0.56) * brightness;
     locator.sleeveSurface.update();
     const speed = isHighlighted ? 1.05 : 1.85;
     locator.phase = this.reveal.enabled ? (locator.phase + dt / speed) % 1 : 0.34;

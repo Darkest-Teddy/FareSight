@@ -8,6 +8,8 @@ import { createGunzip } from 'node:zlib';
 import type { Asset, Vector3 } from '@faresight/shared';
 import type { Config } from '../config.ts';
 import { MAX_SPLAT_BYTES, TerminalProviderError, type CommitFile } from './providerHttp.ts';
+import { decimatePly, decimateSpz } from './splatDecimate.ts';
+import type { PlyLayout } from './splatDecimate.ts';
 import { upgradeSpz } from './spzUpgrade.ts';
 
 const maxVertices = 2_000_000;
@@ -108,8 +110,12 @@ export function inspectSplat(buffer: Buffer, centerDish = false) {
       max[axis] -= midpoint;
     }
   }
-  return { count, bounds: { min, max }, width };
+  const layout: PlyLayout = { offset, stride, count, little: format === 'binary_little_endian', properties };
+  return { count, bounds: { min, max }, width, layout };
 }
+
+/** No published splat has more Gaussians than this. Rooms are cut to it; dishes are cut much lower. */
+export const maxGaussians = 400_000;
 
 let cli: Promise<string[] | undefined> | undefined;
 function splatCli(): Promise<string[] | undefined> {
@@ -138,7 +144,7 @@ export async function convertSplat(
   if ((await stat(original)).size > MAX_SPLAT_BYTES) throw new TerminalProviderError('Splat exceeds the byte limit');
 
   try {
-    let geometry: { count: number; bounds?: NonNullable<Asset['metadata']>['bounds']; width?: number };
+    let geometry: { count: number; bounds?: NonNullable<Asset['metadata']>['bounds']; width?: number; layout?: PlyLayout };
     let spzVersion: number | undefined;
     if (format === 'spz') {
       const { count, version } = await readSpzHeader(original);
@@ -149,7 +155,7 @@ export async function convertSplat(
       geometry = inspectSplat(payload, kind === 'dish');
       await writeFile(normalized, payload, { flag: 'wx' });
     }
-    const target = kind === 'room' ? 100_000 : 60_000;
+    const target = kind === 'room' ? maxGaussians : 60_000;
     const command = await splatCli();
     const decimate = geometry.count > target;
     const commands = [
@@ -185,25 +191,42 @@ export async function convertSplat(
       metadata.conversion_status = 'compressed';
       return { path: sog, count: convertedCount, format: 'sog' as const, metadata };
     }
+    // Without SplatTransform the splat is cut down to the target here, or a full Atlas room is too
+    // heavy to render smoothly.
     let fallback = original;
+    let count = geometry.count;
     if (format === 'ply') {
       fallback = resolve(config.outputs, `${jobId}-normalized.ply`);
+      const reduced = geometry.layout ? decimatePly(await readFile(normalized), geometry.layout, target) : undefined;
+      if (reduced) {
+        await writeFile(normalized, reduced.file);
+        count = reduced.count;
+        metadata.conversion_status = 'ply_decimated';
+      }
       await commit(normalized, fallback);
-    } else if (spzVersion === 2) {
-      let upgraded: Buffer | undefined;
+    } else {
+      // Served as is, so it also has to be a version the viewer can read. Atlas still writes version 2.
+      let reduced: { file: Buffer; count: number } | undefined;
+      let viewable: Buffer | undefined;
       try {
-        upgraded = upgradeSpz(await readFile(original));
+        const source = await readFile(original);
+        reduced = decimateSpz(source, target);
+        viewable = (spzVersion === 2 ? upgradeSpz(reduced?.file ?? source) : undefined) ?? reduced?.file;
       } catch (error) {
         throw new TerminalProviderError(error instanceof Error ? error.message : 'Could not upgrade SPZ');
       }
-      if (upgraded) {
-        if (upgraded.length > MAX_SPLAT_BYTES) throw new TerminalProviderError('Upgraded SPZ exceeds the byte limit');
+      if (viewable) {
+        if (viewable.length > MAX_SPLAT_BYTES) throw new TerminalProviderError('Upgraded SPZ exceeds the byte limit');
         fallback = resolve(config.outputs, `${jobId}.spz`);
-        await writeFile(unique, upgraded, { flag: 'wx' });
+        await writeFile(unique, viewable, { flag: 'wx' });
         await commit(unique, fallback);
+        if (reduced) {
+          count = reduced.count;
+          metadata.conversion_status = 'spz_decimated';
+        }
       }
     }
-    return { path: fallback, count: geometry.count, format, metadata };
+    return { path: fallback, count, format, metadata };
   } finally {
     await Promise.all([unique, temporary, limited, ...(format === 'ply' ? [normalized] : [])].map((path) => rm(path, { force: true })));
   }

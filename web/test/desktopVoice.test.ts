@@ -11,6 +11,7 @@ class TestElement extends EventTarget {
   children: TestElement[] = [];
   dataset: Record<string, string> = {};
   attributes = new Map<string, string>();
+  classList = { add() {} };
   hidden = false;
   disabled = false;
   isConnected = true;
@@ -50,6 +51,7 @@ function installDom(t: TestContext) {
   const doc = {
     activeElement: null as TestElement | null,
     createElement: (tag: string) => new TestElement(tag, doc),
+    createElementNS: (_namespace: string, tag: string) => new TestElement(tag, doc),
   };
   const body = doc.createElement('body');
   const values = { document: { ...doc, get activeElement() { return doc.activeElement; }, body }, HTMLElement: TestElement, window: globalThis };

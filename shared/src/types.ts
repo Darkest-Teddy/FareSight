@@ -187,7 +187,7 @@ export interface Asset {
     measured_width?: number;
     target_gaussians?: number;
     splat_transform_command?: string;
-    conversion_status?: 'compressed' | 'ply_fallback' | 'spz_fallback';
+    conversion_status?: 'compressed' | 'ply_fallback' | 'spz_fallback' | 'spz_decimated' | 'ply_decimated';
   };
 }
 

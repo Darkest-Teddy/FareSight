@@ -8,7 +8,11 @@ const migrationsDir = resolve(projectRoot, 'server/migrations');
 const MIGRATION_LOCK = 4_711_001;
 
 export function createPool(connectionString: string) {
-  return new pg.Pool({ connectionString, max: 5 });
+  const pool = new pg.Pool({ connectionString, max: 5, keepAlive: true, connectionTimeoutMillis: 10_000 });
+  // A hosted database closes idle connections now and then. Without a listener that error would stop the
+  // whole process; the pool has already discarded the connection and opens a new one on the next query.
+  pool.on('error', (error) => console.error('Postgres dropped an idle connection:', error.message));
+  return pool;
 }
 
 /** Applies every pending `NNN_name.up.sql`, or with `down` reverts the most recent applied migration. */

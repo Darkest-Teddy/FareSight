@@ -1,5 +1,5 @@
 import type { VoiceState, VoiceTranscript } from '../voice/RealtimeVoice';
-import { button, element } from './dom.ts';
+import { button, element, icon } from './dom.ts';
 
 export interface LiveVoiceDockActions {
   startVoice(): void;
@@ -7,6 +7,7 @@ export interface LiveVoiceDockActions {
   stop(): void;
   toggleMute(): void;
   sendText(text: string): boolean;
+  opened?(): void;
 }
 
 const stateLabels: Record<VoiceState, string> = {
@@ -16,8 +17,7 @@ const stateLabels: Record<VoiceState, string> = {
 export class LiveVoiceDock {
   readonly trigger: HTMLButtonElement;
   readonly root = element('section', 'voice-dock panel');
-  private readonly triggerDot = element('span', 'voice-dot');
-  private readonly triggerLabel = element('span', '', 'GPT Live');
+  private readonly triggerLabel = element('span', 'voice-label', 'GPT Live');
   private readonly statusBadge = element('span', 'voice-state', 'Ready');
   private readonly modelMeta = element('span', 'voice-model', 'gpt-live-1.1');
   private readonly errorNote = element('p', 'message error');
@@ -44,8 +44,14 @@ export class LiveVoiceDock {
     this.trigger = button('', () => this.setOpen(this.root.hidden), 'voice-trigger');
     this.trigger.setAttribute('aria-expanded', 'false');
     this.trigger.setAttribute('aria-controls', 'faresight-voice-dock');
-    this.triggerDot.setAttribute('aria-hidden', 'true');
-    this.trigger.append(this.triggerDot, this.triggerLabel);
+    this.trigger.setAttribute('aria-label', 'GPT Live');
+    this.trigger.dataset.state = 'idle';
+    const glyph = element('span', 'voice-glyph');
+    const bars = element('span', 'voice-bars');
+    bars.append(element('i'), element('i'), element('i'));
+    glyph.setAttribute('aria-hidden', 'true');
+    glyph.append(icon('mic'), element('span', 'voice-spinner'), bars, icon('alert'));
+    this.trigger.append(glyph, this.triggerLabel);
 
     this.root.id = 'faresight-voice-dock';
     this.root.setAttribute('aria-label', 'FareSight Live Voice Assistant');
@@ -105,10 +111,12 @@ export class LiveVoiceDock {
   }
 
   setOpen(open: boolean): void {
-    const restore = !open && !this.root.hidden && this.root.contains(document.activeElement);
+    if (open === !this.root.hidden) return;
+    const restore = !open && this.root.contains(document.activeElement);
     this.root.hidden = !open;
     this.trigger.setAttribute('aria-expanded', String(open));
     if (restore) this.trigger.focus({ preventScroll: true });
+    if (open) this.actions.opened?.();
   }
 
   setModel(model: string): void {
@@ -163,7 +171,11 @@ export class LiveVoiceDock {
     this.endBtn.hidden = !started;
     this.endBtn.textContent = state === 'connecting' ? 'Cancel' : 'End session';
     this.sendBtn.disabled = state === 'connecting' || state === 'thinking' || state === 'speaking';
-    this.triggerLabel.textContent = state === 'listening' && (!this.hasMic || this.muted || this.paused) ? 'GPT Live' : stateLabels[state];
+    const micActive = this.hasMic && !this.muted && !this.paused;
+    const label = state === 'listening' && !micActive ? 'GPT Live' : stateLabels[state];
+    this.triggerLabel.textContent = label;
+    this.trigger.setAttribute('aria-label', label === 'GPT Live' ? label : `${label}, GPT Live`);
+    this.trigger.dataset.micActive = String(micActive);
     this.statusBadge.textContent = state === 'idle' ? 'Ready' : state === 'error' ? 'Connection error'
       : state === 'listening' && !this.hasMic ? 'Text chat' : state === 'listening' && this.muted ? 'Mic muted'
         : state === 'listening' && this.paused ? 'Standby' : stateLabels[state];

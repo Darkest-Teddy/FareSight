@@ -33,7 +33,11 @@ export async function createApp(config: Config = getConfig(), options: { logger?
 
   const logError = (error: unknown) => app.log.error(error);
   // Optional: Postgres and object storage for room captures. Without them photos stay on this server's disk.
-  const captures = await openCaptures(config);
+  // If they cannot be reached at startup the rest of the app still runs, and the apps fall back to plain uploads.
+  const captures = await openCaptures(config).catch((error) => {
+    console.error('Capture storage is unavailable, so captures are switched off until the next restart:', error);
+    return undefined;
+  });
   const captureEvents = captures && createCaptureEvents(captures, logError);
   const stopMirror = captures && mirrorJobs(store, captures, logError);
 

@@ -6,11 +6,11 @@ import { MapSculptureScene } from '../xr/MapSculptureScene';
 import { SplatLoader } from '../xr/SplatLoader';
 import { StationDioramaScene } from '../xr/StationDioramaScene';
 import { Backdrop } from '../xr/Backdrop';
-import { assetBase, child, clamp, damp, ModelLibrary, smooth } from '../xr/sceneSupport';
+import { assetBase, child, clamp, damp, ModelLibrary, smooth, studioAmbient, studioLights } from '../xr/sceneSupport';
 
 /**
  * The landing page's 3D stage. It floats the app's map sculpture and station diorama in the
- * dusk sky dome. Scroll progress drives the camera, mesh reveals, and the room splat.
+ * paper sky dome. Scroll progress drives the camera, mesh reveals, and the room splat.
  */
 
 export const STOP_ID = 'place-kencl';
@@ -138,7 +138,7 @@ export class IntroScene {
     });
     this.app = app;
     app.setCanvasFillMode(pc.FILLMODE_NONE);
-    app.scene.ambientLight = new pc.Color(0.38, 0.39, 0.42);
+    app.scene.ambientLight = new pc.Color(...studioAmbient);
 
     this.camera = child(app.root, 'Viewer');
     // The same sky dome the app's flat-screen view uses.
@@ -244,12 +244,7 @@ export class IntroScene {
   }
 
   private addLights(root: pc.Entity): void {
-    const lights = [
-      { name: 'Warm studio key', tint: '#fff6e8', intensity: 1.75, angles: [37, -31, 36] },
-      { name: 'Sky fill', tint: '#c8d8ee', intensity: 0.68, angles: [63, 44, 35] },
-      { name: 'Warm bounce', tint: '#e9d7bf', intensity: 0.45, angles: [30, 146, -27] },
-    ];
-    for (const { name, tint, intensity, angles } of lights) {
+    for (const { name, tint, intensity, angles } of studioLights) {
       const light = child(root, name);
       light.addComponent('light', { type: 'directional', color: new pc.Color().fromString(tint), intensity });
       light.setLocalEulerAngles(angles[0], angles[1], angles[2]);
