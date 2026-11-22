@@ -101,46 +101,81 @@ function reaches(lines, centre) {
  * Four concentric rings: a solid core, a solid outer edge at the city limit, then two fading rings
  * that reach the backdrop colour exactly.
  */
+/**
+ * Build the ground into `surface`, which is shared with the city so this costs no extra draw call.
+ *
+ * One blob, not a stack of rings. An earlier version drew concentric bands with face(), which
+ * bakes a single flat colour per quad -- so each band came out a uniform shade with a hard edge
+ * against its neighbour, and the ground read as three separate blobs rather than one fading out.
+ * Removing bands only changed how many of those edges there were.
+ *
+ * The fix is to colour per vertex instead. Surface.vertex() takes its own colour, so the shade is
+ * interpolated across every triangle and the rim dissolves continuously with no steps anywhere.
+ */
+const RINGS = 14;
+
+/** Fraction of the radius that stays full-strength ground before the rim starts to fade. */
+const SOLID = 0.74;
+
+/** Smooth, so the fade has no visible start or end. */
+const smoothstep = (t) => t * t * (3 - 2 * t);
+
+function quad(surface, points, colours) {
+  const up = [0, 1, 0];
+  const ids = points.map((point, i) => surface.vertex(point, up, colours[i]));
+  surface.indices.push(ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]);
+}
+
 export function groundBlob(surface, lines, y) {
   const centre = [0.02, 0];
   const reach = reaches(lines, centre);
 
-  // Ring radii as a fraction of each spoke's reach, with the colour each is written at.
-  // One blob: a solid core, its edge, then a short rim that reaches the backdrop. The two wide
-  // outer rings that used to follow are gone -- they read as separate shapes rather than as this
-  // one fading out.
-  const bands = [
-    { scale: 0.42, pad: 0, tint: 0 },
-    { scale: 1, pad: SKIRT * 0.55, tint: 0.04 },
-    { scale: 1, pad: SKIRT, tint: 0.16 },
-    { scale: 1, pad: SKIRT + FADE, tint: 1 },
-  ];
-
-  const at = (band, i) => {
+  // Radius and colour at ring `u` (0 at the centre, 1 at the outer rim) along spoke `i`.
+  const radiusAt = (u, i) => {
+    const solid = reach[i] + SKIRT;
+    return u <= SOLID
+      ? solid * (u / SOLID)
+      : solid + FADE * ((u - SOLID) / (1 - SOLID));
+  };
+  const tintAt = (u) => (u <= SOLID ? 0 : smoothstep((u - SOLID) / (1 - SOLID)));
+  const colourAt = (u) => mixHex(GROUND, BACKDROP, tintAt(u));
+  const pointAt = (u, i) => {
     const angle = (i / SPOKES) * Math.PI * 2;
-    const r = reach[i] * band.scale + band.pad;
+    const r = radiusAt(u, i);
     return [centre[0] + Math.cos(angle) * r, y, centre[1] + Math.sin(angle) * r];
   };
-  const colourOf = (band) => mixHex(GROUND, BACKDROP, band.tint);
 
-  // Core: a fan from the centre out to the first ring.
+  // Core fan out to the first ring.
   const hub = [centre[0], y, centre[1]];
-  const core = colourOf(bands[0]);
+  const first = 1 / RINGS;
+  const core = colourAt(0);
+  const firstColour = colourAt(first);
   for (let i = 0; i < SPOKES; i++) {
     const j = (i + 1) % SPOKES;
-    face(surface, [hub, at(bands[0], j), at(bands[0], i)], core);
+    const a = pointAt(first, i);
+    const b = pointAt(first, j);
+    const up = [0, 1, 0];
+    const ids = [
+      surface.vertex(hub, up, core),
+      surface.vertex(b, up, firstColour),
+      surface.vertex(a, up, firstColour),
+    ];
+    surface.indices.push(ids[0], ids[1], ids[2]);
   }
 
-  // Then a quad strip per band, each step closer to the backdrop.
-  for (let b = 1; b < bands.length; b++) {
-    const inner = bands[b - 1];
-    const outer = bands[b];
-    // One colour per quad: with 128 spokes the steps are far finer than the eye resolves, and it
-    // keeps every face flat-shaded like the rest of the model.
-    const shade = mixHex(colourOf(inner), colourOf(outer), 0.5);
+  // Then one continuous sheet out to the rim, shaded per vertex.
+  for (let k = 1; k < RINGS; k++) {
+    const inner = k / RINGS;
+    const outer = (k + 1) / RINGS;
+    const ci = colourAt(inner);
+    const co = colourAt(outer);
     for (let i = 0; i < SPOKES; i++) {
       const j = (i + 1) % SPOKES;
-      face(surface, [at(inner, i), at(inner, j), at(outer, j), at(outer, i)], shade);
+      quad(
+        surface,
+        [pointAt(inner, i), pointAt(inner, j), pointAt(outer, j), pointAt(outer, i)],
+        [ci, ci, co, co],
+      );
     }
   }
 }

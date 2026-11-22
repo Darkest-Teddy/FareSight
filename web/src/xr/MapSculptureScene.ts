@@ -60,8 +60,30 @@ interface LineSurface {
 }
 
 const pollInterval = 10;
-// Trains ride on top of the tube rather than inside it.
-const trainLift = 0.0102;
+// Trains ride on top of the plate rather than inside it. Half the plate thickness clears it; the
+// old 0.0102 was sized for the swept tube the lines used to be and now floats them well above it.
+const trainLift = 0.0014;
+
+/**
+ * Flowcast's train is 45 m long and 2.7 m wide: a 17:1 sliver, correct for the real-scale map it
+ * was built for. This map is a diagram, and everything on it is already exaggerated -- the line
+ * plates stand for roughly 55 m of ground, about twenty times a real track.
+ *
+ * Length is the binding constraint. At this scale a consist already covers nine tenths of the
+ * average Green Line B stop gap (0.072 units), so it cannot grow without spanning whole stations.
+ * The cross-section is therefore lifted instead, by a little under 1.8x.
+ *
+ * That ratio is a deliberate middle ground. Uniform scaling is faithful but leaves the body so
+ * slim that its livery is invisible from the map's usual angle, where mostly roof is in view. An
+ * earlier attempt at 3x went too far the other way and the cars came out visibly stubby. At 1.8x
+ * the consist still reads as a tram -- about 9:1 overall -- while the green band along its lower
+ * body is actually legible.
+ */
+const trainScaleLength = 0.0014;
+const trainScaleCross = 0.0024;
+
+/** Its geometry starts 1.12 m up from its own origin, so the body is dropped to sit on the rail. */
+const trainFloorOffset = -1.12 * trainScaleCross;
 const maxSnapError = 0.03 ** 2;
 const burstTime = 0.7;
 const mapRevealTime = 1.45;
@@ -440,7 +462,9 @@ export class MapSculptureScene {
     // Materials are left alone on purpose: each model already carries its own livery, window band
     // and roof trim. Overriding them, as the single shared capsule needed, would flatten all of
     // that back to one colour.
-    model.setLocalScale(1.25, 1.25, 1.25);
+    // Flowcast's model runs along z, which is also the direction the scene points a train.
+    model.setLocalScale(trainScaleCross, trainScaleCross, trainScaleLength);
+    model.setLocalPosition(0, trainFloorOffset, 0);
     train.root.addChild(model);
     if (this.detailsVisible) this.reveal.show(train.root, 0.38, jarvisPoints.detail);
     else this.reveal.finish(train.root, false);
