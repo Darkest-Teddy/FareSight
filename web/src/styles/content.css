@@ -11,6 +11,9 @@
   text-transform: uppercase;
 }
 
+[data-scene=venue] .drawer-caption { text-transform: none; }
+.drawer-scroll .detail-section.dish-menu:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+
 .drawer-disclosure:not([open]) > :not(summary) { display: none; }
 .drawer-disclosure > summary {
   display: flex;
@@ -98,6 +101,7 @@
     overflow-y: auto;
     scrollbar-width: thin;
   }
+  [data-scene=venue] .filter-chip-row, [data-scene=dish] .filter-chip-row { display: none; }
   .filter-chip-row .filter-reset { min-height: 32px; }
   .filter .chips {
     --fade-start: 0px;
@@ -154,7 +158,6 @@
     font-weight: 550;
   }
   .filter-summary span { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .filter-summary-count { color: var(--muted); font-size: inherit; white-space: nowrap; }
   .filter-summary svg { width: 14px; height: 14px; transform: rotate(90deg); }
   .filter-summary[aria-expanded=true] svg { transform: rotate(-90deg); }
   .filter[data-compact=true] .filter-summary[aria-expanded=false] + .filter-controls { display: none; }
@@ -314,6 +317,13 @@
     letter-spacing: -.025em;
     font-variant-numeric: tabular-nums;
   }
+  .venue-stats dd small {
+    display: block;
+    margin-top: 3px;
+    font-size: 11px;
+    font-weight: 550;
+    letter-spacing: normal;
+  }
   .venue-stats dd[data-unavailable] { color: var(--muted); font-size: 13px; letter-spacing: normal; }
   .venue-stats dd[data-loading] { font-size: 0; height: 22px; }
   .venue-stats dd[data-loading]::after {
@@ -357,5 +367,4 @@
   .venue-stats dd[data-loading]::after { animation: none; }
 }
 
-/* Titles receive focus programmatically when a view opens, for screen readers; they are not controls. */
-:is(h1, h2)[tabindex="-1"]:focus { outline: none; }
+:is(h1, h2, h3)[tabindex="-1"]:focus { outline: none; }

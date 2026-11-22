@@ -504,7 +504,6 @@ button.quiet:is(.menu-toggle, .sidebar-back, .sidebar-home):hover:not(:disabled)
   grid-template-columns: minmax(0, 1fr) auto;
   gap: .38rem;
 }
-.visit-note { border-radius: .35rem; padding: .6rem; background: var(--panel-raised); }
 .form-stack { display: grid; gap: .6rem; }
 .form-stack button { justify-self: start; }
 .button-row { flex-wrap: wrap; display: flex; }
@@ -882,7 +881,4 @@ button.quiet:is(.menu-toggle, .sidebar-back, .sidebar-home):hover:not(:disabled)
   .brand-mark { width: .9rem; height: .9rem; }
 }
 
-.readout-list .today { color: var(--text); font-weight: 700; }
 .open-now { color: var(--accent); font-weight: 650; }
-.award-list, .review-highlights { display: grid; gap: .45rem; margin: 0; padding-left: 1.1rem; }
-.award-list small { display: block; color: var(--muted); }

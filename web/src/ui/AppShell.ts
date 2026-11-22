@@ -464,7 +464,8 @@ export class AppShell {
     this.breadcrumbs.replaceChildren(...nodes);
     const atMap = this.mode === 'map';
     this.sidebarBrand.hidden = !atMap;
-    this.sidebarBack.hidden = this.sidebarHome.hidden = atMap;
+    this.sidebarBack.hidden = atMap;
+    this.sidebarHome.hidden = atMap || this.mode === 'station';
     if (!atMap) {
       const parent = this.mode === 'station' ? 'Stops' : names[sceneDepth[this.mode] - 1];
       this.sidebarBackLabel.textContent = parent;
@@ -585,7 +586,7 @@ export class AppShell {
   private applyFilters() {
     this.filtered = matchingPlaces(this.places, this.filters);
     const matched = new Set(this.filtered.map((place) => place.id));
-    this.filterBar.render(this.filters, this.filtered.length);
+    this.filterBar.render(this.filters);
     this.renderStationBoard(matched);
     this.renderDrawer();
     if (!this.engineReady) return;

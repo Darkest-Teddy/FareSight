@@ -4,9 +4,8 @@ import {
 } from '@faresight/shared';
 import { api, type Alert, type Prediction, type Trip } from '../api/client';
 import { has3DDish, has3DRoom, hasDishPreview, isSplat } from '../data/preview3D';
-import { bostonHours, formatHours, liveBriefingReview, loadLiveReviews, week } from '../data/reviewBriefing';
+import { bostonHours, formatHours, week } from '../data/reviewBriefing';
 import { button, element, errorText, field, link, message, money, option, previewBadge, section } from './dom';
-import { renderBriefingReview } from './ReviewBriefingModal';
 import { oneWayCost, type Filters } from './state';
 
 export type Seating = 'seated' | 'standing';
@@ -77,7 +76,6 @@ function breakdown(rows: [string, string][]) {
   return list;
 }
 
-const ratingCount = new Intl.NumberFormat('en-US');
 const bostonClock = new Intl.DateTimeFormat('en-US', {
   timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: 'numeric', hourCycle: 'h23',
 });
@@ -95,75 +93,35 @@ function stationCaption(stop: Stop) {
   return lines.join(' · ');
 }
 
-function venueFacts(place: Place): HTMLElement[] {
-  const details = place.details;
-  const nodes: HTMLElement[] = [];
-  const hours = element('details', 'detail-section drawer-disclosure');
-  const now = new Date();
-  const { openNow, hoursToday } = bostonHours(place.hours, now);
+function nextOpening(hours: Place['hours'], now: Date) {
   const parts = bostonClock.formatToParts(now);
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? '';
-  const today = part('weekday').toLowerCase();
-  const [opening, closing] = hoursToday.split('–');
+  const today = week.findIndex(([day]) => day === part('weekday').toLowerCase());
   const localMinutes = Number(part('hour')) * 60 + Number(part('minute'));
-  const todayHours = place.hours[today];
-  const [openHour, openMinute] = todayHours?.[0].split(':').map(Number) ?? [];
-  const opensLater = todayHours && localMinutes < openHour * 60 + openMinute;
-  const status = openNow ? `Open now · until ${closing}` : opensLater ? `Closed · opens ${opening}` : 'Closed';
-  const hoursSummary = element('summary');
-  hoursSummary.append(element('span', 'drawer-section-label', 'Hours'), element('span', openNow ? 'open-now' : '', status));
-  hours.append(hoursSummary);
-  const list = breakdown(week.map(([day, label]) => [label, formatHours(place.hours[day])]));
-  list.querySelectorAll('dt').forEach((term, index) => {
-    if (week[index][0] !== today) return;
-    term.classList.add('today');
-    term.nextElementSibling?.classList.add('today');
-  });
-  hours.append(list);
-  if (!details?.hours_verified) hours.append(element('p', 'muted', 'Planning hours. Check with the venue.'));
-  if (details?.hours_note) hours.append(element('p', 'muted', details.hours_note));
-  nodes.push(hours);
-  if (!details) return nodes;
-
-  if (details.ratings.length || details.review_highlights.length) {
-    const reviews = section('What reviewers say');
-    if (details.ratings.length) {
-      reviews.append(breakdown(details.ratings.map(({ source, rating, count }) =>
-        [source, `${rating.toFixed(1)} / 5${count ? ` · ${ratingCount.format(count)} reviews` : ''}`])));
-    }
-    if (details.review_highlights.length) {
-      const items = element('ul', 'review-highlights');
-      for (const text of details.review_highlights) items.append(element('li', '', text));
-      reviews.append(items);
-    }
-    nodes.push(reviews);
+  for (let offset = 0; offset <= week.length; offset++) {
+    const [day, label] = week[(today + offset) % week.length];
+    const schedule = hours[day];
+    if (!schedule) continue;
+    const [hour, minute] = schedule[0].split(':').map(Number);
+    if (offset === 0 && localMinutes >= hour * 60 + minute) continue;
+    const [opening] = formatHours(schedule).split('–');
+    return offset ? `opens ${label.slice(0, 3)} ${opening}` : `opens ${opening}`;
   }
+  return '';
+}
 
-  if (details.awards.length) {
-    const awards = section('Recognition');
-    const items = element('ul', 'award-list');
-    for (const award of details.awards) {
-      const item = element('li');
-      const title = [award.title, award.year].filter(Boolean).join(', ');
-      item.append(award.url ? link(title, award.url) : element('span', '', title), element('small', '', award.org));
-      items.append(item);
-    }
-    awards.append(items);
-    nodes.push(awards);
+function visitDetails(place: Place) {
+  const details = place.details;
+  if (!details || !(details.address || details.website || details.phone)) return [];
+  const contact = section('Visit');
+  if (details.address) contact.append(element('p', '', details.address));
+  if (details.phone) {
+    const phone = element('a', 'text-link', details.phone);
+    phone.href = `tel:${details.phone.replace(/[^\d+]/g, '')}`;
+    contact.append(phone);
   }
-
-  if (details.address || details.website || details.phone) {
-    const contact = section('Visit');
-    if (details.address) contact.append(element('p', '', details.address));
-    if (details.phone) {
-      const phone = element('a', 'text-link', details.phone);
-      phone.href = `tel:${details.phone.replace(/[^\d+]/g, '')}`;
-      contact.append(phone);
-    }
-    if (details.website) contact.append(link('Website', details.website));
-    nodes.push(contact);
-  }
-  return nodes;
+  if (details.website) contact.append(link('Website', details.website));
+  return [contact];
 }
 
 export class PlaceDrawer {
@@ -197,10 +155,7 @@ export class PlaceDrawer {
   private modelPlace?: Place;
   private modelComparison?: DishComparison;
   private modelCatalog?: readonly Place[];
-  private reviewsNode?: HTMLElement;
-  private reviewsKey = '';
-  private facts: HTMLElement[] = [];
-  private liveReviews = element('div');
+  private visitNote?: HTMLElement;
   private detailsPlaceId?: string;
 
   constructor(private readonly actions: DrawerActions) {
@@ -282,6 +237,7 @@ export class PlaceDrawer {
     this.root.hidden = false;
     if (isNewView) {
       this.viewKey = key;
+      this.caption.hidden = false;
       this.caption.textContent = stationCaption(stop);
       this.title.textContent = stop.name;
       this.arrivals.replaceChildren();
@@ -306,12 +262,13 @@ export class PlaceDrawer {
       }
       const label = element('span', 'place-label');
       const name = element('span', 'place-name', place.name);
-      const room = has3DRoom(place);
-      const dishes = has3DDish(place);
-      if (room || dishes) name.append(previewBadge());
-      const preview = room && dishes ? ' · 3D room & dishes' : room ? ' · 3D room' : dishes ? ' · 3D dishes' : '';
+      if (has3DRoom(place) || has3DDish(place)) {
+        const badge = previewBadge();
+        badge.removeAttribute('aria-hidden');
+        name.append(badge);
+      }
       const walk = Math.max(1, Math.round(place.walk_from_stop_m / 80));
-      label.append(name, element('small', '', `${walk} min walk${preview}`));
+      label.append(name, element('small', '', `${walk} min walk`));
       item.append(label, element('strong', 'price', money(oneWayCost(place, filters.startStopId, filters.groupSize))));
       const row = element('div', 'place-compare-row');
       row.append(item, this.compareButton(place, true));
@@ -381,28 +338,28 @@ export class PlaceDrawer {
   }
 
   venue(data: ViewData, focus = false) {
-    const { place, stop, dish } = data;
+    const { place, dish } = data;
     const key = dish ? `dish:${place.id}:${dish.id}` : `venue:${place.id}`;
     const isNewView = this.viewKey !== key;
     this.root.hidden = false;
     if (isNewView) {
       const fromStation = this.viewKey.startsWith('station:');
       this.viewKey = key;
-      const summary = element('div', 'venue-intro');
-      summary.append(element('p', '', place.vibe));
-      if (!dish) summary.append(this.venueStats);
-      if (!this.reviewsNode || fromStation || this.detailsPlaceId !== place.id) {
-        this.detailsPlaceId = place.id;
-        this.facts = venueFacts(place);
-        this.reviewsNode = element('div');
-        this.reviewsKey = '';
-        this.liveReviews = element('div');
-        void this.updateLiveReviews(place, this.liveReviews);
+      this.caption.hidden = Boolean(dish);
+      if (!dish) {
+        const category = place.category.replaceAll('_', ' ');
+        this.caption.textContent = category[0].toUpperCase() + category.slice(1);
       }
+      if (!this.visitNote || fromStation || this.detailsPlaceId !== place.id) {
+        this.detailsPlaceId = place.id;
+        this.visitNote = this.visitNoteForm(place);
+      }
+      const summary = element('div', 'venue-intro');
+      if (!dish) summary.append(element('p', '', place.vibe), this.venueStats);
       summary.append(this.venueActions);
+      const lead = dish ? [this.modelDetails, summary] : [summary, this.modelDetails];
       this.actionKey = '';
-      this.content.replaceChildren(summary, this.modelDetails, this.tripDetails, this.costDetails,
-        ...this.facts, this.liveReviews, this.pairingDetails, this.reviewsNode);
+      this.content.replaceChildren(...lead, this.tripDetails, this.costDetails, ...visitDetails(place), this.pairingDetails, this.visitNote);
       this.content.scrollTop = 0;
       this.modelKey = '';
     }
@@ -415,19 +372,18 @@ export class PlaceDrawer {
       this.venueComparison.replaceChildren(toggle);
       if (restore) toggle.focus({ preventScroll: true });
     }
-    this.caption.textContent = dish ? place.name : [stop?.name, place.category.replaceAll('_', ' ')].filter(Boolean).join(' · ');
     this.title.textContent = (dish?.name ?? place.name).replaceAll('—', '–');
-    const { openNow } = bostonHours(place.hours, new Date());
-    this.openStatus.textContent = openNow ? 'Open' : 'Closed';
-    this.openStatus.classList.toggle('open-now', openNow);
+    if (!dish) {
+      const now = new Date();
+      const { openNow, hoursToday } = bostonHours(place.hours, now);
+      const timing = openNow ? `until ${hoursToday.split('–')[1]}` : nextOpening(place.hours, now);
+      this.openStatus.textContent = openNow ? 'Open' : 'Closed';
+      this.openStatus.classList.toggle('open-now', openNow);
+      if (timing) this.openStatus.append(element('small', 'muted', timing));
+    }
     this.updateCost(data);
     this.updateTrip(data);
     this.updateModels(data);
-    const reviewsKey = JSON.stringify(place.reviews);
-    if (this.reviewsKey !== reviewsKey) {
-      this.reviewsKey = reviewsKey;
-      this.reviewsNode?.replaceChildren(this.reviews(place));
-    }
     if (isNewView) this.animateView('.venue-intro, .detail-section');
     if (focus) {
       this.title.tabIndex = -1;
@@ -438,7 +394,7 @@ export class PlaceDrawer {
   private updateVenueActions({ place, dish, manifest, inside }: ViewData) {
     const canEnterRoom = !dish && !inside && Boolean(manifest.data?.room_asset);
     const hasDishes = !dish && manifest.data?.menu_items.some(({ dish_asset }) => isSplat(dish_asset));
-    const action = canEnterRoom ? 'Step inside 3D room' : hasDishes ? 'View dishes in 3D' : 'Reviews & briefing';
+    const action = canEnterRoom ? 'Step inside 3D room' : hasDishes ? 'Browse 3D menu' : 'Reviews & briefing';
     if (action === this.actionKey) return;
     this.actionKey = action;
     const focused = this.venueActions.contains(document.activeElement);
@@ -446,7 +402,13 @@ export class PlaceDrawer {
     const focusedCompare = this.venueComparison.contains(document.activeElement);
     const briefing = button('Reviews & briefing', () => this.actions.showBriefing(place), 'quiet briefing-launch');
     const primary = canEnterRoom ? button(action, this.actions.enterRoom, 'accent')
-      : hasDishes ? button(action, () => this.focusMenu(), 'accent') : briefing;
+      : hasDishes ? button(action, () => {
+        const heading = this.modelDetails.querySelector('h3');
+        if (!heading) return;
+        heading.tabIndex = -1;
+        heading.scrollIntoView({ block: 'start', behavior: reducedMotion.matches ? 'instant' : 'smooth' });
+        heading.focus({ preventScroll: true });
+      }, 'accent') : briefing;
     if (canEnterRoom) primary.dataset.control = 'room';
     if (primary === briefing && !dish) primary.classList.replace('quiet', 'accent');
     this.venueActions.replaceChildren(primary, ...(primary === briefing ? [] : [briefing]), this.venueComparison);
@@ -469,27 +431,6 @@ export class PlaceDrawer {
           easing, duration: noMotion ? 120 : 220, delay: noMotion ? 0 : index * 24, fill: 'backwards',
         }));
     });
-  }
-
-  /** Live web ratings appear only when the lookup succeeds; a failed lookup leaves no placeholder behind. */
-  private async updateLiveReviews(place: Place, host: HTMLElement): Promise<void> {
-    host.replaceChildren();
-    const result = await loadLiveReviews(place.id).catch(() => undefined);
-    if (!host.isConnected || !result?.live) return;
-    const node = section('Live web reviews');
-    for (const { source, rating, count, url } of result.ratings) {
-      const row = element('p');
-      row.append(url ? link(source, url) : source,
-        ` · ${rating.toFixed(1)} / 5${count ? ` · ${ratingCount.format(count)} reviews` : ''}`);
-      node.append(row);
-    }
-    if (result.highlights.length) {
-      const highlights = element('ul', 'review-highlights');
-      highlights.append(...result.highlights.map((text) => element('li', '', text)));
-      node.append(highlights);
-    }
-    node.append(...result.reviews.slice(0, 3).map((review) => renderBriefingReview(liveBriefingReview(review))));
-    host.replaceChildren(node);
   }
 
   private updateCost({ place, filters, trip, dish }: ViewData) {
@@ -519,7 +460,7 @@ export class PlaceDrawer {
     this.costDetails.replaceChildren(node);
   }
 
-  private updateTrip({ place, stop, trip, originName }: ViewData) {
+  private updateTrip({ place, stop, trip, originName, dish }: ViewData) {
     const node = section('Trip breakdown');
     this.doorToDoor.toggleAttribute('data-loading', !trip.data && !trip.error);
     this.doorToDoor.toggleAttribute('data-unavailable', !trip.data && Boolean(trip.error));
@@ -531,8 +472,8 @@ export class PlaceDrawer {
       const rows: [string, number][] = [
         ['Walk to stop', data.walk_to_station_min], [live ? 'Next live train' : 'Train wait', data.wait_min],
         ['Ride', data.ride_min], ['Transfers', data.transfer_min], ['Walk to venue', data.walk_to_venue_min],
-        ['Total', data.total_min],
       ];
+      if (dish || !desktop.matches) rows.push(['Total', data.total_min]);
       node.append(breakdown(rows.filter(([, minutes]) => minutes > 0).map(([label, minutes]) => [label, formatMinutes(minutes)])));
       if (trip.offline) node.append(message('Live trip data is unavailable. Showing an offline estimate.'));
       if (place.evening_venue && usesTrain) {
@@ -562,8 +503,8 @@ export class PlaceDrawer {
     this.modelCatalog = data.places;
     const dataManifest = manifest.data;
     const hasDishes = dataManifest?.menu_items.some(({ dish_asset }) => isSplat(dish_asset));
-    const node = section(dish ? 'On the table' : hasDishes ? 'Menu in 3D' : '3D previews');
-    if (manifest.offline) node.append(message('Showing bundled demo previews.'));
+    const node = dish ? element('div', 'detail-section dish-menu') : section(hasDishes ? 'Menu in 3D' : '3D previews');
+    if (manifest.offline && !dish) node.append(message('Showing bundled demo previews.'));
     if (manifest.error) node.append(message(manifest.error, true), button('Reload previews', this.actions.retryManifest));
     if (!dataManifest && !manifest.error) node.append(message('Loading room and menu previews…'));
     if (dataManifest) {
@@ -594,12 +535,6 @@ export class PlaceDrawer {
         compare.value = comparison?.dish.id ?? '';
         compare.disabled = compare.options.length < 2;
         compare.addEventListener('change', () => this.actions.openDish(dish, compare.value, compare.selectedOptions[0]?.dataset.placeId));
-        node.append(field('Compare side-by-side', compare));
-        if (compare.disabled) node.append(message('No other published 3D dish previews are available.'));
-        if (comparison) {
-          const listed = comparison.dish.price != null ? ` · ${formatDishPrice(comparison.dish.price)}` : '';
-          node.append(element('p', '', `${comparison.dish.name} · ${comparison.place.name}${listed}`));
-        }
         const slider = element('input');
         slider.type = 'range';
         slider.min = '0';
@@ -621,7 +556,12 @@ export class PlaceDrawer {
         slider.id = 'dish-turntable';
         rotation.htmlFor = slider.id;
         rotation.firstElementChild?.append(degrees);
-        node.append(rotation);
+        node.append(rotation, field('Compare side-by-side', compare));
+        if (compare.disabled) node.append(message('No other published 3D dish previews are available.'));
+        if (comparison) {
+          const listed = comparison.dish.price != null ? ` · ${formatDishPrice(comparison.dish.price)}` : '';
+          node.append(element('p', '', `${comparison.dish.name} · ${comparison.place.name}${listed}`));
+        }
         const tableMode = element('select');
         tableMode.dataset.control = 'table';
         tableMode.append(option('virtual', 'Virtual table (VR)'), option('passthrough', 'Passthrough (AR)'));
@@ -630,6 +570,7 @@ export class PlaceDrawer {
         const tableField = field('Table background', tableMode);
         tableField.classList.add('table-background-field');
         node.append(tableField);
+        if (manifest.offline) node.append(message('Showing bundled demo previews.'));
       }
 
       if (!dish && dataManifest.rooms.length) {
@@ -690,15 +631,8 @@ export class PlaceDrawer {
     if (previousFocus) node.querySelector<HTMLElement>(`[data-control="${previousFocus}"]`)?.focus({ preventScroll: true });
   }
 
-  private reviews(place: Place) {
-    const node = section('Visit notes');
-    if (!place.reviews.length) node.append(message('No approved notes yet. Share a detail from your visit.'));
-    for (const review of place.reviews) {
-      const item = element('article', 'visit-note');
-      item.append(element('strong', '', review.author));
-      item.append(element('p', '', review.text));
-      node.append(item);
-    }
+  private visitNoteForm(place: Place) {
+    const node = element('div', 'detail-section');
     const form = element('form', 'form-stack');
     form.id = 'visit-note-form';
     form.hidden = true;

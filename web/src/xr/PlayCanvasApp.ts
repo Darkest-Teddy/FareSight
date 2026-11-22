@@ -65,8 +65,10 @@ const desktopSplatBudget = 420_000;
 const mapClearance = 0.006;
 const cartridgeDepth = 0.430;
 const dishClearance = 0.002;
-// On a flat screen the neighbourhood rests to the right of centre, clear of the left sidebar.
-const stationHome: XYZ = [0.3, 0, -0.2];
+// On a flat screen with the desktop sidebar, the projection offset already centres the view beside it, so the
+// neighbourhood sits under the map pivot. Without a sidebar (phones) it rests up and left, clear of the bottom sheet.
+const stationHomeBesideSidebar: XYZ = [-0.13, 0, -0.06];
+const stationHomeFullWidth: XYZ = [-0.3, 0, -0.2];
 const standbyScale = 0.0004;
 
 export class PlayCanvasApp implements FareSightSceneEngine {
@@ -286,6 +288,10 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     this.lens.projectionOffset = new pc.Vec2(-0.85 * this.insetLeft / width, 0);
   }
 
+  private stationHome(): XYZ {
+    return this.insetLeft > 0 ? stationHomeBesideSidebar : stationHomeFullWidth;
+  }
+
   setViewportInset(left: number): void {
     const inset = Math.max(0, Math.round(left));
     if (inset === this.insetLeft) return;
@@ -463,7 +469,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     const origin = mapRoot.getPosition();
     const mapRotation = mapRoot.getRotation().clone();
     const anchor = mapRotation.transformVector(this.map.stopPosition(stopId) ?? new pc.Vec3(0, 0.07, 0)).add(origin);
-    const stage = flat ? new pc.Vec3(...stationHome) : dir === -1 ? this.station.root.getPosition().clone()
+    const stage = flat ? new pc.Vec3(...this.stationHome()) : dir === -1 ? this.station.root.getPosition().clone()
       : this.stationStage();
     const stageRotation = !flat && dir === -1 ? this.station.root.getRotation().clone() : mapRotation;
     this.mode = dir === 1 ? 'station' : 'map';
@@ -778,7 +784,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     this.map.root.setLocalScale(1, 1, 1);
     if (this.mode === 'map' && !this.leaving.has('station')) this.parkStation();
     else if (this.mode === 'station') {
-      this.station.root.setLocalPosition(...stationHome);
+      this.station.root.setLocalPosition(...this.stationHome());
       this.station.root.setLocalEulerAngles(0, 0, 0);
       this.station.root.setLocalScale(1, 1, 1);
     }

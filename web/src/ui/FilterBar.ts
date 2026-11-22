@@ -9,7 +9,6 @@ export class FilterBar {
   private readonly budgetValue = element('output', 'price');
   private readonly group = element('output');
   private readonly family = element('input');
-  private readonly count = element('small', 'filter-summary-count');
   private readonly reset: HTMLButtonElement;
   private readonly chipStrip = element('div', 'chips');
   private readonly indicator = element('span', 'chip-indicator');
@@ -103,7 +102,7 @@ export class FilterBar {
     }, 'filter-summary');
     this.summary.setAttribute('aria-controls', controls.id);
     this.summary.setAttribute('aria-expanded', 'false');
-    this.summary.append(this.summaryText, this.count, icon('chevron-right'));
+    this.summary.append(this.summaryText, icon('chevron-right'));
     const group = element('div', 'group-controls');
     group.append(element('span', 'field-caption', 'Group size'), stepper);
     controls.append(origin, budgetField, group, family);
@@ -124,7 +123,7 @@ export class FilterBar {
     this.updateSummary();
   }
 
-  render(filters: Filters, count: number) {
+  render(filters: Filters) {
     const cravingChanged = this.filters.craving !== filters.craving;
     this.filters = filters;
     this.start.value = filters.startStopId;
@@ -136,7 +135,6 @@ export class FilterBar {
     this.plus.disabled = filters.groupSize === 20;
     this.family.checked = filters.familyVisit;
     for (const [id, chip] of this.chips) chip.setAttribute('aria-pressed', String(id === filters.craving));
-    this.count.textContent = `${count} ${count === 1 ? 'place' : 'places'}`;
     const resetFocused = document.activeElement === this.reset;
     this.reset.hidden = (Object.keys(initialFilters) as (keyof Filters)[]).every((key) => filters[key] === initialFilters[key]);
     if (this.reset.hidden && resetFocused) this.chips.get(filters.craving)?.focus({ preventScroll: true });
