@@ -12,6 +12,7 @@ interface VoiceCallbacks {
   onMicrophone: (hasMic: boolean, muted: boolean, requesting: boolean) => void;
   onAudioBlocked: (blocked: boolean) => void;
   onPaused: (paused: boolean) => void;
+  onAudioLevel?: (level: number) => void;
   onUnsentText: (text: string) => void;
   onModel: (model: string) => void;
   onTool: (name: RealtimeToolName, args: Record<string, unknown>, current: () => boolean) => Promise<{ result: Record<string, unknown>; actionLabel?: string }>;
@@ -380,6 +381,7 @@ export class RealtimeVoice {
       if (this.session !== session) return;
       const stats = await receiver.getStats().catch(() => undefined);
       if (this.session !== session) return;
+      let level = 0;
       stats?.forEach((report) => {
         if (report.type !== 'inbound-rtp' || (report.kind && report.kind !== 'audio')) return;
         const nextEnergy = report.totalAudioEnergy;
@@ -388,8 +390,11 @@ export class RealtimeVoice {
           ? Math.sqrt(Math.max(0, nextEnergy - energy) / (nextDuration - duration)) : 0;
         energy = nextEnergy;
         duration = nextDuration;
-        if (session.audioArmed && Math.max(report.audioLevel ?? 0, rms) >= 0.004) this.noteAudio(session);
+        const sampleLevel = Math.max(report.audioLevel ?? 0, rms);
+        level = Math.max(level, sampleLevel);
+        if (session.audioArmed && sampleLevel >= 0.004) this.noteAudio(session);
       });
+      if (session.playing) this.callbacks.onAudioLevel?.(level);
       session.audioMeterTimer = window.setTimeout(sample, 100);
     };
     window.clearTimeout(session.audioMeterTimer);

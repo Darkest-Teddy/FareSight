@@ -56,6 +56,8 @@ export function getConfig() {
     adminPasscode: process.env.ADMIN_PASSCODE,
     contributorPasscode: process.env.CONTRIBUTOR_PASSCODE,
     allowUnauthenticatedDemo: process.env.ALLOW_UNAUTHENTICATED_DEMO === '1',
+    // Contributors upload and start builds without a code. Admin routes still need ADMIN_PASSCODE.
+    openUploads: process.env.OPEN_UPLOADS === '1',
     geminiKey: process.env.GEMINI_API_KEY,
     openaiKey: process.env.OPENAI_API_KEY,
     openaiBaseUrl: (process.env.OPENAI_API_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, ''),

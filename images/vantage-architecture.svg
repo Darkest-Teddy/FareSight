@@ -1,0 +1,298 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1520" viewBox="0 0 1800 1520" role="img" aria-labelledby="chart-title chart-desc">
+<title id="chart-title">VANTAGE — SPATIAL WEBXR, 3DGS RECONSTRUCTION &amp; REAL-TIME VOICE ARCHITECTURE</title>
+<desc id="chart-desc">Vantage turns field photos into room and dish Gaussian splats and renders them in a four-scene PlayCanvas app. The chart shows direct and multipart uploads, reconstruction with Atlas and TRELLIS, the Fastify gateway, SQLite and optional Postgres storage, procedural Boston station dioramas, and OpenAI Live voice tools for the WebXR and desktop or mobile surfaces.</desc>
+<style>
+    text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-kerning: normal; }
+    .brand { font-size: 47px; font-weight: 780; letter-spacing: .12em; }
+    .headline { font-size: 25px; font-weight: 680; letter-spacing: .035em; }
+    .stamp { font-size: 15px; font-weight: 600; letter-spacing: .02em; }
+    .metric { font-size: 29px; font-weight: 750; }
+    .metric-label { font-size: 16px; font-weight: 570; }
+    .lane-title { font-size: 19px; font-weight: 740; letter-spacing: .055em; }
+    .eyebrow { font-size: 13px; font-weight: 740; letter-spacing: .09em; }
+    .title { font-size: 23px; font-weight: 730; }
+    .subhead { font-size: 18px; font-weight: 720; }
+    .scene-title { font-size: 19px; font-weight: 720; }
+    .body { font-size: 17px; font-weight: 440; }
+    .compact { font-size: 16px; font-weight: 440; }
+    .code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 15px; font-weight: 560; }
+    .note { font-size: 14px; font-weight: 520; }
+    .flow-label { font-size: 12px; font-weight: 740; letter-spacing: .10em; }
+  </style>
+<defs>
+    <marker id="write-arrow" viewBox="0 0 9 9" refX="9" refY="4.5" markerWidth="8" markerHeight="8" orient="auto" markerUnits="userSpaceOnUse"><path fill="#086e69" d="M0 0 9 4.5 0 9Z"/></marker>
+    <marker id="read-arrow" viewBox="0 0 9 9" refX="9" refY="4.5" markerWidth="8" markerHeight="8" orient="auto" markerUnits="userSpaceOnUse"><path fill="#2756a7" d="M0 0 9 4.5 0 9Z"/></marker>
+    <marker id="runtime-arrow" viewBox="0 0 9 9" refX="9" refY="4.5" markerWidth="8" markerHeight="8" orient="auto" markerUnits="userSpaceOnUse"><path fill="#6540a5" d="M0 0 9 4.5 0 9Z"/></marker>
+  </defs>
+    <rect x="0" y="0" width="1800" height="1520" rx="0" fill="#fff" stroke="none"/>
+    <rect x="0" y="0" width="1800" height="8" rx="0" fill="#14243d" stroke="none"/>
+  <g id="masthead">
+    <rect x="55" y="37" width="76" height="76" rx="15" fill="#14243d" stroke="none"/>
+    <g transform="translate(61 43) scale(.666667)" fill="#a1ece0" aria-label="Roomfold Turn">
+      <path d="M9 78V50C9 32 18 23 35 16L56 8 82 18 61 27C46 33 38 42 38 57V67Z"/>
+      <path d="M48 55C48 45 53 39 63 35L85 26V65L48 87Z"/>
+    </g>
+    <text x="151" y="76" class="brand" text-anchor="start" fill="#14243d">VANTAGE</text>
+    <text x="153" y="111" class="headline" text-anchor="start" fill="#14243d">SPATIAL WEBXR, 3DGS RECONSTRUCTION &amp; REAL-TIME VOICE ARCHITECTURE</text>
+    <text x="1745" y="62" class="stamp" text-anchor="end" fill="#30445c">BostonHacks 2026 · Meta Quest 3 + Web + Contribute PWA · 2026-11-22</text>
+    <path d="M55 138H1745" stroke="#d3dce6"/>
+    <text x="55" y="183" class="metric" text-anchor="start" fill="#2756a7">4</text>
+    <text x="55" y="211" class="metric-label" text-anchor="start" fill="#14243d">TypeScript workspaces</text>
+    <path d="M323 156V213" stroke="#d3dce6"/>
+    <text x="337" y="183" class="metric" text-anchor="start" fill="#086e69">10</text>
+    <text x="337" y="211" class="metric-label" text-anchor="start" fill="#14243d">OSM station dioramas</text>
+    <path d="M605 156V213" stroke="#d3dce6"/>
+    <text x="619" y="183" class="metric" text-anchor="start" fill="#086e69">58</text>
+    <text x="619" y="211" class="metric-label" text-anchor="start" fill="#14243d">Boston-area venues</text>
+    <path d="M887 156V213" stroke="#d3dce6"/>
+    <text x="901" y="183" class="metric" text-anchor="start" fill="#6540a5">67</text>
+    <text x="901" y="211" class="metric-label" text-anchor="start" fill="#14243d">Bundled Gaussian splats</text>
+    <path d="M1169 156V213" stroke="#d3dce6"/>
+    <text x="1183" y="183" class="metric" text-anchor="start" fill="#92500c">2</text>
+    <text x="1183" y="211" class="metric-label" text-anchor="start" fill="#14243d">3DGS reconstruction engines</text>
+    <path d="M1451 156V213" stroke="#d3dce6"/>
+    <text x="1465" y="183" class="metric" text-anchor="start" fill="#6540a5">gpt-live-1.1</text>
+    <text x="1465" y="211" class="metric-label" text-anchor="start" fill="#14243d">+ 27 spatial tools</text>
+  </g>
+  <g id="capture-pipeline">
+    <rect x="39" y="242" width="1722" height="427" rx="14" fill="#edf7f5" stroke="none"/>
+    <rect x="55" y="256" width="27" height="26" rx="5" fill="#086e69" stroke="none"/>
+    <text x="68.5" y="274" class="eyebrow" text-anchor="middle" fill="#fff">01</text>
+    <text x="95" y="274" class="lane-title" text-anchor="start" fill="#14243d">FIELD CAPTURE &amp; DUAL-ENGINE 3D GAUSSIAN SPLAT PIPELINE</text>
+    <text x="1745" y="273" class="code" text-anchor="end" fill="#086e69">contribute/  ·  server/src/worker/</text>
+  <g id="contribution">
+    <rect x="55" y="297" width="403" height="292" rx="10" fill="#fff" stroke="#d3dce6"/>
+    <text x="75" y="324" class="eyebrow" text-anchor="start" fill="#086e69">FIELD INPUT</text>
+    <text x="75" y="353" class="title" text-anchor="start" fill="#14243d">Contribute PWA</text>
+    <text x="75" y="385" class="body" text-anchor="start" fill="#30445c">10-stop network and OSM footprints</text>
+    <text x="75" y="407" class="body" text-anchor="start" fill="#30445c">in a touch-driven flat SVG interface.</text>
+    <text x="75" y="429" class="body" text-anchor="start" fill="#30445c">Gyro-guided 360° auto-capture.</text>
+    <text x="75" y="451" class="body" text-anchor="start" fill="#30445c">Re-encodes HEIC when decodable,</text>
+    <text x="75" y="473" class="body" text-anchor="start" fill="#30445c">and oversized photos, on-device.</text>
+    <path d="M75 491H438" stroke="#d3dce6"/>
+    <text x="75" y="518" class="subhead" text-anchor="start" fill="#14243d">Web Upload Studio</text>
+    <text x="75" y="542" class="body" text-anchor="start" fill="#30445c">Manual selection for room and dish sets.</text>
+    <text x="75" y="564" class="code" text-anchor="start" fill="#30445c">X-Upload-Passcode</text>
+  </g>
+  <g id="ingest">
+    <rect x="484" y="297" width="403" height="292" rx="10" fill="#fff" stroke="#d3dce6"/>
+    <text x="504" y="324" class="eyebrow" text-anchor="start" fill="#086e69">DUAL INGEST</text>
+    <text x="504" y="353" class="title" text-anchor="start" fill="#14243d">Presigned PUT or multipart</text>
+    <text x="504" y="382" class="code" text-anchor="start" fill="#30445c">POST /api/captures</text>
+    <text x="504" y="402" class="code" text-anchor="start" fill="#30445c">POST /api/captures/:id/upload-urls</text>
+    <text x="504" y="422" class="compact" text-anchor="start" fill="#30445c">Direct PUT of frames + frames.json to private</text>
+    <text x="504" y="442" class="compact" text-anchor="start" fill="#30445c">Vultr Object Storage (RAW_BUCKET).</text>
+    <text x="504" y="462" class="code" text-anchor="start" fill="#30445c">POST /api/captures/:id/frames</text>
+    <text x="504" y="482" class="code" text-anchor="start" fill="#30445c">POST /api/captures/:id/complete</text>
+    <path d="M504 495H867" stroke="#d3dce6"/>
+    <text x="504" y="521" class="code" text-anchor="start" fill="#30445c">POST /api/uploads</text>
+    <text x="504" y="542" class="compact" text-anchor="start" fill="#30445c">Dishes and Studio. EXIF orientation and</text>
+    <text x="504" y="563" class="compact" text-anchor="start" fill="#30445c">dimensions, SHA-256 dedupe, original archive.</text>
+  </g>
+  <g id="reconstruction">
+    <rect x="913" y="297" width="403" height="292" rx="10" fill="#fffaf2" stroke="#d3dce6"/>
+    <text x="933" y="324" class="eyebrow" text-anchor="start" fill="#92500c">CLOUD RECONSTRUCTION</text>
+    <text x="933" y="353" class="title" text-anchor="start" fill="#14243d">Atlas rooms / TRELLIS dishes</text>
+    <text x="933" y="380" class="compact" text-anchor="start" fill="#30445c">World Labs Atlas API v2 · 2–32 photos</text>
+    <text x="933" y="401" class="code" text-anchor="start" fill="#30445c">images2PosedRGBD → posedImages2Splats</text>
+    <text x="933" y="422" class="compact" text-anchor="start" fill="#30445c">Camera pose + depth → SPZ. Splat step</text>
+    <text x="933" y="443" class="compact" text-anchor="start" fill="#30445c">atlas-draft ~30 s · atlas-refined ~15–21 min¹.</text>
+    <path d="M933 460H1296" stroke="#ead9bc"/>
+    <text x="933" y="483" class="compact" text-anchor="start" fill="#30445c">Replicate firtoz/trellis · pinned SHA e8f6c45…</text>
+    <text x="933" y="504" class="compact" text-anchor="start" fill="#30445c">Single photo → foreground preview and</text>
+    <text x="933" y="525" class="code" text-anchor="start" fill="#30445c">output.gaussian_ply</text>
+    <text x="933" y="546" class="compact" text-anchor="start" fill="#30445c">Download on success, before 1 h expiry¹.</text>
+  </g>
+  <g id="processing-and-publish">
+    <rect x="1342" y="297" width="403" height="292" rx="10" fill="#fff" stroke="#d3dce6"/>
+    <text x="1362" y="324" class="eyebrow" text-anchor="start" fill="#086e69">OPTIMIZE &amp; PUBLISH</text>
+    <text x="1362" y="353" class="title" text-anchor="start" fill="#14243d">Calibrated splat delivery</text>
+    <text x="1362" y="382" class="code" text-anchor="start" fill="#30445c">@playcanvas/splat-transform</text>
+    <text x="1362" y="403" class="compact" text-anchor="start" fill="#30445c">SOG compression and native PLY / SPZ</text>
+    <text x="1362" y="424" class="compact" text-anchor="start" fill="#30445c">decimation for fallback formats.</text>
+    <text x="1362" y="445" class="compact" text-anchor="start" fill="#30445c">Dish plate scale from 5th–95th percentiles.</text>
+    <text x="1362" y="466" class="compact" text-anchor="start" fill="#30445c">Targets of 400k room / 60k dish Gaussians.</text>
+    <path d="M1362 480H1725" stroke="#d3dce6"/>
+    <text x="1362" y="504" class="compact" text-anchor="start" fill="#30445c">Auto-publish or admin moderation.</text>
+    <text x="1362" y="525" class="compact" text-anchor="start" fill="#30445c">Cloud rooms → public Vultr SPLAT_BUCKET</text>
+    <text x="1362" y="546" class="compact" text-anchor="start" fill="#30445c">with optional CDN. Local builds are served</text>
+    <text x="1362" y="567" class="code" text-anchor="start" fill="#30445c">from /storage/outputs/*</text>
+  </g>
+    <path d="M458 395H484" fill="none" stroke="#086e69" stroke-width="2" stroke-linejoin="round" marker-end="url(#write-arrow)"/>
+    <path d="M458 538H484" fill="none" stroke="#086e69" stroke-width="2" stroke-linejoin="round" marker-end="url(#write-arrow)"/>
+    <path d="M887 396H913" fill="none" stroke="#086e69" stroke-width="2" stroke-linejoin="round" marker-end="url(#write-arrow)"/>
+    <path d="M887 538H913" fill="none" stroke="#086e69" stroke-width="2" stroke-linejoin="round" marker-end="url(#write-arrow)"/>
+    <path d="M1316 438H1342" fill="none" stroke="#086e69" stroke-width="2" stroke-linejoin="round" marker-end="url(#write-arrow)"/>
+    <rect x="55" y="607" width="890" height="44" rx="7" fill="#dcefeb" stroke="none"/>
+    <text x="69" y="624" class="eyebrow" text-anchor="start" fill="#086e69">RESUMABLE LEASED WORKER</text>
+    <text x="69" y="642" class="code" text-anchor="start" fill="#14243d">queued → generating → downloading → converting → needs_review → ready</text>
+    <text x="931" y="624" class="code" text-anchor="end" fill="#086e69">jobWorker.ts + captureBridge.ts</text>
+    <text x="931" y="643" class="note" text-anchor="end" fill="#086e69">Persisted IDs · stable Atlas keys</text>
+    <rect x="960" y="607" width="785" height="44" rx="7" fill="#e6edf9" stroke="none"/>
+    <text x="974" y="624" class="eyebrow" text-anchor="start" fill="#2756a7">LIVE CAPTURE PROGRESS</text>
+    <text x="974" y="643" class="code" text-anchor="start" fill="#14243d">Postgres LISTEN / NOTIFY → Fastify SSE</text>
+    <path d="M1336 637H1370" fill="none" stroke="#2756a7" stroke-width="2" stroke-linejoin="round" stroke-dasharray="5 5" marker-end="url(#read-arrow)"/>
+    <text x="1383" y="643" class="code" text-anchor="start" fill="#2756a7">GET /api/captures/:id/events</text>
+  </g>
+  <g id="platform">
+    <rect x="39" y="687" width="1722" height="392" rx="14" fill="#eef3fb" stroke="none"/>
+    <rect x="55" y="701" width="27" height="26" rx="5" fill="#2756a7" stroke="none"/>
+    <text x="68.5" y="719" class="eyebrow" text-anchor="middle" fill="#fff">02</text>
+    <text x="95" y="719" class="lane-title" text-anchor="start" fill="#14243d">PROCEDURAL CITY COMPILER, FASTIFY GATEWAY &amp; REAL-TIME AGENT</text>
+    <text x="1745" y="718" class="code" text-anchor="end" fill="#2756a7">modeling/  ·  server/  ·  shared/</text>
+  <g id="compiler">
+    <rect x="55" y="742" width="403" height="317" rx="10" fill="#fff" stroke="#d3dce6"/>
+    <text x="75" y="769" class="eyebrow" text-anchor="start" fill="#2756a7">DETERMINISTIC BUILD</text>
+    <text x="75" y="798" class="title" text-anchor="start" fill="#14243d">Procedural Boston</text>
+    <text x="75" y="826" class="code" text-anchor="start" fill="#30445c">modeling/generate_all.mjs</text>
+    <text x="75" y="847" class="compact" text-anchor="start" fill="#30445c">OSM Overpass · osm-data.json</text>
+    <text x="75" y="868" class="compact" text-anchor="start" fill="#30445c">Boston / Cambridge GIS · city-footprints.json</text>
+    <text x="75" y="889" class="compact" text-anchor="start" fill="#30445c">MassGIS · hydrography.json</text>
+    <text x="75" y="910" class="compact" text-anchor="start" fill="#30445c">Pinned MBTA stops + modeled route paths</text>
+    <path d="M75 924H438" stroke="#d3dce6"/>
+    <text x="75" y="947" class="compact" text-anchor="start" fill="#30445c">glTF 2.0, PLY and JSON · 31 validated exports</text>
+    <text x="75" y="968" class="compact" text-anchor="start" fill="#30445c">Map sculpture · 47,540 tris / 535 track rings</text>
+    <text x="75" y="989" class="compact" text-anchor="start" fill="#30445c">10 dioramas · 4,502 solids / 2,313 trunks</text>
+    <text x="75" y="1010" class="compact" text-anchor="start" fill="#30445c">58 venue pins · 55 surveyed roofs / 3 ground</text>
+    <text x="75" y="1031" class="compact" text-anchor="start" fill="#30445c">Physical props, anchors and track geometry</text>
+  </g>
+  <g id="gateway">
+    <rect x="484" y="742" width="1261" height="65" rx="10" fill="#203d74" stroke="none"/>
+    <text x="504" y="770" class="title" text-anchor="start" fill="#fff">Fastify TypeScript gateway</text>
+    <text x="878" y="769" class="body" text-anchor="start" fill="#f0f5ff">30+ REST, SSE &amp; WebSocket routes · per-IP limits · server-side provider keys</text>
+    <text x="504" y="793" class="note" text-anchor="start" fill="#d9e7ff">Catalog · pipeline · captures · MBTA · Live · Realtime · pairing · admin</text>
+    <text x="1725" y="793" class="code" text-anchor="end" fill="#f0f5ff">X-Upload-Passcode  /  X-Admin-Passcode</text>
+  </g>
+  <g id="persistence">
+    <rect x="484" y="831" width="403" height="228" rx="10" fill="#f9fbff" stroke="#d3dce6"/>
+    <text x="504" y="858" class="eyebrow" text-anchor="start" fill="#2756a7">PERSISTENT STORES</text>
+    <text x="504" y="887" class="title" text-anchor="start" fill="#14243d">SQLite + optional Postgres</text>
+    <text x="504" y="911" class="compact" text-anchor="start" fill="#30445c">node:sqlite · 8 STRICT tables</text>
+    <text x="504" y="931" class="code" text-anchor="start" fill="#30445c">places, assets, uploads, upload_places</text>
+    <text x="504" y="951" class="code" text-anchor="start" fill="#30445c">jobs, reviews, debug_logs, worker_lease</text>
+    <path d="M504 961H867" stroke="#d3dce6"/>
+    <text x="504" y="984" class="compact" text-anchor="start" fill="#30445c">Tiger Data · 4 capture tables</text>
+    <text x="504" y="1003" class="code" text-anchor="start" fill="#30445c">captures, frames, jobs, splat_assets</text>
+    <text x="504" y="1022" class="compact" text-anchor="start" fill="#30445c">Object keys and metadata. Advisory-locked</text>
+    <text x="504" y="1041" class="code" text-anchor="start" fill="#30445c">migrations · DATABASE_URL_DIRECT</text>
+  </g>
+  <g id="data-enrichment">
+    <rect x="913" y="831" width="403" height="228" rx="10" fill="#fffaf2" stroke="#d3dce6"/>
+    <text x="933" y="858" class="eyebrow" text-anchor="start" fill="#92500c">EXTERNAL DATA &amp; AI</text>
+    <text x="933" y="887" class="title" text-anchor="start" fill="#14243d">Transit, prices &amp; intake</text>
+    <text x="933" y="911" class="compact" text-anchor="start" fill="#30445c">MBTA V3 JSON:API · server-injected key</text>
+    <text x="933" y="930" class="compact" text-anchor="start" fill="#30445c">Vehicles 5 s · predictions 10 s · alerts 60 s</text>
+    <text x="933" y="949" class="compact" text-anchor="start" fill="#30445c">Schedules 1 h · simulated Boston fallback</text>
+    <text x="933" y="968" class="compact" text-anchor="start" fill="#30445c">Trip fare math · $2.40 subway / $1.70 bus</text>
+    <text x="933" y="987" class="code" text-anchor="start" fill="#30445c">/live-reviews · /live-prices</text>
+    <text x="933" y="1006" class="compact" text-anchor="start" fill="#30445c">POST /api/intake · Gemini gemini-4-hydrogen</text>
+    <text x="933" y="1025" class="compact" text-anchor="start" fill="#30445c">JSON selection · heuristic fallback + override</text>
+  </g>
+  <g id="agent">
+    <rect x="1342" y="831" width="403" height="228" rx="10" fill="#fffaf2" stroke="#d3dce6"/>
+    <text x="1362" y="858" class="eyebrow" text-anchor="start" fill="#92500c">MULTIMODAL VOICE AGENT</text>
+    <text x="1362" y="887" class="title" text-anchor="start" fill="#14243d">OpenAI Live + Responses</text>
+    <text x="1362" y="911" class="code" text-anchor="start" fill="#30445c">POST /api/live/sessions</text>
+    <text x="1362" y="930" class="compact" text-anchor="start" fill="#30445c">gpt-live-1.1 · ballad · 30 s speech-wake²</text>
+    <text x="1362" y="949" class="compact" text-anchor="start" fill="#30445c">WebRTC audio + DataChannel tool calls</text>
+    <text x="1362" y="968" class="compact" text-anchor="start" fill="#30445c">gpt-6-luna · Boston clock + web_search²</text>
+    <text x="1362" y="987" class="compact" text-anchor="start" fill="#30445c">Grounded in 10 stops / 58 places / 63 dishes</text>
+    <text x="1362" y="1006" class="compact" text-anchor="start" fill="#30445c">27 client tools · scenes, filters, tray, camera,</text>
+    <text x="1362" y="1025" class="compact" text-anchor="start" fill="#30445c">dish rotation, highlights, transit and visit notes.</text>
+  </g>
+    <path d="M685.5 807V831" fill="none" stroke="#2756a7" stroke-width="2" stroke-linejoin="round" stroke-dasharray="5 5" marker-end="url(#read-arrow)"/>
+    <path d="M1114.5 807V831" fill="none" stroke="#2756a7" stroke-width="2" stroke-linejoin="round" stroke-dasharray="5 5" marker-end="url(#read-arrow)"/>
+    <path d="M1543.5 807V831" fill="none" stroke="#2756a7" stroke-width="2" stroke-linejoin="round" stroke-dasharray="5 5" marker-end="url(#read-arrow)"/>
+  </g>
+  <g id="spatial-runtime">
+    <rect x="39" y="1097" width="1722" height="294" rx="14" fill="#f4f0fb" stroke="none"/>
+    <rect x="55" y="1111" width="27" height="26" rx="5" fill="#6540a5" stroke="none"/>
+    <text x="68.5" y="1129" class="eyebrow" text-anchor="middle" fill="#fff">03</text>
+    <text x="95" y="1129" class="lane-title" text-anchor="start" fill="#14243d">WEBXR SPATIAL RUNTIME, CUSTOM SHADERS &amp; MULTI-DEVICE SURFACES</text>
+    <text x="1745" y="1128" class="code" text-anchor="end" fill="#6540a5">web/src/xr/  ·  web/public/</text>
+    <rect x="55" y="1151" width="403" height="55" rx="8" fill="#403069" stroke="none"/>
+    <text x="72" y="1174" class="eyebrow" text-anchor="start" fill="#ddd0fd">MAP</text>
+    <text x="72" y="1195" class="scene-title" text-anchor="start" fill="#fff">Tabletop MBTA map</text>
+    <rect x="484" y="1151" width="403" height="55" rx="8" fill="#403069" stroke="none"/>
+    <text x="501" y="1174" class="eyebrow" text-anchor="start" fill="#ddd0fd">STATION</text>
+    <text x="501" y="1195" class="scene-title" text-anchor="start" fill="#fff">10 floating-island dioramas</text>
+    <path d="M458 1179H484" fill="none" stroke="#6540a5" stroke-width="2" stroke-linejoin="round" marker-end="url(#runtime-arrow)"/>
+    <rect x="913" y="1151" width="403" height="55" rx="8" fill="#403069" stroke="none"/>
+    <text x="930" y="1174" class="eyebrow" text-anchor="start" fill="#ddd0fd">VENUE</text>
+    <text x="930" y="1195" class="scene-title" text-anchor="start" fill="#fff">3DGS venue room</text>
+    <path d="M887 1179H913" fill="none" stroke="#6540a5" stroke-width="2" stroke-linejoin="round" marker-end="url(#runtime-arrow)"/>
+    <rect x="1342" y="1151" width="403" height="55" rx="8" fill="#403069" stroke="none"/>
+    <text x="1359" y="1174" class="eyebrow" text-anchor="start" fill="#ddd0fd">DISH</text>
+    <text x="1359" y="1195" class="scene-title" text-anchor="start" fill="#fff">3DGS dish table</text>
+    <path d="M1316 1179H1342" fill="none" stroke="#6540a5" stroke-width="2" stroke-linejoin="round" marker-end="url(#runtime-arrow)"/>
+  <g id="engine">
+    <rect x="55" y="1223" width="403" height="151" rx="10" fill="#fff" stroke="#d3dce6"/>
+    <text x="75" y="1250" class="eyebrow" text-anchor="start" fill="#6540a5">PLAYCANVAS v2.24.2</text>
+    <text x="75" y="1279" class="title" text-anchor="start" fill="#14243d">Spatial scene engine</text>
+    <text x="75" y="1302" class="compact" text-anchor="start" fill="#30445c">Animated map-to-station dive. Web Audio</text>
+    <text x="75" y="1321" class="compact" text-anchor="start" fill="#30445c">synthesis. Shared @faresight/shared</text>
+    <text x="75" y="1340" class="compact" text-anchor="start" fill="#30445c">projection, catalog and transit math.</text>
+  </g>
+  <g id="quest">
+    <rect x="484" y="1223" width="403" height="151" rx="10" fill="#fff" stroke="#d3dce6"/>
+    <text x="504" y="1250" class="eyebrow" text-anchor="start" fill="#6540a5">META QUEST 3 · immersive-vr / immersive-ar</text>
+    <text x="504" y="1279" class="title" text-anchor="start" fill="#14243d">VR walkthrough / AR tabletop</text>
+    <text x="504" y="1302" class="compact" text-anchor="start" fill="#30445c">AR hit-test, plane and mesh detection.</text>
+    <text x="504" y="1320" class="compact" text-anchor="start" fill="#30445c">25-joint GLB hands, pinch and forearm dock.</text>
+    <text x="504" y="1338" class="compact" text-anchor="start" fill="#30445c">3D menu, review clipboards and dish physics.</text>
+    <text x="504" y="1356" class="compact" text-anchor="start" fill="#30445c">Canvas textures redraw on content changes.</text>
+  </g>
+  <g id="desktop-mobile">
+    <rect x="913" y="1223" width="403" height="151" rx="10" fill="#fff" stroke="#d3dce6"/>
+    <text x="933" y="1250" class="eyebrow" text-anchor="start" fill="#6540a5">DESKTOP &amp; MOBILE</text>
+    <text x="933" y="1279" class="title" text-anchor="start" fill="#14243d">Dock, cache &amp; phone handoff</text>
+    <text x="933" y="1302" class="compact" text-anchor="start" fill="#30445c">Paper Map dock · voice, upload, moderation.</text>
+    <text x="933" y="1320" class="compact" text-anchor="start" fill="#30445c">/sw.js · shell cache + 36-entry demo LRU⁵.</text>
+    <text x="933" y="1338" class="compact" text-anchor="start" fill="#30445c">4-digit WebSocket pairing to Quest³.</text>
+    <text x="933" y="1356" class="compact" text-anchor="start" fill="#30445c">deploy-web · Vultr Object Storage + CDN.</text>
+  </g>
+  <g id="shader-rendering">
+    <rect x="1342" y="1223" width="403" height="151" rx="10" fill="#fff" stroke="#d3dce6"/>
+    <text x="1362" y="1250" class="eyebrow" text-anchor="start" fill="#6540a5">WEBGL2 SPLAT SHADERS</text>
+    <text x="1362" y="1279" class="title" text-anchor="start" fill="#14243d">GPU wavefront reveal</text>
+    <text x="1362" y="1302" class="compact" text-anchor="start" fill="#30445c">SOG / SPZ / PLY · Zstd WASM for SPZ.</text>
+    <text x="1362" y="1320" class="compact" text-anchor="start" fill="#30445c">GLSL hooks: modifySplatRotationScale</text>
+    <text x="1362" y="1338" class="compact" text-anchor="start" fill="#30445c">and modifySplatColor · ref-counted cache.</text>
+    <text x="1362" y="1356" class="compact" text-anchor="start" fill="#30445c">240k XR Gaussian budget · 800k safety cap.</text>
+  </g>
+  </g>
+  <g id="delivery-and-tool-paths">
+    <path d="M1564 1059V1097" fill="none" stroke="#086e69" stroke-width="2" stroke-linejoin="round" marker-end="url(#write-arrow)"/>
+    <text x="1577" y="1084" class="flow-label" text-anchor="start" fill="#086e69">CLIENT TOOL CALLS</text>
+    <path d="M55 932H28V1178H55" fill="none" stroke="#2756a7" stroke-width="2" stroke-linejoin="round" stroke-dasharray="5 5" marker-end="url(#read-arrow)"/>
+    <path d="M1745 438H1772V1286H1745" fill="none" stroke="#2756a7" stroke-width="2" stroke-linejoin="round" stroke-dasharray="5 5" marker-end="url(#read-arrow)"/>
+    <g transform="translate(17 1055) rotate(-90)">
+    <text x="0" y="0" class="flow-label" text-anchor="middle" fill="#2756a7">BUILT SCENE ASSETS</text>
+    </g>
+    <g transform="translate(1783 864) rotate(90)">
+    <text x="0" y="0" class="flow-label" text-anchor="middle" fill="#2756a7">PUBLISHED SPLATS</text>
+    </g>
+  </g>
+  <g id="legend-and-notes">
+    <path d="M55 1405H1745" stroke="#d3dce6"/>
+    <path d="M55 1427H88" fill="none" stroke="#086e69" stroke-width="2" stroke-linejoin="round" marker-end="url(#write-arrow)"/>
+    <text x="98" y="1432" class="note" text-anchor="start" fill="#14243d">Write / control</text>
+    <path d="M261 1427H294" fill="none" stroke="#2756a7" stroke-width="2" stroke-linejoin="round" stroke-dasharray="5 5" marker-end="url(#read-arrow)"/>
+    <text x="304" y="1432" class="note" text-anchor="start" fill="#14243d">Read / stream</text>
+    <path d="M462 1427H495" fill="none" stroke="#6540a5" stroke-width="2" stroke-linejoin="round" marker-end="url(#runtime-arrow)"/>
+    <text x="505" y="1432" class="note" text-anchor="start" fill="#14243d">Scene navigation</text>
+    <rect x="690" y="1419" width="18" height="15" rx="3" fill="#fffaf2" stroke="#dfc395"/>
+    <text x="717" y="1432" class="note" text-anchor="start" fill="#14243d">Cloud AI / external data</text>
+    <rect x="952" y="1419" width="18" height="15" rx="3" fill="#f9fbff" stroke="#9eb4e0"/>
+    <text x="979" y="1432" class="note" text-anchor="start" fill="#14243d">Persistent stores</text>
+    <rect x="1170" y="1419" width="18" height="15" rx="3" fill="#f4f0fb" stroke="#c9b7ea"/>
+    <text x="1197" y="1432" class="note" text-anchor="start" fill="#14243d">Spatial runtime surfaces</text>
+    <text x="1745" y="1432" class="subhead" text-anchor="end" fill="#14243d">67 splats + 27 GLBs · 86.3 MB⁴</text>
+    <text x="55" y="1458" class="note" text-anchor="start" fill="#30445c">¹ Provider timings and expiry are documented.  ² Standby and web search are requested when supported. Separate Realtime credential route: POST /api/realtime/session.</text>
+    <text x="55" y="1478" class="note" text-anchor="start" fill="#30445c">³ POST /api/pairing/create · WS /ws/pair/:code · open_place / send_trip.  ⁴ Tracked demo files: 65 SOG, 2 PLY, 27 GLB. Map +X east, +Z south. Sources: OpenStreetMap (ODbL), BPDA, Cambridge GIS, MassGIS, MBTA.</text>
+  </g>
+  <g id="storage-note">
+    <text x="55" y="1498" class="note" text-anchor="start" fill="#30445c">⁵ Shell assets use cache-first and demo assets use network-first. Direct image PUT bypasses the API. SQLite runs the local catalog and worker. Optional Postgres tracks cloud captures and Vultr stores the binaries.</text>
+  </g>
+</svg>

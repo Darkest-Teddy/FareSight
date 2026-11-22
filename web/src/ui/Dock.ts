@@ -1,5 +1,7 @@
 import '../styles/dock.css';
 import { dockButton, element, type IconName } from './dom';
+import { animateIcon } from './icons';
+import { springBump, springStagger, springVisible } from './motion';
 
 export type DockPanel = 'stops' | 'origin' | 'budget';
 
@@ -30,8 +32,10 @@ export class Dock {
   readonly root = element('nav', 'dock');
   readonly budget = element('div', 'dock dock-budget');
   private readonly slots = new Map<DockPanel, { trigger: HTMLButtonElement; card: HTMLElement }>();
+  private readonly alertBadge = element('span', 'dock-alert');
   private readonly budgetValue = element('span', 'dock-value');
   private open?: DockPanel;
+  private hasAlert = false;
 
   constructor(private readonly parts: DockParts) {
     this.root.setAttribute('aria-label', 'Explore');
@@ -42,6 +46,9 @@ export class Dock {
       this.slot('origin', 'pin', 'Start from', parts.origin),
       ...parts.actions, parts.voice,
     );
+    this.alertBadge.hidden = true;
+    this.alertBadge.setAttribute('aria-hidden', 'true');
+    this.slots.get('stops')!.trigger.append(this.alertBadge);
     this.budget.append(this.slot('budget', 'budget', 'Budget', parts.budget));
     this.slots.get('budget')!.trigger.append(this.budgetValue);
 
@@ -78,29 +85,50 @@ export class Dock {
 
   /** Reflects the shell's state: which card is open, if any. */
   render(open?: DockPanel) {
+    if (open === this.open) return;
     const previous = this.open && this.slots.get(this.open);
     // Focus never stays behind on something that just disappeared.
     const stranded = previous && open !== this.open && previous.card.contains(document.activeElement);
     this.open = open;
     for (const [panel, { trigger, card }] of this.slots) {
-      card.hidden = panel !== open;
-      trigger.setAttribute('aria-expanded', String(panel === open));
+      const expanded = panel === open;
+      springVisible(card, expanded, { from: panel === 'budget'
+        ? 'translate(3px, 8px) scale(.965)' : 'translate(-8px, 5px) scale(.965)' });
+      trigger.setAttribute('aria-expanded', String(expanded));
+      if (expanded) {
+        animateIcon(trigger.querySelector('svg'), 'state');
+        if (panel === 'stops') springStagger(card.querySelectorAll<HTMLElement>('.station-row'));
+      }
     }
     if (stranded) previous.trigger.focus({ preventScroll: true });
+    this.renderAlert();
   }
 
   /** The budget button reads its value back, and turns sunflower while any filter narrows the map. */
   setBudget(value: number, narrowed: boolean) {
-    this.budgetValue.textContent = '$' + value;
     const { trigger } = this.slots.get('budget')!;
-    trigger.dataset.narrowed = String(narrowed);
+    const next = '$' + value;
+    if (this.budgetValue.textContent !== next) {
+      if (this.budgetValue.textContent) {
+        springBump(this.budgetValue);
+        animateIcon(trigger.querySelector('svg'), 'state');
+      }
+      this.budgetValue.textContent = next;
+    }
+    if (trigger.dataset.narrowed !== String(narrowed)) {
+      if (trigger.dataset.narrowed !== undefined) springBump(this.budget);
+      trigger.dataset.narrowed = String(narrowed);
+    }
     trigger.setAttribute('aria-label', `Budget, $${value} per person`);
   }
 
   /** A red dot on the Stops button while the MBTA feed has a problem. */
   setAlert(alert: boolean) {
-    const { trigger } = this.slots.get('stops')!;
-    if (alert && !trigger.querySelector('.dock-alert')) trigger.append(element('span', 'dock-alert'));
-    else if (!alert) trigger.querySelector('.dock-alert')?.remove();
+    this.hasAlert = alert;
+    this.renderAlert();
+  }
+
+  private renderAlert() {
+    springVisible(this.alertBadge, this.hasAlert && this.open !== 'stops', { from: 'scale(.35)', preset: 'pop' });
   }
 }

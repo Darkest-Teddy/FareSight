@@ -190,6 +190,8 @@ export class App {
   }
 
   private renderCode() {
+    // The key only shows on a server that asks for a code.
+    this.codeButton.hidden = inviteCode.status === 'open' || inviteCode.status === 'unknown';
     this.codeButton.dataset.status = inviteCode.status;
     this.codeButton.setAttribute('aria-label', codeLabels[inviteCode.status]);
   }

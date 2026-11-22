@@ -17,6 +17,8 @@ import { button, dockButton, element, errorText, httpUrl, icon, link, message, m
 import { FilterControls } from './FilterControls';
 import { LiveVoiceDock } from './LiveVoiceDock';
 import { lineDots } from './lineDots';
+import { animateIcon, attachIconMotion } from './icons';
+import { springBump, springHide, springShow, springText, springVisible } from './motion';
 import { PairingModal } from './PairingModal';
 import type { DishComparison, Load, Seating } from './viewState';
 import { filtersNarrowed, initialFilters, matchingPlaces, type Filters } from './state';
@@ -29,6 +31,7 @@ export class AppShell {
   private readonly canvasNotice = element('div', 'canvas-notice');
   private readonly status = element('span', 'service-status');
   private readonly statusText = element('span');
+  private readonly statusDot = element('span', 'status-dot');
   private readonly xrStatus = element('span', 'xr-status', 'Starting 3D');
   private readonly notice = element('div', 'notice');
   private readonly brand = element('h1', 'brand');
@@ -115,10 +118,12 @@ export class AppShell {
     this.backNav.setAttribute('aria-label', 'Scene navigation');
     this.backButton = button('', () => this.stepBack(), 'scene-back');
     this.backButton.append(icon('back'), this.backLabel);
+    attachIconMotion(this.backButton);
+    this.backNav.hidden = true;
     this.backNav.append(this.backButton);
     // The MBTA state is the last line under the stop list. A problem also marks the Stops button.
     this.statusText.setAttribute('role', 'status');
-    this.status.append(element('span', 'status-dot'), this.statusText);
+    this.status.append(this.statusDot, this.statusText);
     this.vrButton = dockButton('vr', 'Enter VR', () => void this.launchVR());
     // Shown once the viewer reports what this device supports, so the icon never flips on screen.
     this.vrButton.hidden = true;
@@ -138,6 +143,7 @@ export class AppShell {
       onMicrophone: (hasMic, muted, requesting) => this.liveDock.setMicrophone(hasMic, muted, requesting),
       onAudioBlocked: (blocked) => this.liveDock.setAudioBlocked(blocked),
       onPaused: (paused) => this.liveDock.setPaused(paused),
+      onAudioLevel: (level) => this.liveDock.setAudioLevel(level),
       onUnsentText: (text) => this.liveDock.restoreDraft(text),
       onTranscript: (entry) => this.liveDock.appendTranscript(entry),
       onModel: (model) => this.liveDock.setModel(model),
@@ -250,15 +256,18 @@ export class AppShell {
           const changed = this.xrMode !== state.activeMode;
           this.xrMode = state.activeMode;
           this.root.dataset.xr = this.xrMode;
-          this.vrButton.hidden = this.xrMode !== 'none';
-          this.xrExit.hidden = this.xrMode === 'none';
           setDockButton(this.vrButton, state.vrSupported ? 'Enter VR' : 'Reset view', state.vrSupported ? 'vr' : 'reset');
           this.vrButton.classList.toggle('accent', state.vrSupported);
           this.vrButton.dataset.supported = String(state.vrSupported);
-          this.xrStatus.textContent = state.activeMode === 'ar' ? 'AR table active'
+          for (const [control, visible] of [[this.vrButton, this.xrMode === 'none'], [this.xrExit, this.xrMode !== 'none']] as const) {
+            if (springVisible(control, visible, { from: 'translateY(5px) scale(.88)' }) && visible) {
+              animateIcon(control.querySelector('svg'), 'state');
+            }
+          }
+          springText(this.xrStatus, state.activeMode === 'ar' ? 'AR table active'
             : state.activeMode === 'vr' ? 'VR active'
               : /Quest|OculusBrowser/i.test(navigator.userAgent) ? 'Quest browser'
-                : state.vrSupported || state.arSupported ? 'WebXR available' : 'Desktop 3D';
+                : state.vrSupported || state.arSupported ? 'WebXR available' : 'Desktop 3D');
           if (changed) this.renderReviewCards();
         },
         onStatsUpdate: (stats) => {
@@ -269,7 +278,7 @@ export class AppShell {
       await this.engine.init();
       this.engineReady = true;
       this.engine.setVoiceState(this.liveClient.state);
-      this.canvasNotice.hidden = true;
+      springHide(this.canvasNotice, { from: 'scale(.96)' });
       this.engine.setStops(this.stops);
       if (this.highlightedStops.length) this.engine.setHighlightedStops(this.highlightedStops, false);
       if (this.highlightedPlaces.length) this.engine.setHighlightedPlaces(this.highlightedPlaces);
@@ -283,8 +292,8 @@ export class AppShell {
       // Stations, venues and dishes are 3D scenes, so without the viewer only the stop list remains.
       this.canvasNotice.replaceChildren(message('3D viewer unavailable on this device, so stations and menus cannot open.', true));
       this.log(errorText(error));
-      this.vrButton.hidden = true;
-      this.xrStatus.textContent = '3D viewer unavailable';
+      springHide(this.vrButton);
+      springText(this.xrStatus, '3D viewer unavailable');
       this.root.dataset.viewer = 'failed';
       // The stop list still shows how many places match at each stop.
       this.setStopsOpen(true);
@@ -299,7 +308,7 @@ export class AppShell {
         : this.vehicleSource === 'simulated' ? 'Simulated trains'
           : this.vehicleSource === 'unavailable' ? 'Trains unavailable' : 'Checking MBTA';
     const source = this.catalogState === 'offline' ? 'offline' : this.vehicleSource ?? 'pending';
-    if (this.statusText.textContent !== text) this.statusText.textContent = text;
+    if (springText(this.statusText, text)) springBump(this.statusDot);
     this.status.dataset.source = source;
     // A problem turns the dot red and ringed, and marks the Stops button too.
     const alert = source === 'offline' || source === 'unavailable';
@@ -359,10 +368,10 @@ export class AppShell {
       : this.mode === 'venue' ? this.stop?.name ?? 'Station'
         : this.mode === 'station' ? 'Map' : undefined;
     const held = document.activeElement === this.backButton;
-    this.backNav.hidden = !target;
-    this.brand.hidden = !!target;
+    springVisible(this.backNav, !!target, { from: 'translateX(-7px) scale(.98)' });
+    springVisible(this.brand, !target, { from: 'translateX(-7px)' });
     if (target) {
-      this.backLabel.textContent = target;
+      springText(this.backLabel, target);
       this.backButton.setAttribute('aria-label', `Back to ${target}`);
       this.backButton.title = `Back to ${target} (Esc)`;
     } else if (held) {
@@ -373,31 +382,46 @@ export class AppShell {
 
   private renderStationBoard(matched: ReadonlySet<string>) {
     const counts = countPreviewsByStop(this.places, matched);
-    const key = JSON.stringify([this.highlightedStops, ...this.stops.map((stop) => [stop.stop_id, counts.get(stop.stop_id)])]);
-    if (this.stationList.dataset.summary === key) return;
-    this.stationList.dataset.summary = key;
-    this.stationList.replaceChildren();
+    const rows = new Map(Array.from(this.stationList.querySelectorAll<HTMLButtonElement>('.station-row'),
+      (row) => [row.dataset.stop, row]));
     const highlighted = new Set(this.highlightedStops);
-    for (const stop of this.stops) {
-      const previews = counts.get(stop.stop_id);
-      const count = previews?.matching ?? 0;
-      // Picking a stop takes you into its scene, which closes the list. Without the 3D viewer
-      // there is no scene to open, so the list stays up.
-      const row = button('', () => {
-        this.showStation(stop);
-        if (!this.engineReady) this.setStopsOpen(true);
-      }, 'station-row');
-      const name = element('strong');
-      name.append(element('span', 'station-name', stop.name));
-      row.append(lineDots(stop), name, element('span', 'station-count', String(count)));
-      row.setAttribute('aria-label', `${stop.name}, ${count} matching ${count === 1 ? 'place' : 'places'}`);
-      row.dataset.stop = stop.stop_id;
-      row.dataset.highlighted = String(highlighted.has(stop.stop_id));
-      // Mirror list focus on the 3D map so the two read as one control.
-      for (const type of ['pointerenter', 'focus']) row.addEventListener(type, () => this.engine?.setHoveredStop(stop.stop_id));
-      for (const type of ['pointerleave', 'blur']) row.addEventListener(type, () => this.engine?.setHoveredStop(undefined));
-      this.stationList.append(row);
-    }
+    this.stops.forEach((stop, index) => {
+      const id = stop.stop_id;
+      const tally = String(counts.get(id)?.matching ?? 0);
+      const lines = JSON.stringify([stop.primary_color, stop.lines]);
+      let row = rows.get(id);
+      if (!row) {
+        row = button('', () => {
+          const current = this.findStop(id);
+          if (current) this.showStation(current);
+          if (!this.engineReady) this.setStopsOpen(true);
+        }, 'station-row');
+        const name = element('strong');
+        name.append(element('span', 'station-name', stop.name));
+        row.append(lineDots(stop), name, element('span', 'station-count', tally));
+        row.dataset.stop = id;
+        row.dataset.lines = lines;
+        for (const type of ['pointerenter', 'focus']) row.addEventListener(type, () => this.engine?.setHoveredStop(id));
+        for (const type of ['pointerleave', 'blur']) row.addEventListener(type, () => this.engine?.setHoveredStop(undefined));
+      } else {
+        if (row.dataset.lines !== lines) {
+          row.querySelector('.route-list')?.replaceWith(lineDots(stop));
+          row.dataset.lines = lines;
+        }
+        springText(row.querySelector<HTMLElement>('.station-name')!, stop.name);
+        springText(row.querySelector<HTMLElement>('.station-count')!, tally);
+      }
+      const highlight = String(highlighted.has(id));
+      if (row.dataset.highlighted !== highlight) {
+        if (row.isConnected) springBump(row.querySelector<HTMLElement>('.station-count')!);
+        row.dataset.highlighted = highlight;
+      }
+      row.setAttribute('aria-label', `${stop.name}, ${tally} matching ${tally === '1' ? 'place' : 'places'}`);
+      const atIndex = this.stationList.children[index];
+      if (atIndex !== row) this.stationList.insertBefore(row, atIndex ?? null);
+      rows.delete(id);
+    });
+    for (const row of rows.values()) row.remove();
   }
 
   private renderPanels() {
@@ -437,6 +461,7 @@ export class AppShell {
     const originChanged = patch.startStopId !== undefined && (patch.startStopId !== this.filters.startStopId || this.origin !== undefined);
     if (patch.startStopId !== undefined) {
       ++this.gpsRequest;
+      this.filterControls.setLocating(false);
       this.origin = undefined;
     }
     this.filters = { ...this.filters, ...patch };
@@ -464,10 +489,12 @@ export class AppShell {
     if (!current()) return { ok: false, message: 'Location request cancelled.' };
     if (!navigator.geolocation) return fail('GPS is unavailable in this browser. Choose your start stop.');
     const request = ++this.gpsRequest;
+    this.filterControls.setLocating(true);
     this.notify('Finding the nearest demo stop…');
     const position = await new Promise<GeolocationPosition>((resolve, reject) =>
       navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10_000, maximumAge: 60_000 }),
     ).catch(() => undefined);
+    if (request === this.gpsRequest) this.filterControls.setLocating(false);
     if (request !== this.gpsRequest || !current()) return { ok: false, message: 'Location request cancelled.' };
     if (!position) return fail('Could not read your location. Choose a start stop from the list.');
     const { latitude, longitude } = position.coords;
@@ -1036,11 +1063,11 @@ export class AppShell {
         this.setAudio(enabled);
       },
       openModal: (name) => {
-        this.uploader.close();
-        this.pairing.close();
-        if (this.debug.dialog.open) this.debug.dialog.close();
-        if (this.credits.dialog.open) this.credits.dialog.close();
-        if (this.incomingTrip.dialog.open) this.incomingTrip.dialog.close();
+        if (name !== 'upload') this.uploader.close();
+        if (name !== 'pair') this.pairing.close();
+        if (name !== 'debug') this.debug.close();
+        if (name !== 'credits') this.credits.close();
+        this.incomingTrip.close();
         if (name === 'upload') this.uploader.open(this.place?.id);
         else if (name === 'pair') this.pairing.open();
         else if (name === 'credits') this.credits.open();
@@ -1075,9 +1102,12 @@ export class AppShell {
   }
 
   private notify(text: string) {
-    this.notice.textContent = text;
-    this.notice.hidden = false;
+    const motion = { from: 'translateY(-8px) scale(.98)' };
+    const label = text.replaceAll('—', '–');
+    const changed = label !== this.notice.textContent;
+    this.notice.textContent = label;
+    if (!springShow(this.notice, motion) && changed) springBump(this.notice);
     window.clearTimeout(this.noticeTimer);
-    this.noticeTimer = window.setTimeout(() => { this.notice.hidden = true; }, 6500);
+    this.noticeTimer = window.setTimeout(() => springHide(this.notice, motion), 6500);
   }
 }

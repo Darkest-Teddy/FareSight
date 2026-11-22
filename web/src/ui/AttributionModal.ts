@@ -52,7 +52,7 @@ export function attribution(openModeration: () => void) {
       const list = element('ul', 'credit-list');
       for (const { name, price, source, url } of items) {
         const item = element('li');
-        item.append(`${name} — $${price.toFixed(2)} from `, link(source, url));
+        item.append(`${name} · $${price.toFixed(2)} from `, link(source, url));
         list.append(item);
       }
       group.append(list);
@@ -67,6 +67,6 @@ export function attribution(openModeration: () => void) {
     element('p', '', 'Live AI voice streams your microphone audio directly to OpenAI over WebRTC only while a live session is active. End the session at any time to disconnect the microphone.'),
   );
   surface.body.append(credits, roomCredits, dishCredits,
-    ...(demoDishPriceSources.length ? [priceCredits] : []), privacy, button('Open moderation', () => { surface.dialog.close(); openModeration(); }, 'quiet'));
+    ...(demoDishPriceSources.length ? [priceCredits] : []), privacy, button('Open moderation', () => surface.close(openModeration), 'quiet'));
   return surface;
 }

@@ -1,7 +1,15 @@
+import { animate } from 'motion/mini';
+import { spring } from 'motion';
+import { animateIcon, attachIconMotion, icon, type IconName } from './icons.ts';
+import { attachTactileSpring, canAnimate, labelSpring, springSurface, springText } from './motion.ts';
+
+export { icon, type IconName } from './icons.ts';
+
 export function element<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = ''): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text) node.textContent = text.replaceAll('—', '–');
+  if (tag === 'button') attachTactileSpring(node);
   return node;
 }
 
@@ -12,37 +20,11 @@ export function button(label: string, action: () => void, className = '') {
   return node;
 }
 
-// Static line icons on a 24 px grid. Strokes take the text colour, so they follow every button state.
-const icons = {
-  back: '<path d="M19.5 12h-15M10.5 6l-6 6 6 6"/>',
-  list: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.3" class="fill"/><circle cx="4.5" cy="12" r="1.3" class="fill"/><circle cx="4.5" cy="18" r="1.3" class="fill"/>',
-  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>',
-  alert: '<path d="M12 7v6.5M12 17v.2"/>',
-  venue: '<path d="M4.5 10.5V20h15v-9.5M3 9l2-5h14l2 5a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0zM10 20v-5h4v5"/>',
-  pin: '<path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/>',
-  locate: '<circle cx="12" cy="12" r="5.5"/><path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4"/>',
-  budget: '<circle cx="12" cy="12" r="8.5"/><path d="M14.6 9.4c-.4-.8-1.4-1.3-2.6-1.3-1.5 0-2.6.8-2.6 1.9 0 2.7 5.3 1.3 5.3 4 0 1.2-1.1 2-2.7 2-1.3 0-2.3-.5-2.7-1.4M12 6.4v1.7M12 16v1.7"/>',
-  vr: '<path d="M4 8h16a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 20 17h-3.4a1.5 1.5 0 0 1-1.2-.6l-1.2-1.6a2.7 2.7 0 0 0-4.4 0l-1.2 1.6a1.5 1.5 0 0 1-1.2.6H4a1.5 1.5 0 0 1-1.5-1.5v-6A1.5 1.5 0 0 1 4 8z"/>',
-  reset: '<path d="M5 12a7 7 0 1 0 2.2-5.1L5 9M5 4.5V9h4.5"/>',
-  exit: '<path d="M14 4.5h4.5v15H14M10.5 8l-4 4 4 4M6.5 12H15"/>',
-  sound: '<path d="M4 9.5v5h3.5L12 18V6L7.5 9.5zM15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.7 7.7 0 0 1 0 11"/>',
-  mute: '<path d="M4 9.5v5h3.5L12 18V6L7.5 9.5zM16 9.7l4.5 4.6M20.5 9.7 16 14.3"/>',
-} as const;
-export type IconName = keyof typeof icons;
-
-export function icon(name: IconName) {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('aria-hidden', 'true');
-  svg.classList.add('icon');
-  svg.innerHTML = icons[name];
-  return svg;
-}
-
 /** A button that shows only an icon. The label is its accessible name and tooltip. */
 export function iconButton(name: IconName, label: string, action: () => void, className = '') {
   const node = button('', action, `icon-button ${className}`.trim());
   node.append(icon(name));
+  attachIconMotion(node);
   node.setAttribute('aria-label', label);
   node.title = label;
   return node;
@@ -52,6 +34,8 @@ export function iconButton(name: IconName, label: string, action: () => void, cl
 export function dockButton(name: IconName, label: string, action: () => void, className = '') {
   const node = button('', action, `dock-button ${className}`.trim());
   node.append(icon(name), element('span', 'dock-label'));
+  attachIconMotion(node);
+  labelSpring(node);
   setDockButton(node, label);
   return node;
 }
@@ -59,10 +43,15 @@ export function dockButton(name: IconName, label: string, action: () => void, cl
 /** Renames a dock button, and swaps its icon when one is given. */
 export function setDockButton(node: HTMLElement, label: string, name?: IconName) {
   node.setAttribute('aria-label', label);
-  const text = node.querySelector('.dock-label');
-  if (text) text.textContent = label;
-  const glyph = name && node.querySelector('.icon');
-  if (glyph) glyph.innerHTML = icons[name];
+  const text = node.querySelector<HTMLElement>('.dock-label');
+  if (text) springText(text, label);
+  if (!name) return;
+  const glyph = node.querySelector<SVGSVGElement>('.icon');
+  if (glyph && glyph.getAttribute('data-icon') !== name) {
+    const replacement = icon(name);
+    glyph.replaceWith(replacement);
+    if (!node.hidden) animateIcon(replacement, 'state');
+  }
 }
 
 export function option(value: string, label: string) {
@@ -117,15 +106,73 @@ export function modal(title: string, className = '') {
   const heading = element('h2', '', title);
   heading.id = 'dialog-' + title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   dialog.setAttribute('aria-labelledby', heading.id);
-  const close = button('Close', () => dialog.close(), 'quiet');
-  header.append(heading, close);
+  const closeButton = iconButton('close', 'Close', () => close(), 'quiet');
+  header.append(heading, closeButton);
   const body = element('div', 'modal-body');
   dialog.append(header, body);
+
+  let closing = false;
+  let backdrop: ReturnType<typeof animate> | undefined;
+  const motionPreference = typeof window === 'undefined' ? undefined : window.matchMedia?.('(prefers-reduced-motion: reduce)');
+  const backdropOpacity = (fallback: number) => canAnimate(dialog) && typeof getComputedStyle === 'function'
+    ? Number(getComputedStyle(dialog, '::backdrop').opacity) : fallback;
+  const stopBackdrop = () => {
+    backdrop?.cancel();
+    backdrop = undefined;
+    motionPreference?.removeEventListener?.('change', stopBackdrop);
+  };
+
+  function animateBackdrop(open: boolean, from: number) {
+    stopBackdrop();
+    if (!canAnimate(dialog)) return;
+    try {
+      const options = { pseudoElement: '::backdrop', type: spring, stiffness: 340, damping: 34 };
+      const animation = animate(dialog, { opacity: [from, Number(open)] }, options);
+      backdrop = animation;
+      motionPreference?.addEventListener?.('change', stopBackdrop);
+      void animation.finished.then(() => { if (backdrop === animation) stopBackdrop(); });
+    } catch (error) {
+      if (!(error instanceof TypeError || error instanceof DOMException)) throw error;
+    }
+  }
+
+  function close(after?: () => void) {
+    if (!dialog.open) { after?.(); return; }
+    if (closing) return;
+    const opacity = backdropOpacity(1);
+    closing = true;
+    dialog.dataset.closing = 'true';
+    // Keep the native dialog modal while its backdrop is visible.
+    body.inert = header.inert = true;
+    animateBackdrop(false, opacity);
+    springSurface(dialog, false, { from: 'translateY(10px) scale(.965)' }, () => {
+      closing = false;
+      dialog.close();
+      body.inert = header.inert = false;
+      delete dialog.dataset.closing;
+      stopBackdrop();
+      after?.();
+    });
+  }
+
+  function open() {
+    const first = !dialog.open;
+    if (!first && !closing) return;
+    const opacity = first ? 0 : backdropOpacity(0);
+    closing = false;
+    delete dialog.dataset.closing;
+    body.inert = header.inert = false;
+    if (first) dialog.showModal();
+    animateBackdrop(true, opacity);
+    springSurface(dialog, true, { from: 'translateY(10px) scale(.965)' }, undefined, first);
+  }
+
+  dialog.addEventListener('cancel', (event) => { event.preventDefault(); close(); });
   dialog.addEventListener('click', (event) => {
     if (event.target !== dialog) return;
     const { left, top, right, bottom } = dialog.getBoundingClientRect();
-    if (event.clientX < left || event.clientX > right || event.clientY < top || event.clientY > bottom) dialog.close();
+    if (event.clientX < left || event.clientX > right || event.clientY < top || event.clientY > bottom) close();
   });
   document.body.append(dialog);
-  return { dialog, body, open: () => { if (!dialog.open) dialog.showModal(); } };
+  return { dialog, body, open, close, isOpen: () => dialog.open && !closing };
 }

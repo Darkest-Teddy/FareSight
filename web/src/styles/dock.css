@@ -44,7 +44,6 @@
   font-size: .875rem;
   font-weight: 650;
   letter-spacing: -.01em;
-  animation: chrome-in .18s var(--ease) both;
 }
 .scene-back .icon { width: 1.125rem; height: 1.125rem; stroke-width: 2.1; }
 .back-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -96,7 +95,7 @@
   max-width: 0;
   overflow: hidden;
   opacity: 0;
-  transition: max-width .24s var(--ease), padding .24s var(--ease), opacity .16s;
+  transition: max-width var(--label-spring, 0ms), padding var(--label-spring, 0ms), opacity var(--label-spring, 0ms);
 }
 .dock-button:focus-visible :is(.dock-label, .voice-label) { max-width: 11rem; padding-inline: .5rem .125rem; opacity: 1; }
 @media (hover: hover) {
@@ -107,7 +106,6 @@
 @media (hover: hover) { .dock-button[data-narrowed=true]:not([aria-expanded=true]):hover { background: var(--sun); } }
 /* A red dot on the Stops button while the MBTA feed has a problem. */
 .dock-alert { position: absolute; top: .4375rem; right: .4375rem; width: .5rem; height: .5rem; border-radius: 50%; background: var(--error); box-shadow: 0 0 0 2px var(--surface); }
-.dock-button[aria-expanded=true] .dock-alert { display: none; }
 
 /* A card opens beside the column, or above the budget, one at a time. */
 .dock-card {
@@ -124,9 +122,11 @@
   border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: var(--shadow-lg);
-  animation: card-in .16s var(--ease) both;
+  transform-origin: bottom left;
 }
-.dock-budget .dock-card { left: auto; right: 0; bottom: calc(100% + .5rem); width: min(17.5rem, calc(100vw - 2 * var(--gutter))); }
+.dock-budget .dock-card { transform-origin: bottom right; left: auto; right: 0; bottom: calc(100% + .5rem); width: min(17.5rem, calc(100vw - 2 * var(--gutter))); }
+
+.dock-card:not([inert]) { z-index: 1; }
 
 /* Start stop and budget: an icon, a control, a value. */
 .filter-card { display: grid; gap: .125rem; padding: .25rem .25rem .25rem .625rem; }
@@ -137,38 +137,32 @@
 .filter-row > .icon-button { width: 2.25rem; min-height: 2.25rem; margin-inline-end: -.125rem; border-radius: var(--radius-sm); color: var(--muted); }
 .filter-field input[type=range] { flex: 1; }
 .filter-field output { min-width: 2.5rem; padding-inline-end: .375rem; font-size: .875rem; text-align: end; }
-.filter-count { display: flex; align-items: center; gap: .5rem; min-height: 1.75rem; color: var(--muted); font-size: .75rem; font-weight: 550; }
+.filter-count { display: flex; align-items: center; gap: .5rem; width: fit-content; min-height: 1.75rem; margin-inline-start: -.375rem; padding-inline: .375rem .5rem; border-radius: var(--radius-sm); color: var(--muted); font-size: .75rem; font-weight: 550; transition: background-color .18s, color .18s; }
 .filter-count .icon { width: 1rem; height: 1rem; }
 /* Nothing matches: the line turns sunflower, under the slider that fixes it. */
-.filter-card[data-empty=true] .filter-count { width: fit-content; margin-inline-start: -.375rem; padding-inline: .375rem .5rem; border-radius: var(--radius-sm); background: var(--sun); color: var(--ink); }
+.filter-card[data-empty=true] .filter-count { background: var(--sun); color: var(--ink); }
+.filter-row [data-locating=true] { color: var(--price); }
 
 /* Voice: one glyph per state. Live is sunflower with ink, so the state reads by fill and glyph. */
 .voice-glyph { display: grid; place-items: center; width: 1.25rem; height: 1.25rem; flex: none; }
-.voice-glyph > * { grid-area: 1 / 1; display: none; }
-.voice-trigger:is([data-state=idle], [data-state=listening]) .voice-glyph .icon:first-child { display: block; }
-.voice-trigger[data-state=connecting] .voice-spinner { display: block; }
-.voice-trigger:is([data-state=thinking], [data-state=speaking]) .voice-bars { display: flex; }
-.voice-trigger[data-state=error] .voice-glyph .icon:last-child { display: block; stroke-width: 2.6; }
-.voice-spinner { width: 1.125rem; height: 1.125rem; border: 2px solid currentColor; border-inline-end-color: transparent; border-radius: 50%; }
-.voice-bars { align-items: center; gap: .125rem; height: 1.125rem; }
-.voice-bars i { width: .1875rem; height: .25rem; border-radius: .09375rem; background: currentColor; }
-.voice-trigger[data-state=speaking] .voice-bars i { height: .625rem; }
-.voice-trigger[data-state=speaking] .voice-bars i:nth-child(2) { height: 1.125rem; }
+.voice-glyph [data-icon=loading] path { opacity: .3; }
+.voice-glyph [data-icon=loading] path:nth-child(4) { opacity: .5; }
+.voice-glyph [data-icon=loading] path:nth-child(8) { opacity: .72; }
+.voice-glyph [data-icon=loading] path:first-child { opacity: 1; }
 .voice-trigger:is([data-state=listening], [data-state=thinking], [data-state=speaking]) { background: var(--sun); color: var(--ink); }
 @media (hover: hover) {
   .voice-trigger:is([data-state=listening], [data-state=thinking], [data-state=speaking]):hover:not(:disabled) { background: var(--sun); }
 }
 .voice-trigger[data-state=error] { color: var(--error); box-shadow: inset 0 0 0 1.5px var(--error), var(--shadow-sm); }
 @media (prefers-reduced-motion: no-preference) {
-  .voice-trigger[data-state=connecting] .voice-spinner { animation: voice-spin .9s linear infinite; }
-  .voice-trigger[data-state=thinking] .voice-bars i { animation: voice-think 1.2s ease-in-out infinite; }
-  .voice-trigger[data-state=speaking] .voice-bars i { animation: voice-speak .9s ease-in-out infinite; }
-  .voice-bars i:nth-child(2) { animation-delay: .15s !important; }
-  .voice-bars i:nth-child(3) { animation-delay: .3s !important; }
+  .voice-trigger[data-state=connecting] .voice-glyph { animation: voice-spin 1.2s steps(8) infinite; }
+  .voice-trigger[data-state=thinking] .voice-glyph { animation: voice-think 1.25s ease-in-out infinite; }
+  .voice-trigger[data-state=speaking] .voice-glyph { scale: var(--voice-level, 1); transition: scale var(--label-spring, 0ms); }
+  .filter-row [data-locating=true] .icon > :last-child { animation: gps-search 1.3s ease-in-out infinite; }
 }
 @keyframes voice-spin { to { rotate: 360deg; } }
-@keyframes voice-think { 0%, 100% { opacity: .35; } 40% { opacity: 1; } }
-@keyframes voice-speak { 0%, 100% { scale: 1 .45; } 50% { scale: 1 1; } }
+@keyframes voice-think { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+@keyframes gps-search { 0%, 100% { scale: .78; } 50% { scale: 1.22; } }
 
 /* MBTA state, the last line under the stop list: a dot and two words. A problem is red and ringed. */
 .service-status {
@@ -184,7 +178,7 @@
   font-weight: 550;
   white-space: nowrap;
 }
-.status-dot { width: .4375rem; height: .4375rem; flex: none; border: 1.5px solid var(--muted); border-radius: 50%; }
+.status-dot { transition: background-color .15s, border-color .15s; width: .4375rem; height: .4375rem; flex: none; border: 1.5px solid var(--muted); border-radius: 50%; }
 .service-status[data-source=live] .status-dot { border-color: var(--live); background: var(--live); }
 .service-status[data-source=simulated] .status-dot { border-color: var(--ink); background: var(--sun); }
 .service-status[data-alert=true] { color: var(--error); }
@@ -216,7 +210,7 @@
 .station-row .route-list { justify-content: center; }
 .station-row .route-line { font-size: 0; }
 .station-row .route-line:not(:first-child) { display: none; }
-.station-count { min-width: 1.5rem; padding: .125rem .375rem; border-radius: var(--radius-xs); background: var(--surface-2); font-size: .75rem; font-weight: 650; text-align: center; }
+.station-count { transition: background-color .15s, color .15s; min-width: 1.5rem; padding: .125rem .375rem; border-radius: var(--radius-xs); background: var(--surface-2); font-size: .75rem; font-weight: 650; text-align: center; }
 .station-row[data-hover=true] .station-count { background: var(--surface); }
 @media (hover: hover) {
   .station-row:hover:not(:disabled) { background: var(--surface-2); }
@@ -225,23 +219,16 @@
 .station-board .message { margin: .5rem .625rem; }
 .station-board > div:last-child > button { margin: .25rem .625rem .5rem; }
 
-@keyframes card-in { from { opacity: 0; transform: translateY(.375rem) scale(.98); } }
-@keyframes chrome-in { from { opacity: 0; transform: translateX(-.375rem); } }
-
 /* ───────── Phones: the same corners, with thumb-sized targets ───────── */
 @media (max-width: 768px) {
   .station-row, .filter-row { min-height: 44px; }
   .filter-row > .icon-button { width: 44px; min-height: 44px; }
-  .filter-field select { min-height: 40px; }
+  .filter-field select { min-height: 44px; }
   .filter-card input[type=range] { min-height: 44px; }
-  .dock-card { width: calc(100vw - 2 * var(--gutter) - var(--tap) - .5rem); }
-  .dock-budget .dock-card { width: calc(100vw - 2 * var(--gutter)); }
+  /* Keep every card beside the dock column and above the bottom-right budget button. */
+  .dock-card, .dock-budget .dock-card { width: calc(100vw - 2 * var(--gutter) - var(--tap) - .5rem); }
+  .dock-card { bottom: calc(var(--tap) + .5rem); }
 }
 @media (max-width: 360px) {
-  .dock { --tap: 2.5rem; gap: .25rem; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .dock-card, .scene-back { animation: none; }
-  .dock-label, .dock .voice-label { transition: none; }
+  .dock { gap: .25rem; }
 }

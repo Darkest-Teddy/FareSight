@@ -8,18 +8,18 @@
   accent-color: var(--ink);
 
   /* Surfaces */
-  --paper: #F5F0E6;        /* behind the canvas; matches the 3D sky dome */
+  --paper: #FBF9F4;        /* behind the canvas */
   --surface: #FFFDF8;      /* cards, bars, panels */
   --surface-2: #F1EBDF;    /* raised or inset areas, hover fills */
 
   /* Ink */
-  --ink: #22252B;          /* text and primary actions */
+  --ink: #141413;          /* text and primary actions */
   --ink-soft: #3B3F48;     /* hover on ink fills */
   --on-ink: #FFFDF8;
   --muted: #6B665C;        /* 5.0:1 on paper, 5.6:1 on surface, 4.8:1 on surface-2 */
 
   /* Meaning */
-  --sun: #FFC93C;          /* highlight fill, always behind ink text */
+  --sun: #F2C94C;          /* highlight fill, always behind ink text */
   --price: #8A5300;        /* prices as plain text */
   --error: #B3261E;
   --live: #00843D;         /* MBTA green, used only for the live status dot */
@@ -42,5 +42,4 @@
   /* Layout */
   --gutter: 1rem;
   --tap: 2.75rem;          /* the corner controls: back button height, bottom button size */
-  --ease: cubic-bezier(.2, .8, .2, 1);
 }

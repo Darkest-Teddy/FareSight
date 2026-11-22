@@ -3,10 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#F5F0E6" />
+    <meta name="theme-color" content="#FBF9F4" />
     <meta name="description" content="Explore Boston restaurants and hangouts by MBTA stop in VR or your browser. Compare total prices with train fare included, then step inside in 3D." />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Vantage · Know the spot before you get on the T</title>
+    <link rel="preconnect" href="https://api.fontshare.com" />
+    <link rel="preconnect" href="https://cdn.fontshare.com" crossorigin />
+    <link href="https://api.fontshare.com/v2/css?f[]=switzer@1&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/src/intro/intro.css" />
   </head>
   <body data-state="loading">
@@ -15,27 +18,15 @@
     <div class="veil" aria-hidden="true"></div>
 
     <header class="bar">
-      <a class="wordmark" href="#top" data-to="0">
-        <svg viewBox="0 0 96 96" fill="currentColor" aria-hidden="true">
-          <path d="M9 78V50C9 32 18 23 35 16L56 8 82 18 61 27C46 33 38 42 38 57V67Z"/>
-          <path d="M48 55C48 45 53 39 63 35L85 26V65L48 87Z"/>
-        </svg>
-        Vantage
-      </a>
-      <nav class="chapters" aria-label="Chapters">
-        <a href="#map" data-to="0" data-chapter="map">Map</a>
-        <a href="#station" data-to="0.67" data-chapter="station">Kenmore</a>
-        <a href="#place" data-to="0.915" data-chapter="place">Shu Daxia</a>
-        <a href="#inside" data-to="1" data-chapter="inside">Inside</a>
-      </nav>
-      <a class="pill" href="/index.html">Open Vantage</a>
+      <a class="brand" href="#top" data-to="0"><svg class="brand-mark" viewBox="0 0 96 96" fill="currentColor" aria-hidden="true"><path d="M9 78V50C9 32 18 23 35 16L56 8 82 18 61 27C46 33 38 42 38 57V67Z"/><path d="M48 55C48 45 53 39 63 35L85 26V65L48 87Z"/></svg>Vantage</a>
+      <a class="action solid" href="/index.html">Open Vantage</a>
       <span class="meter" aria-hidden="true"></span>
     </header>
 
     <main id="top">
       <section class="beat beat-hero" id="map" data-in="-1,-1" data-out="0.065,0.105">
         <div class="copy">
-          <h1>Know the spot before you get on the T.</h1>
+          <h1>Know <span class="hl">the spot</span> before you get on the T.</h1>
           <p class="lead">Browse Boston food and hangouts by subway stop in VR or your browser. See real total prices with MBTA fare included, then look inside in 3D.</p>
         </div>
       </section>
@@ -49,30 +40,78 @@
 
       <section class="beat beat-station" id="station" data-in="0.60,0.645" data-out="0.765,0.80">
         <div class="copy">
-          <p class="line">Green Line B, C and D</p>
+          <p class="line" data-line="green">Green Line B, C and D</p>
           <h2>Kenmore</h2>
-          <p class="lead">Every rooftop pin shows what going there actually costs, including the $2.40 T fare. Yellow 3D markers highlight places you can step inside.</p>
+          <p class="lead">Every rooftop pin shows what going there actually costs, including the <span class="price">$2.40</span> T fare. Yellow <span class="tag-3d">3D</span> markers highlight places you can step inside.</p>
           <p class="note">Next-train arrival times and your budget filter update directly on the base display.</p>
         </div>
       </section>
 
-      <section class="beat beat-place" id="place" data-in="0.845,0.885" data-out="0.915,0.936">
+      <section class="beat beat-place" id="place" data-in="0.845,0.885" data-out="0.92,0.95">
         <div class="copy">
           <h2>Shu Daxia Hot Pot</h2>
-          <p class="lead">A Sichuan hot pot dining room 370 meters from the Kenmore platform. About $36 a person, with a real 3D scan of the room and actual-size 3D dishes.</p>
+          <p class="lead">A Sichuan hot pot dining room 370 meters from the Kenmore platform. About <span class="price">$36</span> a person, with a real 3D scan of the room and actual-size 3D dishes.</p>
         </div>
       </section>
 
-      <section class="beat beat-inside" id="inside" data-in="0.931,0.961" data-out="2,2">
+      <!-- The stage waits on the hot pot's flag from 0.915 to 1.375 while the phone tells how a room gets scanned. -->
+      <section class="beat beat-phone" id="contribute" data-in="0.955,0.99" data-out="1.07,1.095">
+        <div class="copy">
+          <p class="line">Contribute app</p>
+          <h2>Every 3D room starts on a phone.</h2>
+          <p class="lead">Open the Contribute app, pick a stop on the map, and choose a place that still needs photos.</p>
+        </div>
+      </section>
+
+      <section class="beat beat-phone" data-in="1.105,1.135" data-out="1.32,1.355">
+        <div class="copy">
+          <p class="line">Guided 360° scan</p>
+          <h2>Turn on the spot. Aim at each dot.</h2>
+          <p class="lead">Hold steady on a dot and the phone takes that photo. 32 overlapping shots cover the room from one position.</p>
+          <p class="note">Those photos are what Vantage builds a Gaussian splat from.</p>
+        </div>
+      </section>
+
+      <section class="beat beat-inside" id="inside" data-in="1.391,1.421" data-out="3,3">
         <div class="copy">
           <h2>Step inside before you go.</h2>
-          <p class="lead">Check the seating, tap dishes on the physical menu, and preview approximate portion sizes on a table in VR, AR, or desktop.</p>
+          <p class="lead">Scans like that become a Gaussian splat of the real room. Check the seating, tap dishes on the menu, and preview portions on a table in VR, AR, or desktop.</p>
           <p class="room-tag">Works on Meta Quest 3, phone, and desktop</p>
-          <a class="pill solid" href="/index.html">Launch Vantage</a>
+          <a class="action" href="/index.html">Launch Vantage</a>
           <p class="look-hint">Drag to look around the room.</p>
         </div>
       </section>
     </main>
+
+    <!--
+      One phone for the Contribute chapter: the app's home screen first, then a recording of the guided
+      scan that the scroll plays. Every frame of scan-demo.mp4 is a keyframe so it can be shown at once.
+    -->
+    <div class="dusk" aria-hidden="true"></div>
+    <div class="phone" aria-hidden="true">
+      <span class="phone-key phone-key-action"></span>
+      <span class="phone-key phone-key-up"></span>
+      <span class="phone-key phone-key-down"></span>
+      <span class="phone-key phone-key-power"></span>
+      <div class="phone-body">
+        <div class="phone-screen">
+          <div class="phone-status">
+            <span class="phone-time">9:41</span>
+            <span class="phone-island"></span>
+            <span class="phone-signal">
+              <svg viewBox="0 0 18 12"><rect y="8" width="3" height="4" rx="1" /><rect x="5" y="5.5" width="3" height="6.5" rx="1" /><rect x="10" y="3" width="3" height="9" rx="1" /><rect x="15" width="3" height="12" rx="1" /></svg>
+              <svg viewBox="0 0 16 12"><path d="M8 2.2c2.3 0 4.4.9 6 2.4l1-1.1A10.2 10.2 0 0 0 8 .6 10.2 10.2 0 0 0 1 3.5l1 1.1a8.6 8.6 0 0 1 6-2.4Zm0 3.3c1.4 0 2.7.5 3.7 1.4l1-1.1A7 7 0 0 0 8 3.9a7 7 0 0 0-4.7 1.9l1 1.1c1-.9 2.3-1.4 3.7-1.4Zm0 3.2c-.7 0-1.3.3-1.8.7L8 11.4l1.8-2c-.5-.4-1.1-.7-1.8-.7Z" /></svg>
+              <svg viewBox="0 0 27 12"><rect x=".5" y=".5" width="22" height="11" rx="3.2" fill="none" stroke="currentColor" opacity=".4" /><rect x="2" y="2" width="19" height="8" rx="2" /><path d="M24 4v4c.8-.3 1.4-1.1 1.4-2s-.6-1.7-1.4-2Z" opacity=".45" /></svg>
+            </span>
+          </div>
+          <div class="phone-view">
+            <img class="phone-home" src="/intro/phone-home.jpg" alt="" width="786" height="1520" decoding="async" />
+            <video class="phone-scan" data-src="/intro/scan-demo.mp4" poster="/intro/scan-poster.jpg" width="464" height="832" muted playsinline preload="none"></video>
+          </div>
+          <div class="phone-grip"><span></span></div>
+        </div>
+      </div>
+    </div>
 
     <p class="status" role="status">Loading Boston map</p>
     <script type="module" src="/src/intro/main.ts"></script>

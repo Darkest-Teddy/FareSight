@@ -29,15 +29,10 @@ const CLIP_DEPTH = 0.513;
 const fixed = (value) => Number((value * UNIT).toFixed(1));
 const polyline = (points) => 'M' + points.map(([x, y]) => `${fixed(x)} ${fixed(y)}`).join('L');
 
-// The sculpture paints each tube with its line colour lifted 45% toward the brighter core colour.
-const mixHex = (a, b, t) => '#' + [1, 3, 5].map((i) => {
-  const from = parseInt(a.slice(i, i + 2), 16);
-  const to = parseInt(b.slice(i, i + 2), 16);
-  return Math.round(from + (to - from) * t).toString(16).padStart(2, '0');
-}).join('');
+// Each line carries its official colour for the track and the brighter one the sculpture gives its trains.
 const core = Object.fromEntries(routes.map(([id, , , , coreColor]) => [id, coreColor]));
 const lines = paths.lines.map(({ id, routeId, name, color, points }) => ({
-  id, routeId, name, color, tube: mixHex(color, core[id], 0.45), core: core[id],
+  id, routeId, name, color, core: core[id],
   points: points.flatMap(([x, , z]) => [fixed(x), fixed(z)]),
 }));
 

@@ -10,7 +10,8 @@ export function createPasscodeGuards(config: Config) {
   const contributor = config.contributorPasscode ? digest(config.contributorPasscode) : undefined;
   const loopback = config.host === '127.0.0.1' || config.host === 'localhost';
   const pipelineAllowed = Boolean(admin) || loopback || config.allowUnauthenticatedDemo;
-  const openPipeline = pipelineAllowed && !admin && !contributor;
+  // No code is asked of contributors when no passcode is set at all, or when OPEN_UPLOADS says so outright.
+  const openPipeline = config.openUploads || (pipelineAllowed && !admin && !contributor);
   const failures = ipRateLimit(12, 60_000);
 
   function guard(scope: 'admin' | 'contributor', permitDemo = false) {

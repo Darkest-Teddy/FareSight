@@ -102,7 +102,6 @@ export class IntroScene {
   private pin?: pc.Entity;
   private otherPins: pc.Entity[] = [];
   private lastDive = -1;
-  private calloutProgress = 1;
   private cityProgress = -1;
   private galleryProgress = 1;
   private pinsProgress = -1;
@@ -161,8 +160,9 @@ export class IntroScene {
     this.map = new MapSculptureScene(app.root, app.graphicsDevice, this.models, this.reveal, log, noop, this.canvas, noop);
 
     this.map.root.setLocalPosition(0, mapHeight, 0);
-    this.map.setImmersive(true);
     this.map.setStops(STOPS);
+    // The stops are named by the app's own flat-screen labels. Here they only name: nothing to click or tab to.
+    this.canvas.parentElement?.querySelector('.map-labels')?.setAttribute('inert', '');
     this.map.setPlaces(offlineCatalog.places, this.allPlaces);
     const sculpture = await this.models.load(`${assetBase}boston-map-sculpture.glb`);
     if (this.app !== app) return;
@@ -427,13 +427,9 @@ export class IntroScene {
     if (scroll > 0.67) this.loadRoom?.();
     const p = this.reducedMotion.matches ? reducedScene(scroll) : scroll;
     const dive = progressAt(p, ...DIVE);
-    const initial = this.lastDive < 0;
-    const diveChanged = this.applyDive(dive);
-    const callouts = 1 - smooth(progressAt(p, CLEAR_AT, DIVE[0]));
-    if (callouts !== this.calloutProgress || (diveChanged && !initial)) {
-      this.calloutProgress = callouts;
-      this.map.seekCallouts(callouts);
-    }
+    this.applyDive(dive);
+    // The station labels clear off before the camera dives into Kenmore.
+    const labels = 1 - smooth(progressAt(p, CLEAR_AT, DIVE[0]));
     const leaving = this.roomReady ? smooth(progressAt(p, ...CITY_EXIT)) : 0;
     const city = clamp((dive - 0.22) / 0.75, 0, 1) * (1 - leaving);
     this.station.root.enabled = dive > 0 && leaving < 1;
@@ -454,7 +450,7 @@ export class IntroScene {
     this.applyLook(p);
     this.poseCamera(this.roomReady ? p : Math.min(p, 0.925), dt);
     this.backdrop.update(this.camera);
-    this.map.update(dt, this.camera, this.lens, 0);
+    this.map.update(dt, this.camera, this.lens, labels);
     if (this.station.root.enabled) this.station.update(this.reducedMotion.matches ? 1 : dt, this.camera);
     this.reveal.update(dt);
     const app = this.app;

@@ -23,7 +23,7 @@ interface Box { left: number; top: number; right: number; bottom: number }
 export type KeepClear = readonly pc.Vec3[];
 
 // Vertical offsets (px) from the station to the label centre, in order of preference.
-const slots = [-44, 44, -84, 84, -124, 124, -164, 164];
+const slots = [-44, 44, -84, 84, -124, 124, -164, 164, -204, 204];
 const gap = 6;
 
 function setTabbable(node: HTMLButtonElement, tabbable: boolean): void {
