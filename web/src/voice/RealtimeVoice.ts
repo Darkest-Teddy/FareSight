@@ -1,13 +1,18 @@
-import { api } from '../api/client';
-import { realtimeTools, type RealtimeToolName } from './tools';
+import { api } from '../api/client.ts';
+import { realtimeTools, type RealtimeToolName } from './tools.ts';
 
 export type VoiceState = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'error';
 export type VoiceTranscript = { kind: 'user' | 'assistant' | 'action'; text: string; id?: string };
 
-type Speaker = Exclude<VoiceTranscript['kind'], 'action'>;
+type Speaker = Exclude<VoiceTranscript['kind'], 'action'> | 'backend';
 
 interface VoiceCallbacks {
   onState: (state: VoiceState, detail?: string) => void;
+  onNotice: (detail?: string) => void;
+  onMicrophone: (hasMic: boolean, muted: boolean, requesting: boolean) => void;
+  onAudioBlocked: (blocked: boolean) => void;
+  onPaused: (paused: boolean) => void;
+  onUnsentText: (text: string) => void;
   onModel: (model: string) => void;
   onTool: (name: RealtimeToolName, args: Record<string, unknown>, current: () => boolean) => Promise<{ result: Record<string, unknown>; actionLabel?: string }>;
   onTranscript: (entry: VoiceTranscript) => void;
@@ -17,6 +22,13 @@ interface VoiceCallbacks {
 interface VoiceSession {
   cancel: AbortController;
   peer?: RTCPeerConnection;
+  sender?: RTCRtpSender;
+  ready: boolean;
+  requestingMic: boolean;
+  queuedText?: string;
+  textTurn: boolean;
+  responseTimer?: number;
+  pendingEvents: Set<string>;
   channel?: RTCDataChannel;
   stream?: MediaStream;
   audio?: HTMLAudioElement;
@@ -34,7 +46,6 @@ interface VoiceSession {
   handled: Map<string, ToolBatch>;
   batches: Set<ToolBatch>;
   drafts: Partial<Record<Speaker, TranscriptDraft>>;
-  pendingResponseId?: string;
 }
 
 interface ToolBatch {
@@ -63,7 +74,6 @@ interface LiveError {
   code?: string;
   message?: string;
   client_event_id?: string;
-  event_id?: string;
 }
 
 interface LiveEvent extends FunctionCall {
@@ -75,8 +85,9 @@ interface LiveEvent extends FunctionCall {
   item?: FunctionCall;
   delta?: string;
   transcript?: string;
+  text?: string;
   error?: LiveError;
-  response?: { id?: string; status?: string; output?: FunctionCall[]; status_details?: { error?: LiveError } };
+  response?: { id?: string; status?: string; output?: FunctionCall[]; error?: LiveError; status_details?: { error?: LiveError } };
 }
 
 const fatalLiveErrors = new Set([
@@ -111,37 +122,47 @@ export class RealtimeVoice {
   private muted = false;
   private nextTranscriptId = 0;
 
-  constructor(private readonly callbacks: VoiceCallbacks) {}
+  private readonly callbacks: VoiceCallbacks;
+
+  constructor(callbacks: VoiceCallbacks) {
+    this.callbacks = callbacks;
+  }
 
   get state(): VoiceState { return this.current; }
   get isMuted(): boolean { return this.muted; }
 
   toggle(): void {
     if (this.session) this.stop();
-    else void this.start();
+    else void this.connect(true);
   }
 
   async start(): Promise<void> {
-    if (this.session) return;
+    const session = this.session;
+    if (!session) {
+      await this.connect(true);
+    } else if (session.ready && !session.stream && !session.requestingMic) {
+      this.enableAudio();
+      this.callbacks.onNotice();
+      await this.acquireMicrophone(session);
+    }
+  }
+
+  private async connect(withMic: boolean, queuedText?: string): Promise<void> {
     const session: VoiceSession = {
-      cancel: new AbortController(), responding: false, playing: false,
-      handled: new Map(), batches: new Set(), drafts: {},
+      cancel: new AbortController(), ready: false, requestingMic: false, queuedText, textTurn: false,
+      responding: false, playing: false, pendingEvents: new Set(), handled: new Map(), batches: new Set(), drafts: {},
       paused: false, pausedBatches: new Set(), audioArmed: true, rejectedResponses: new Set(),
     };
     this.session = session;
     this.setState('connecting');
 
     try {
-      if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') {
-        throw new Error('GPT Live needs microphone and WebRTC access over HTTPS or localhost.');
+      if (typeof RTCPeerConnection === 'undefined') {
+        throw new Error('GPT Live needs WebRTC over HTTPS or localhost.');
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
-      if (this.session !== session) { stream.getTracks().forEach((track) => track.stop()); return; }
-      session.stream = stream;
-      session.timer = window.setTimeout(() => this.fail(session, 'GPT Live connection timed out.'), 55_000);
       const peer = session.peer = new RTCPeerConnection();
+      // Negotiate audio in both directions so enabling a microphone later only needs replaceTrack.
+      session.sender = peer.addTransceiver('audio', { direction: 'sendrecv' }).sender;
       const audio = session.audio = document.createElement('audio');
       audio.autoplay = true;
       audio.setAttribute('playsinline', '');
@@ -150,7 +171,7 @@ export class RealtimeVoice {
       peer.ontrack = (event) => {
         if (this.session !== session) return;
         audio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
-        void audio.play().catch(() => this.fail(session, 'The browser blocked GPT Live audio. Start it again from the voice control.'));
+        this.enableAudio();
         if (event.receiver?.track.kind === 'audio') this.watchRemoteAudio(session, event.receiver);
       };
       peer.onconnectionstatechange = () => {
@@ -162,18 +183,10 @@ export class RealtimeVoice {
           session.reconnectTimer = window.setTimeout(() => this.fail(session, 'GPT Live connection lost.'), 5_000);
         }
       };
-      for (const track of stream.getAudioTracks()) {
-        track.enabled = false;
-        peer.addTrack(track, stream);
-      }
+      if (withMic) void this.acquireMicrophone(session);
+      session.timer = window.setTimeout(() => this.fail(session, 'GPT Live connection timed out.'), 55_000);
 
       const channel = session.channel = peer.createDataChannel('oai-events');
-      channel.addEventListener('open', () => {
-        if (this.session !== session) return;
-        window.clearTimeout(session.timer);
-        this.applyMute();
-        this.setState('listening');
-      });
       channel.addEventListener('close', () => this.fail(session, 'GPT Live session ended.'));
       channel.addEventListener('error', () => this.fail(session, 'GPT Live could not exchange session events.'));
       channel.addEventListener('message', ({ data }) => {
@@ -196,11 +209,56 @@ export class RealtimeVoice {
       this.callbacks.onModel(answer.model);
       await peer.setRemoteDescription({ type: 'answer', sdp: answer.sdp });
     } catch (error) {
-      const detail = error instanceof DOMException && error.name === 'NotAllowedError' ? 'Microphone access was denied.'
-        : error instanceof DOMException && error.name === 'NotFoundError' ? 'No microphone is available.'
-          : error instanceof Error ? error.message : 'Could not start GPT Live.';
+      const detail = error instanceof Error ? error.message : 'Could not start GPT Live.';
       this.fail(session, detail);
     }
+  }
+
+  private async acquireMicrophone(session: VoiceSession): Promise<void> {
+    session.requestingMic = true;
+    this.updateMicrophone();
+    let stream: MediaStream | undefined;
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) throw new DOMException('Microphone unavailable', 'NotFoundError');
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      if (this.session !== session) return;
+      const track = stream.getAudioTracks()[0];
+      if (!track) throw new DOMException('Microphone unavailable', 'NotFoundError');
+      track.enabled = false;
+      await session.sender!.replaceTrack(track);
+      if (this.session !== session) return;
+      session.stream = stream;
+      track.addEventListener('ended', () => {
+        if (this.session !== session || session.stream !== stream) return;
+        session.stream = undefined;
+        this.updateMicrophone();
+        this.callbacks.onNotice('Microphone disconnected. Keep typing or enable the mic again.');
+      }, { once: true });
+    } catch (error) {
+      if (this.session !== session) return;
+      const reason = error instanceof DOMException && error.name === 'NotAllowedError' ? 'Microphone access was denied.'
+        : error instanceof DOMException && error.name === 'NotFoundError' ? 'No microphone is available.'
+          : 'Could not enable the microphone.';
+      this.callbacks.onNotice(reason + ' You can still type.');
+    } finally {
+      if (this.session !== session || session.stream !== stream) stream?.getTracks().forEach((track) => track.stop());
+      if (this.session === session) {
+        session.requestingMic = false;
+        this.updateMicrophone();
+      }
+    }
+  }
+
+  enableAudio(): void {
+    const session = this.session;
+    const audio = session?.audio;
+    if (!audio?.srcObject) return;
+    void audio.play().then(
+      () => { if (this.session === session) this.callbacks.onAudioBlocked(false); },
+      () => { if (this.session === session) this.callbacks.onAudioBlocked(true); },
+    );
   }
 
   private handleEvent(session: VoiceSession, event: LiveEvent, delegationId = event.delegation_id): void {
@@ -211,8 +269,16 @@ export class RealtimeVoice {
         }
         break;
       case 'session.started':
+        session.ready = true;
+        window.clearTimeout(session.timer);
+        this.updateMicrophone();
+        this.refreshState(session);
+        if (session.queuedText && this.submitText(session, session.queuedText)) session.queuedText = undefined;
+        break;
       case 'session.resumed':
         session.paused = false;
+        session.audioArmed = true;
+        this.callbacks.onPaused(false);
         this.refreshState(session);
         break;
       case 'session.paused':
@@ -226,23 +292,16 @@ export class RealtimeVoice {
       case 'input_audio_buffer.speech_started':
         delete session.drafts.user;
         delete session.drafts.assistant;
-        session.pendingResponseId = undefined;
-        session.responding = false;
+        if (!session.textTurn) this.finishResponse(session);
         this.stopPlayback(session);
         break;
       case 'input_audio_buffer.speech_stopped':
         session.audioArmed = true;
-        session.responding = true;
-        this.refreshState(session);
         break;
+      case 'session.delegation.created':
       case 'response.created':
-        if (!delegationId) {
-          delete session.drafts.assistant;
-          session.audioArmed = true;
-        }
-        session.pendingResponseId = undefined;
-        session.responding = true;
-        this.refreshState(session);
+        if (!delegationId) session.audioArmed = true;
+        this.expectResponse(session);
         break;
       case 'output_audio_buffer.started':
         session.audioArmed = true;
@@ -255,12 +314,10 @@ export class RealtimeVoice {
       case 'response.output_item.done':
         if (event.item?.type === 'function_call') this.queueTool(session, event.item, event, delegationId);
         break;
-      case 'response.function_call_arguments.done':
-        this.queueTool(session, event, event, delegationId);
-        break;
       case 'response.done':
       case 'response.completed':
       case 'response.cancelled':
+      case 'response.incomplete':
       case 'response.failed':
         this.completeResponse(session, event, delegationId);
         break;
@@ -276,6 +333,12 @@ export class RealtimeVoice {
       case 'session.input_transcript.done':
         this.transcript(session, 'user', event, true);
         break;
+      case 'response.output_text.delta':
+        if (session.textTurn) this.transcript(session, 'backend', event, false);
+        break;
+      case 'response.output_text.done':
+        if (session.textTurn) this.transcript(session, 'backend', event, true);
+        break;
       case 'response.output_audio_transcript.done':
       case 'session.output_transcript.done':
         this.transcript(session, 'assistant', event, true);
@@ -288,11 +351,13 @@ export class RealtimeVoice {
 
   private pause(session: VoiceSession): void {
     session.paused = true;
-    session.pendingResponseId = undefined;
-    session.responding = false;
+    this.callbacks.onPaused(true);
+    if (!session.textTurn) {
+      this.finishResponse(session);
+      for (const batch of session.batches) session.pausedBatches.add(batch);
+      if (session.pausedBatches.size) this.schedulePauseExpiry(session);
+    }
     this.stopPlayback(session);
-    for (const batch of session.batches) session.pausedBatches.add(batch);
-    this.schedulePauseExpiry(session);
   }
 
   private schedulePauseExpiry(session: VoiceSession): void {
@@ -304,7 +369,6 @@ export class RealtimeVoice {
         if (session.batches.delete(batch)) this.rejectBatch(session, batch.responseId ?? batch.delegationId);
       }
       session.pausedBatches.clear();
-      if (session.paused && !session.pendingResponseId) session.responding = false;
       this.refreshState(session);
     }, 8_000);
   }
@@ -345,33 +409,52 @@ export class RealtimeVoice {
   }
 
   private setPlayback(session: VoiceSession, playing: boolean): void {
-    if (playing) {
-      session.pendingResponseId = undefined;
-      session.responding = false;
-    }
     session.playing = playing;
     this.refreshState(session);
   }
 
   private handleError(session: VoiceSession, error: LiveError | undefined): void {
-    console.warn('[FareSight GPT Live]', error);
     if (fatalLiveErrors.has(error?.code ?? '') || fatalLiveErrors.has(error?.type ?? '')) {
       this.fail(session, 'GPT Live session ended. Start it again to continue.');
       return;
     }
-    if (session.pendingResponseId && [error?.event_id, error?.client_event_id].includes(session.pendingResponseId)) {
-      session.pendingResponseId = undefined;
-      session.responding = false;
+    const eventId = error?.client_event_id;
+    if (!eventId || session.pendingEvents.has(eventId)) {
+      for (const batch of session.batches) this.rejectBatch(session, batch.responseId ?? batch.delegationId);
+      session.batches.clear();
+      session.pausedBatches.clear();
+      this.finishResponse(session);
+      this.stopPlayback(session);
     }
+    const message = typeof error?.message === 'string' ? error.message.split(' Supported values are:')[0].trim() : '';
+    const detail = message.length > 240 ? message.slice(0, 240).replace(/\s+\S*$/, '') + '…' : message;
+    this.callbacks.onNotice(detail ? `GPT Live: ${detail} Try again or start a new session.`
+      : 'GPT Live could not finish the request. Try again or start a new session.');
+  }
+
+  private expectResponse(session: VoiceSession): void {
+    window.clearTimeout(session.responseTimer);
+    session.responding = true;
+    session.responseTimer = window.setTimeout(() => {
+      if (this.session === session) this.handleError(session, { message: 'The response timed out.' });
+    }, 60_000);
     this.refreshState(session);
   }
 
+  private finishResponse(session: VoiceSession): void {
+    window.clearTimeout(session.responseTimer);
+    session.responding = false;
+    session.textTurn = false;
+    session.pendingEvents.clear();
+  }
+
   private refreshState(session: VoiceSession): void {
+    if (!session.ready) return;
     this.setState(session.playing ? 'speaking' : session.responding || session.batches.size ? 'thinking' : 'listening');
   }
 
   private transcript(session: VoiceSession, speaker: Speaker, event: LiveEvent, completed: boolean): void {
-    const value = completed ? event.transcript : event.delta;
+    const value = completed ? event.transcript ?? event.text : event.delta;
     if (typeof value !== 'string' || !value) return;
     const itemId = typeof event.item_id === 'string' ? event.item_id : undefined;
     let draft = session.drafts[speaker];
@@ -382,7 +465,7 @@ export class RealtimeVoice {
     draft.itemId ??= itemId;
     draft.text = completed ? value.trim() || draft.text : draft.text + value;
     draft.completed = completed;
-    if (draft.text.trim()) this.callbacks.onTranscript({ id: draft.id, kind: speaker, text: draft.text });
+    if (draft.text.trim()) this.callbacks.onTranscript({ id: draft.id, kind: speaker === 'backend' ? 'assistant' : speaker, text: draft.text });
   }
 
   private findBatch(session: VoiceSession, event: LiveEvent, delegationId?: string): ToolBatch | undefined {
@@ -404,7 +487,7 @@ export class RealtimeVoice {
     batch.responseId ??= responseId;
     batch.delegationId ??= delegationId;
     session.batches.add(batch);
-    if (session.paused) {
+    if (session.paused && !session.textTurn) {
       session.pausedBatches.add(batch);
       this.schedulePauseExpiry(session);
     }
@@ -454,7 +537,6 @@ export class RealtimeVoice {
     const status = event.response?.status ?? event.type.split('.')[1];
     const responseId = event.response_id ?? event.response?.id;
     if (session.rejectedResponses.has(responseId ?? delegationId ?? '')) return;
-    if (!delegationId || status === 'failed' || status === 'cancelled' || status === 'incomplete') session.responding = false;
     const output = Array.isArray(event.response?.output) ? event.response.output.filter((item) => item?.type === 'function_call') : [];
     let batch = this.findBatch(session, event, delegationId);
     if (!batch) {
@@ -466,8 +548,12 @@ export class RealtimeVoice {
         session.batches.delete(batch);
         session.pausedBatches.delete(batch);
       }
-      if (status === 'failed') this.handleError(session, event.response?.status_details?.error);
-      else this.refreshState(session);
+      if (status === 'failed' || status === 'incomplete') {
+        this.handleError(session, event.response?.error ?? event.response?.status_details?.error);
+      } else if (!session.batches.size) {
+        this.finishResponse(session);
+        this.refreshState(session);
+      }
       return;
     }
     for (const call of output) {
@@ -475,52 +561,76 @@ export class RealtimeVoice {
     }
     if (batch && !batch.completed) {
       batch.completed = true;
+      this.expectResponse(session);
       void this.runTools(session, batch);
+    } else if (!session.batches.size) {
+      this.finishResponse(session);
+      this.refreshState(session);
     }
-    this.refreshState(session);
   }
 
   private requestResponse(session: VoiceSession): boolean {
-    const eventId = crypto.randomUUID();
-    if (!this.send(session, { type: 'response.create', event_id: eventId })) return false;
+    if (!this.send(session, { type: 'response.create' })) return false;
     session.audioArmed = true;
-    session.pendingResponseId = eventId;
-    session.responding = true;
-    this.refreshState(session);
+    this.expectResponse(session);
     return true;
   }
 
   sendText(text: string): boolean {
     const session = this.session;
     const message = text.trim();
-    if (!session || !message || session.responding || session.playing || session.batches.size) return false;
+    if (!message) return false;
+    if (!session) {
+      void this.connect(false, message);
+      return this.current !== 'error';
+    }
+    if (!session.ready || session.responding || session.playing || session.batches.size) return false;
+    this.enableAudio();
+    return this.submitText(session, message);
+  }
+
+  private submitText(session: VoiceSession, message: string): boolean {
+    this.callbacks.onNotice();
+    delete session.drafts.backend;
+    session.textTurn = true;
     if (!this.send(session, {
-      type: 'response.item.create', item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: message }] },
-    })) return false;
-    if (!this.requestResponse(session)) return false;
-    delete session.drafts.user;
-    delete session.drafts.assistant;
+      type: 'response.item.create',
+      item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: message }] },
+    }) || !this.requestResponse(session)) return false;
     this.callbacks.onTranscript({ kind: 'user', text: message });
     return true;
   }
 
-  private send(session: VoiceSession, event: object): boolean {
-    if (this.session !== session || session.channel?.readyState !== 'open') return false;
-    try { session.channel.send(JSON.stringify(event)); return true; }
-    catch { this.fail(session, 'GPT Live could not exchange session events.'); return false; }
+  private send(session: VoiceSession, event: { type: string; item?: object }): boolean {
+    if (this.session !== session) return false;
+    if (session.channel?.readyState === 'open') {
+      const eventId = crypto.randomUUID();
+      try {
+        session.channel.send(JSON.stringify({ ...event, event_id: eventId }));
+        session.pendingEvents.add(eventId);
+        return true;
+      } catch { /* The channel can close during a send. */ }
+    }
+    this.fail(session, 'GPT Live could not exchange session events.');
+    return false;
   }
 
   setMuted(muted: boolean): void {
     this.muted = muted;
-    this.applyMute();
+    this.updateMicrophone();
   }
 
-  private applyMute(): void {
-    const enabled = !this.muted && this.session?.channel?.readyState === 'open';
-    this.session?.stream?.getAudioTracks().forEach((track) => { track.enabled = enabled; });
+  private updateMicrophone(): void {
+    const session = this.session;
+    session?.stream?.getAudioTracks().forEach((track) => { track.enabled = !this.muted && session.ready; });
+    this.callbacks.onMicrophone(Boolean(session?.stream), this.muted, Boolean(session?.requestingMic));
   }
 
   stop(): void {
+    const session = this.session;
+    if (session?.channel?.readyState === 'open') {
+      try { session.channel.send(JSON.stringify({ type: 'session.close' })); } catch { /* The channel may already be closing. */ }
+    }
     this.release();
     this.setState('idle');
   }
@@ -543,7 +653,13 @@ export class RealtimeVoice {
     const session = this.session;
     this.session = undefined;
     if (!session) return;
+    this.muted = false;
+    this.updateMicrophone();
+    this.callbacks.onAudioBlocked(false);
+    this.callbacks.onPaused(false);
+    if (session.queuedText) this.callbacks.onUnsentText(session.queuedText);
     window.clearTimeout(session.timer);
+    window.clearTimeout(session.responseTimer);
     window.clearTimeout(session.reconnectTimer);
     window.clearTimeout(session.audioMeterTimer);
     window.clearTimeout(session.pauseTimer);

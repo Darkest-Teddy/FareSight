@@ -56,13 +56,26 @@ export interface PlaceDetails {
   awards: PlaceAward[];
   ratings: PlaceRating[];
   review_highlights: string[];
+  review_excerpts?: PlaceReviewExcerpt[];
   review_sources: string[];
 }
+
+export type AwardScope = 'local' | 'national' | 'international';
 
 export interface PlaceAward {
   title: string;
   org: string;
   year: number | null;
+  url: string | null;
+  scope?: AwardScope;
+}
+
+export interface PlaceReviewExcerpt {
+  author: string;
+  source: string;
+  text: string;
+  rating: number | null;
+  date_label: string | null;
   url: string | null;
 }
 

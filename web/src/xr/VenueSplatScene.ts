@@ -17,7 +17,6 @@ export class VenueSplatScene {
   private cardsRoot: pc.Entity;
   private galleryRoot: pc.Entity;
   private peopleRoot: pc.Entity;
-  private header: PhysicalPlaque;
   private fitPanel: PhysicalPlaque;
   private plaqueModel: Promise<pc.ContainerResource | null>;
   private gallery: PhysicalPlaque[] = [];
@@ -46,11 +45,9 @@ export class VenueSplatScene {
     this.galleryRoot = child(this.cardsRoot, 'Photo gallery arc');
     this.peopleRoot = child(this.cardsRoot, 'Group size preview');
     this.plaqueModel = models.load(`${assetBase}room-plaque-stand.glb`);
-    this.header = this.makePlaque(this.cardsRoot, 'Preview provenance', 0.69, 0.202);
     this.fitPanel = this.makePlaque(this.peopleRoot, 'Floor-space estimate', 0.85, 0.205);
     this.menu = new PhysicalMenuBook(device, this.cardsRoot, models, reveal, selectDish);
     this.peopleRoot.enabled = false;
-    this.header.entity.enabled = false;
     this.galleryRoot.enabled = false;
   }
 
@@ -90,7 +87,6 @@ export class VenueSplatScene {
     if (!sameRoom) this.currentRoomReady = false;
     this.menu.setMenu(place, menuDishes(place, manifest), neighborhood);
     this.positionCards();
-    this.drawHeader();
     if (contentChanged) this.buildGallery();
     this.updateGallery();
     this.updateFit();
@@ -98,7 +94,6 @@ export class VenueSplatScene {
     const ready = await this.splats.show('room', asset, this.roomRoot);
     if (revision !== this.revision) return;
     this.currentRoomReady = ready;
-    this.drawHeader();
     this.updateGallery();
     this.updateFit();
   }
@@ -107,10 +102,8 @@ export class VenueSplatScene {
     this.splats.setVisible('room', showRoom);
     if (this.cardsVisible === showCards) return;
     this.cardsVisible = showCards;
-    for (const entity of [this.header.entity, this.menu.entity]) {
-      if (showCards) this.reveal.show(entity, entity === this.menu.entity ? 0.74 : 0.66);
-      else this.reveal.hide(entity, 0.54);
-    }
+    if (showCards) this.reveal.show(this.menu.entity, 0.74);
+    else this.reveal.hide(this.menu.entity, 0.54);
     this.updateGallery();
     this.updateFit();
   }
@@ -144,7 +137,7 @@ export class VenueSplatScene {
     this.asset = null;
     this.fitKey = '';
     this.setPresentation(false, false);
-    for (const entity of [this.header.entity, this.menu.entity, this.galleryRoot, this.peopleRoot]) {
+    for (const entity of [this.menu.entity, this.galleryRoot, this.peopleRoot]) {
       this.reveal.finish(entity, false);
     }
     this.clearGallery();
@@ -155,7 +148,6 @@ export class VenueSplatScene {
 
   private positionCards(): void {
     const [x, y, z] = this.spawn;
-    this.header.entity.setLocalPosition(x - 0.10, y + 0.21, z - 1.18);
     this.fitPanel.entity.setLocalPosition(x - 0.33, y - 0.25, z - 1.12);
     this.galleryRoot.setLocalPosition(x, y - 0.09, z);
     for (const panel of this.gallery) {
@@ -163,19 +155,6 @@ export class VenueSplatScene {
       if (stand instanceof pc.Entity) this.groundStand(stand);
     }
     this.menu.placeAt([x + 0.24, y - 0.42, z - 0.74], -16);
-  }
-
-  private drawHeader(): void {
-    const place = this.place;
-    if (!place) return;
-    const preview = this.currentRoomReady ? this.asset?.provenance_label || 'AI spatial preview from restaurant photos'
-      : isSplat(this.asset) ? 'Photo preview · 3D capture unavailable' : 'Photo preview (no 3D capture yet)';
-    const date = this.currentRoomReady ? this.asset?.captured_on.slice(0, 10) : undefined;
-    this.header.setText([
-      { text: place.name, size: 76, weight: 750 },
-      { text: preview, size: 49 },
-      ...(date ? [{ text: `Captured on ${date}`, color: '#725b43', size: 40 }] : []),
-    ]);
   }
 
   private buildGallery(): void {
@@ -293,7 +272,6 @@ export class VenueSplatScene {
 
   destroy(): void {
     this.clear();
-    this.header.destroy();
     this.fitPanel.destroy();
     this.menu.destroy();
     this.root.destroy();

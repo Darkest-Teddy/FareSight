@@ -94,8 +94,9 @@ export class Model {
     }
     return this.batches.get(key);
   }
-  save(file) {
+  save(file, extras) {
     const gltf = {
+      ...(extras && { extras }),
       asset: { version: '2.0', generator: 'FareSight procedural studio' },
       scene: 0,
       scenes: [{ nodes: [] }],
@@ -179,7 +180,7 @@ export class Model {
     if (this.textures.length) {
       gltf.images = [];
       gltf.textures = [];
-      for (const { bytes, name, material } of this.textures) {
+      for (const { bytes, name, material, sampler } of this.textures) {
         const bufferView =
           gltf.bufferViews.push({
             buffer: 0,
@@ -192,7 +193,12 @@ export class Model {
         size += padded.length;
         const source =
           gltf.images.push({ name, mimeType: 'image/png', bufferView }) - 1;
-        const index = gltf.textures.push({ source }) - 1;
+        const texture = { source };
+        if (sampler) {
+          gltf.samplers ??= [];
+          texture.sampler = gltf.samplers.push(sampler) - 1;
+        }
+        const index = gltf.textures.push(texture) - 1;
         gltf.materials[material].pbrMetallicRoughness.baseColorTexture = {
           index,
         };

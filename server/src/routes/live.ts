@@ -54,8 +54,13 @@ function buildVoiceInstructions(): string {
 }
 
 function buildBackendInstructions(places: Place[], initialContext?: string): string {
+  const bostonTime = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', weekday: 'long', year: 'numeric', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+  }).format(new Date());
   return [
     'You are the tool-execution and reasoning backend for FareSight Live.',
+    `At session start in Boston (America/New_York): ${bostonTime}.`,
     LIVE_APP_INSTRUCTIONS,
     'Use catalog and app-state entries as data. Return a concise, factual summary the voice layer can speak naturally.',
     '',

@@ -1,31 +1,49 @@
-boston-map-sculpture.glb 2403356 bytes 37312 triangles 12 primitives [-0.963524, 0.039400, -0.686083] .. [0.938212, 0.136400, 0.756437]
-mbta-train-green.glb 22200 bytes 292 triangles 4 primitives [-0.004453, 0.000132, -0.013400] .. [0.004453, 0.010575, 0.013400]
-mbta-train-red.glb 18732 bytes 236 triangles 4 primitives [-0.004655, 0.000154, -0.015700] .. [0.004655, 0.008600, 0.015700]
-mbta-train-orange.glb 18736 bytes 236 triangles 4 primitives [-0.004655, 0.000154, -0.014700] .. [0.004655, 0.008600, 0.014700]
-mbta-train-blue.glb 22204 bytes 292 triangles 4 primitives [-0.004453, 0.000154, -0.013100] .. [0.004453, 0.010875, 0.013100]
+boston-map-sculpture.glb 2958292 bytes 47540 triangles 13 primitives [-0.742283, 0.039400, -0.515960] .. [0.755423, 0.139530, 0.529407]
 table-pedestal.glb 390004 bytes 4426 triangles 4 primitives [-0.450000, -0.740000, -0.450000] .. [0.450000, 0.000000, 0.450000]
 vr-control-deck.glb 127936 bytes 2102 triangles 17 primitives [-0.180000, -0.075000, -0.010800] .. [0.180000, 0.075000, 0.017200]
+vr-controller-left.glb 101392 bytes 3144 triangles 15 primitives [-0.020300, -0.084502, -0.049300] .. [0.028300, 0.037141, 0.057300]
+vr-controller-right.glb 104256 bytes 3190 triangles 15 primitives [-0.028300, -0.084502, -0.049300] .. [0.020300, 0.037141, 0.057300]
 venue-pin-flag.glb 45868 bytes 834 triangles 3 primitives [-0.118000, 0.000000, -0.007000] .. [0.118000, 0.100000, 0.009000]
 station-medallion.glb 73984 bytes 1482 triangles 3 primitives [-0.122000, 0.000000, -0.007700] .. [0.122000, 0.108000, 0.010300]
-table-menu-stand.glb 50604 bytes 826 triangles 5 primitives [-0.128000, 0.000000, -0.036000] .. [0.128000, 0.125868, 0.036000]
-room-plaque-stand.glb 46776 bytes 734 triangles 4 primitives [-0.300000, -0.180000, -0.009610] .. [0.300000, 0.180000, 0.014390]
+table-menu-stand.glb 50600 bytes 826 triangles 5 primitives [-0.128000, 0.000000, -0.036000] .. [0.128000, 0.125868, 0.036000]
+room-plaque-stand.glb 46772 bytes 734 triangles 4 primitives [-0.300000, -0.180000, -0.009610] .. [0.300000, 0.180000, 0.014390]
 menu-book.glb 72088 bytes 856 triangles 5 primitives [-0.202829, 0.027012, -0.063136] .. [0.202829, 0.296531, 0.085659]
 review-clipboard.glb 135312 bytes 3200 triangles 6 primitives [-0.148000, -0.190000, -0.009160] .. [0.148000, 0.191978, 0.010200]
-segment-place-bucen.glb 1238864 bytes 21995 triangles 8 primitives [-0.450000, -0.428217, -0.416103] .. [0.421575, 0.087679, 0.444235]
-segment-place-brico.glb 1836624 bytes 29147 triangles 8 primitives [-0.448453, -0.425818, -0.437842] .. [0.432899, 0.101033, 0.450000]
-segment-place-kencl.glb 1128724 bytes 19614 triangles 7 primitives [-0.443408, -0.424849, -0.418471] .. [0.420843, 0.069874, 0.418994]
-segment-place-harsq.glb 2134468 bytes 33733 triangles 8 primitives [-0.443285, -0.424224, -0.440822] .. [0.437098, 0.085175, 0.447621]
-segment-place-chncl.glb 1870208 bytes 30230 triangles 8 primitives [-0.410679, -0.420451, -0.450000] .. [0.443531, 0.181085, 0.440443]
+segment-place-bucen.glb 1264260 bytes 22027 triangles 8 primitives [-0.450000, -0.428217, -0.416103] .. [0.421575, 0.087679, 0.444235]
+segment-place-brico.glb 1908476 bytes 29223 triangles 8 primitives [-0.448453, -0.425818, -0.437842] .. [0.432899, 0.101033, 0.450000]
+segment-place-kencl.glb 1163244 bytes 19669 triangles 7 primitives [-0.443408, -0.424849, -0.418471] .. [0.420843, 0.069874, 0.418994]
+segment-place-harsq.glb 2182932 bytes 33842 triangles 8 primitives [-0.443285, -0.424224, -0.440822] .. [0.437098, 0.085175, 0.447621]
+segment-place-chncl.glb 1950760 bytes 30540 triangles 8 primitives [-0.410679, -0.420451, -0.450000] .. [0.443531, 0.181085, 0.440443]
+segment-place-haecl.glb 2605988 bytes 39891 triangles 8 primitives [-0.406197, -0.428244, -0.448303] .. [0.450000, 0.201741, 0.423312]
+segment-place-coecl.glb 1944356 bytes 30118 triangles 8 primitives [-0.450000, -0.431169, -0.450000] .. [0.443200, 0.246879, 0.450000]
+segment-place-aqucl.glb 2045304 bytes 32714 triangles 8 primitives [-0.450000, -0.424956, -0.448565] .. [0.412243, 0.163642, 0.424485]
+segment-place-cntsq.glb 2268508 bytes 30896 triangles 7 primitives [-0.429378, -0.425635, -0.450000] .. [0.446103, 0.092130, 0.450000]
+segment-place-cool.glb 1904928 bytes 29769 triangles 7 primitives [-0.447935, -0.419129, -0.448693] .. [0.402188, 0.060972, 0.450000]
+place-bucen geometry gates passed for 167 solids and 282 trunks
 place-bucen tube [-0.150165, 0.045000, 0.066630] top [-0.150165, 0.052500, 0.066630] 8 pins; clearance 0.018 m; minimum XZ separation 0.218990
+place-brico geometry gates passed for 544 solids and 244 trunks
 place-brico tube [-0.380077, 0.045000, 0.034574] top [-0.380077, 0.052500, 0.034574] 8 pins; clearance 0.018 m; minimum XZ separation 0.270388
+place-kencl geometry gates passed for 255 solids and 257 trunks
 place-kencl tube [-0.002139, 0.045000, 0.085898] top [-0.002139, 0.052500, 0.085898] 8 pins; clearance 0.018 m; minimum XZ separation 0.206023
+place-harsq geometry gates passed for 285 solids and 300 trunks
 place-harsq tube [-0.303191, 0.048500, -0.329273] top [-0.303191, 0.056000, -0.329273] 8 pins; clearance 0.018 m; minimum XZ separation 0.237467
+place-chncl geometry gates passed for 460 solids and 183 trunks
 place-chncl tube [0.408136, 0.041500, 0.024710] top [0.408136, 0.049000, 0.024710] 8 pins; clearance 0.018 m; minimum XZ separation 0.276295
-28 venue pins (1 door points moved onto their building), 25 on surveyed roofs and 3 on ground surfaces
+place-haecl geometry gates passed for 679 solids and 243 trunks
+place-haecl tube [0.464608, 0.041500, -0.153413] top [0.464608, 0.049000, -0.153413] 8 pins; clearance 0.018 m; minimum XZ separation 0.250003
+place-coecl geometry gates passed for 563 solids and 300 trunks
+place-coecl tube [0.222154, 0.045000, 0.068467] top [0.222154, 0.052500, 0.068467] 8 pins; clearance 0.018 m; minimum XZ separation 0.270283
+place-aqucl geometry gates passed for 471 solids and 212 trunks
+place-aqucl tube [0.548620, 0.048500, -0.098364] top [0.548620, 0.056000, -0.098364] 8 pins; clearance 0.018 m; minimum XZ separation 0.243510
+place-cntsq geometry gates passed for 670 solids and 51 trunks
+place-cntsq tube [-0.111400, 0.048500, -0.195333] top [-0.111400, 0.056000, -0.195333] 8 pins; clearance 0.018 m; minimum XZ separation 0.289378
+place-cool geometry gates passed for 408 solids and 241 trunks
+place-cool tube [-0.332389, 0.045000, 0.202101] top [-0.332389, 0.052500, 0.202101] 8 pins; clearance 0.018 m; minimum XZ separation 0.253509
+58 venue pins (2 door points moved onto their building), 55 on surveyed roofs and 3 on ground surfaces
 535 centerline rings; max centroid error 1.490e-8 m
 room-study-cafe.ply 1120452 bytes 20000 Gaussians [-2.750000, 0.000000, -2.250000] .. [2.750000, 3.000000, 2.232013] floor span 5.465510 × 4.461809 m
 dish-matcha-tiramisu.ply 560452 bytes 10000 Gaussians [-0.089807, 0.000000, -0.089795] .. [0.089763, 0.061500, 0.089818] plate span 0.179570 × 0.179613 m
-station-anchors.json 2123 bytes
-segment-anchors.json 9587 bytes
+station-anchors.json 4233 bytes
+segment-anchors.json 36395 bytes
 mbta-3d-paths.json 62384 bytes
-PASS: all 23 exports
+PASS: all 30 exports

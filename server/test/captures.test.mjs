@@ -43,12 +43,20 @@ function reachable(url) {
 const available = await reachable(captures.databaseUrl) && await reachable(captures.endpoint);
 const skip = available ? false : 'Postgres and MinIO are not running (docker compose up -d)';
 
-/** The smallest file image-size reads as a JPEG. Each size gives different bytes, so photos do not deduplicate. */
-function jpeg(width, height = 2) {
-  const frame = Buffer.from([0xff, 0xc0, 0x00, 0x0b, 0x08, 0, 0, 0, 0, 0x01, 0x01, 0x11, 0x00]);
-  frame.writeUInt16BE(height, 5);
-  frame.writeUInt16BE(width, 7);
-  return Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x00, 0x00]), frame, Buffer.from([0xff, 0xd9])]);
+const grayscaleJpegHeader = Buffer.from(
+  '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAACAAQBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAAAP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8A',
+  'base64',
+);
+
+function jpeg(width) {
+  const header = Buffer.from(grayscaleJpegHeader);
+  const frame = header.indexOf(Buffer.from([0xff, 0xc0]));
+  header.writeUInt16BE(width, frame + 7);
+  // This solid gray scan uses two zero bits per 8-pixel block, padded with ones.
+  const bitCount = Math.ceil(width / 8) * 2;
+  const scan = Buffer.alloc(Math.ceil(bitCount / 8));
+  if (bitCount % 8) scan[scan.length - 1] = 0xff >> (bitCount % 8);
+  return Buffer.concat([header, scan, Buffer.from([0xff, 0xd9])]);
 }
 
 function fixturePly() {

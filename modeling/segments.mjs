@@ -51,7 +51,7 @@ function contains(ring, [x, z]) {
   }
   return inside;
 }
-function simplify(ring, tolerance, closed) {
+function simplify(ring, tolerance, closed, fixed) {
   const points = ring.slice();
   let changed = true;
   while (changed && points.length > (closed ? 3 : 2)) {
@@ -59,7 +59,7 @@ function simplify(ring, tolerance, closed) {
     for (let i = closed ? 0 : 1; i < points.length - (closed ? 0 : 1); i++) {
       const a = points[(i + points.length - 1) % points.length];
       const b = points[(i + 1) % points.length];
-      if (segmentDistance(points[i], a, b) <= tolerance) {
+      if (!fixed?.has(points[i]) && segmentDistance(points[i], a, b) <= tolerance) {
         points.splice(i, 1);
         changed = true;
         break;
@@ -100,7 +100,9 @@ function triangulate(ring) {
     ]);
     active.splice(ear, 1);
   }
-  if (turn(...active.map((i) => ring[i])) > 1e-14) triangles.push(active);
+  const last = turn(...active.map((i) => ring[i]));
+  if (last < -1e-14) return null; // Simplification folded a narrow courtyard seam over itself.
+  if (last > 1e-14) triangles.push(active);
   return triangles.map((tri) => tri.map((i) => ring[i]));
 }
 // The city is cropped to a convex, slightly irregular outline rather than a square, so its edge
@@ -182,15 +184,29 @@ function shoreline(random) {
     }),
   );
 }
-function polygon(feature, scale, tolerance) {
+// OSM relation courtyards can have very narrow seams. Simplifying the two sides of a seam
+// independently can cross them and produce overlapping roof ears.
+function simpleRing(ring) {
+  return ring.every((a, i) => {
+    const b = ring[(i + 1) % ring.length];
+    for (let j = i + 2; j < ring.length; j++) {
+      if (i === 0 && j === ring.length - 1) continue;
+      const c = ring[j], d = ring[(j + 1) % ring.length];
+      if (turn(a, b, c) * turn(a, b, d) < 0 && turn(c, d, a) * turn(c, d, b) < 0) return false;
+    }
+    return true;
+  });
+}
+function polygon(feature, scale, tolerance, junctions) {
   const raw = feature.ring.map((p) => p.map((v) => v * scale));
-  let ring = simplify(raw, tolerance, true);
+  const fixed = junctions && new Set(raw.filter((_, i) => junctions.has(feature.ring[i].join(','))));
+  let ring = simplify(raw, tolerance, true, fixed);
   if (signedArea(ring) < 0) ring.reverse();
-  let triangles = triangulate(ring);
+  let triangles = simpleRing(ring) && triangulate(ring);
   if (!triangles) {
-    ring = simplify(raw, 1e-8, true);
+    ring = simplify(raw, 1e-8, true, fixed);
     if (signedArea(ring) < 0) ring.reverse();
-    triangles = triangulate(ring);
+    triangles = simpleRing(ring) && triangulate(ring);
   }
   if (!triangles) return null; // A self-crossing OSM way does not define a unique interior.
   const walls = [],
@@ -261,11 +277,32 @@ function subtractTriangle(poly, tri) {
   }
   return outside;
 }
-function exposedShells(buildings) {
-  for (const b of buildings) {
-    b.bounds = boundsOf(b.roof.flat());
-    b.triangles = b.roof.map((tri) => ({ tri, bounds: boundsOf(tri) }));
+// Subtract footprints from a triangulated horizontal face without counting stacked floors twice.
+function uncoveredFace(building, cutters) {
+  const result = [];
+  for (const { tri, bounds } of building.triangles) {
+    let pieces = [tri];
+    for (const other of cutters) {
+      if (!overlaps(bounds, other.bounds)) continue;
+      for (const cutter of other.triangles) {
+        if (overlaps(bounds, cutter.bounds))
+          pieces = pieces.flatMap((piece) => subtractTriangle(piece, cutter.tri));
+        if (!pieces.length) break;
+      }
+      if (!pieces.length) break;
+    }
+    for (const piece of pieces)
+      for (let i = 1; i < piece.length - 1; i++)
+        if (turn(piece[0], piece[i], piece[i + 1]) > 1e-12)
+          result.push([piece[0], piece[i], piece[i + 1]]);
   }
+  return result;
+}
+function indexFootprint(b) {
+  b.bounds = boundsOf(b.roof.flat());
+  b.triangles = b.roof.map((tri) => ({ tri, bounds: boundsOf(tri) }));
+}
+function exposedShells(buildings) {
   buildings.sort(
     (a, b) =>
       b.height - a.height ||
@@ -276,30 +313,13 @@ function exposedShells(buildings) {
   );
   for (const [rank, b] of buildings.entries()) b.rank = rank;
   for (const b of buildings) {
-    const neighbors = buildings.filter(
-      (other) => other !== b && overlaps(b.bounds, other.bounds),
-    );
-    b.visibleRoof = [];
-    for (const { tri, bounds } of b.triangles) {
-      let pieces = [tri];
-      for (const other of neighbors) {
-        if (other.rank > b.rank || !overlaps(bounds, other.bounds)) continue;
-        for (const cutter of other.triangles) {
-          if (overlaps(bounds, cutter.bounds))
-            pieces = pieces.flatMap((piece) =>
-              subtractTriangle(piece, cutter.tri),
-            );
-          if (!pieces.length) break;
-        }
-        if (!pieces.length) break;
-      }
-      for (const piece of pieces)
-        for (let i = 1; i < piece.length - 1; i++) {
-          if (turn(piece[0], piece[i], piece[i + 1]) > 1e-11)
-            b.visibleRoof.push([piece[0], piece[i], piece[i + 1]]);
-        }
-    }
+    const neighbors = buildings.filter((o) => o !== b && overlaps(b.bounds, o.bounds));
+    b.visibleRoof = uncoveredFace(b, neighbors.filter((o) => o.baseY <= b.height &&
+      (o.height > b.height || (o.height === b.height && o.rank < b.rank))));
+    b.soffit = b.baseY > 0 ? uncoveredFace(b, neighbors.filter((o) => o.height >= b.baseY &&
+      (o.baseY < b.baseY || (o.baseY === b.baseY && o.rank < b.rank)))) : [];
     b.visibleWalls = [];
+    if (b.groundPriority) continue;
     for (const [a, c] of b.walls) {
       const bounds = boundsOf([a, c]),
         near = neighbors.filter((o) => overlaps(bounds, o.bounds));
@@ -333,23 +353,24 @@ function exposedShells(buildings) {
       for (let i = 1; i < cuts.length; i++) {
         if ((cuts[i] - cuts[i - 1]) * length < 1e-7) continue;
         const mid = mix(a, c, (cuts[i - 1] + cuts[i]) / 2);
-        const side = (sign) => mid.map((v, k) => v + sign * normal[k] * 1e-7);
+        const side = (sign) => mid.map((v, k) => v + sign * normal[k] * 1e-12);
         const covered = near.filter(
           (o) =>
             (inBounds(side(1)) && contains(o.ring, side(1))) ||
             (o.rank < b.rank && contains(o.ring, side(-1))),
         );
-        const base = Math.max(b.baseY ?? 0.00255, ...covered.map((o) => o.height));
-        if (base < b.height - 1e-6)
-          b.visibleWalls.push([
-            mix(a, c, cuts[i - 1]),
-            mix(a, c, cuts[i]),
-            base,
-          ]);
+        const start = mix(a, c, cuts[i - 1]), end = mix(a, c, cuts[i]);
+        let bottom = b.baseY;
+        for (const o of covered.sort((u, v) => u.baseY - v.baseY)) {
+          if (o.baseY >= b.height) break;
+          if (bottom < o.baseY) b.visibleWalls.push([start, end, bottom, o.baseY, cuts[i - 1], cuts[i]]);
+          bottom = Math.max(bottom, o.height);
+        }
+        if (bottom < b.height) b.visibleWalls.push([start, end, bottom, b.height, cuts[i - 1], cuts[i]]);
       }
     }
   }
-  return buildings.filter((b) => b.visibleRoof.length || b.visibleWalls.length);
+  return buildings.filter((b) => b.visibleRoof.length || b.visibleWalls.length || b.soffit.length);
 }
 // ---- Survey interpretation -------------------------------------------------------------------
 // Heights are true to the horizontal scale apart from one uniform vertical exaggeration, so
@@ -472,12 +493,15 @@ function classify(b, scale) {
   const pitched =
     box.fill > 0.62 &&
     heightM < 20 &&
-    (pitchedTag || (family === 'house' && b.roofShape !== 'flat' && areaM < 420));
+    (pitchedTag || (family === 'house' && !b.minHeightM && b.roofShape !== 'flat' && areaM < 420));
   let riseM = 0;
   if (pitched) {
     riseM = b.roofHeightM ?? Math.max(1.2, Math.min(3.6, (box.half / scale) * 0.62));
     // A tagged height is measured to the ridge, so the eaves sit one roof rise below it.
-    if (tagged) heightM = Math.max(2.4, heightM - riseM);
+    if (tagged) {
+      riseM = Math.min(riseM, Math.max(0, heightM - (b.minHeightM || 2.4)));
+      heightM -= riseM;
+    }
   }
   const tower = heightM >= 45 && family !== 'utility';
   const glass = b.material === 'glass' || (tower && !/^(apartments|dormitory)$/.test(b.kind));
@@ -507,8 +531,85 @@ function classify(b, scale) {
   };
 }
 
+function coveredArea(b, parts) {
+  return b.area - uncoveredFace(b, parts).reduce((sum, tri) => sum + turn(...tri) / 2, 0);
+}
+
+function resolveParts(buildings) {
+  const parts = buildings.filter((b) => b.part);
+  const replaced = new Map();
+  const retained = buildings.filter((parent) => {
+    if (parent.part) return true;
+    const inside = parts.filter((p) => {
+      if (!overlaps(parent.bounds, p.bounds)) return false;
+      const center = [0, 1].map((k) => p.ring.reduce((n, q) => n + q[k], 0) / p.ring.length);
+      return contains(parent.ring, center);
+    });
+    if (!inside.length || coveredArea(parent, inside) < parent.area / 2) return true;
+    replaced.set(parent, inside);
+    return false;
+  });
+  const grounded = new Set(retained.filter((b) => !b.baseY));
+  const raised = retained.filter((b) => b.baseY).sort((a, b) => a.baseY - b.baseY);
+  function connected(a, b) {
+    if (a.height < b.baseY || b.height < a.baseY || !overlaps(a.bounds, b.bounds)) return false;
+    return a.ring.some((p) => distanceTo(b, p) < 1e-7) || b.ring.some((p) => distanceTo(a, p) < 1e-7)
+      || coveredArea(a, [b]) > 1e-10;
+  }
+  function propagate() {
+    let grew;
+    do {
+      grew = false;
+      for (const b of raised) {
+        if (grounded.has(b) || ![...grounded].some((p) => connected(b, p))) continue;
+        grounded.add(b);
+        grew = true;
+      }
+    } while (grew);
+  }
+  propagate();
+  for (const upper of raised) {
+    if (grounded.has(upper) || upper.kind === 'bridge') continue;
+    const family = [...replaced].filter(([, members]) => members.includes(upper))
+      .sort(([a], [b]) => a.area - b.area)[0];
+    if (!family) continue;
+    const [parent, members] = family;
+    const lower = members.filter((p) => grounded.has(p) && !p.heightExplicit && !p.pitched &&
+      p.height < upper.baseY && overlaps(p.bounds, upper.bounds) && coveredArea(upper, [p]) > 1e-10)
+      .sort((a, b) => b.height - a.height)[0];
+    // Level-derived heights can leave a storey unaccounted for. Continue the surveyed lower
+    // footprint to the next floor, preserving the upper cantilever. If the lower footprint
+    // is missing, use only the base of the parent as the supporting podium.
+    if (lower) lower.height = upper.baseY;
+    else {
+      parent.height = Math.max(grounded.has(parent) ? parent.height : 0, upper.baseY);
+      parent.pitched = false;
+      if (!grounded.has(parent)) retained.push(parent);
+      grounded.add(parent);
+    }
+    propagate();
+  }
+  return retained;
+}
+
+// At each end of the long axis, the end wall must share an abutment at span height.
+function bridgeEnds(ring, { across }) {
+  const along = [-across[1], across[0]];
+  const station = (p) => p[0] * along[0] + p[1] * along[1];
+  const ends = ring.map((p, i) => mix(p, ring[(i + 1) % ring.length], 0.5))
+    .sort((a, b) => station(a) - station(b));
+  return [ends[0], ends.at(-1)];
+}
+function bridgeHosts(span, buildings) {
+  const hosts = bridgeEnds(span.ring, span.box).map((end) => buildings.filter((other) =>
+    other !== span && other.kind !== 'bridge' && other.height > span.baseY && other.baseY < span.height &&
+    distanceTo(other, end) < 0.000002));
+  return hosts[0].some((a) => hosts[1].some((b) => a !== b));
+}
+
 // A wall panel whose colour darkens toward the pavement, standing in for ambient occlusion.
 function wall(surface, a, end, lo, hi, colorLo, colorHi, uv) {
+  if (Math.fround(lo) === Math.fround(hi)) return;
   const pts = [to3(a, lo), to3(a, hi), to3(end, hi), to3(end, lo)];
   const normal = norm(cross(sub(pts[1], pts[0]), sub(pts[2], pts[0])));
   const colors = [colorLo, colorHi, colorHi, colorLo];
@@ -544,7 +645,8 @@ function gableRoof(s, b) {
       );
     }
   // Close each gable end with wall finish between the eaves line and the roof slope.
-  for (const [a, c] of b.visibleWalls) {
+  for (const [a, c, , top] of b.visibleWalls) {
+    if (top !== b.height) continue;
     const cuts = [a],
       d0 = offset(a),
       d1 = offset(c);
@@ -591,48 +693,38 @@ function renderBuilding(s, b, pins, scale) {
   const storeys = Math.max(1, Math.round(b.heightM / LEVEL_M));
   const storeyY = (y - GROUND_Y) / storeys;
   const cornice = b.pitched || !b.facade ? 0 : Math.min(0.6 * scale * VERTICAL, (y - GROUND_Y) * 0.12);
-  const low = shade(b.finish, 0.78);
-  const tint = (h) => shade(b.finish, 0.78 + 0.22 * Math.min(1, (h - GROUND_Y) / (storeyY * 1.5)));
-  const v = (h) => (y - h) / storeyY;
-  for (const [a, end, base] of b.visibleWalls) {
-    const lengthM = Math.hypot(...sub(a, end)) / scale;
-    if (lengthM < 1e-4) continue;
+  const tint = (h) => shade(b.finish, 0.78 + 0.22 * Math.min(1, Math.max(0, (h - GROUND_Y) / (storeyY * 1.5))));
+  for (const tri of b.soffit) face(s.city, tri.map((p) => to3(p, b.baseY)), b.finish);
+  for (const [a, end, base, top, t0, t1] of b.visibleWalls) {
+    const lengthM = Math.hypot(...sub(a, end)) / ((t1 - t0) * scale);
     const atEdge = onOutline(a, end);
-    const top = y - cornice;
-    if (!b.facade || atEdge || lengthM < 2.2 || top - base < storeyY * 0.45) {
-      wall(s.city, a, end, base, y, atEdge ? shade(b.finish, 0.7) : tint(base), atEdge ? shade(b.finish, 0.7) : tint(y));
+    if (!b.facade || atEdge || lengthM < 2.2) {
+      wall(s.city, a, end, base, top, atEdge ? shade(b.finish, 0.7) : tint(base), atEdge ? shade(b.finish, 0.7) : tint(top));
       continue;
     }
-    let from = base;
-    const shopTop = GROUND_Y + storeyY;
-    if (b.storefront && base <= GROUND_Y + 1e-6 && lengthM >= 4 && shopTop <= top + 1e-9) {
-      const cols = Math.max(1, Math.round(lengthM / FACADES.storefront.bayM));
-      const lift = Math.min(shopTop, top);
-      wall(s.facades.storefront, a, end, base, lift, low, tint(lift), [
-        [0, 1],
-        [0, 0],
-        [cols, 0],
-        [cols, 1],
+    // Cut the original elevation and UVs at occluders, keeping each bay and storey in place.
+    const panel = (kind, lower, upper, v) => {
+      const lo = Math.max(base, lower), hi = Math.min(top, upper);
+      if (hi <= lo) return;
+      const bays = Math.max(1, Math.round(lengthM / FACADES[kind].bayM));
+      wall(s.facades[kind], a, end, lo, hi, tint(lo), tint(hi), [
+        [t0 * bays, v(lo)], [t0 * bays, v(hi)], [t1 * bays, v(hi)], [t1 * bays, v(lo)],
       ]);
-      from = lift;
-    }
-    if (top - from > 1e-6) {
-      const cols = Math.max(1, Math.round(lengthM / FACADES[b.facade].bayM));
-      wall(s.facades[b.facade], a, end, from, top, tint(from), tint(top), [
-        [0, v(from)],
-        [0, v(top)],
-        [cols, v(top)],
-        [cols, v(from)],
-      ]);
-    }
-    if (cornice) wall(s.city, a, end, top, y, '#e3ddd0', '#e3ddd0');
+    };
+    const eave = y - cornice, shopTop = GROUND_Y + storeyY;
+    const shop = b.storefront && b.baseY === 0 && lengthM >= 4 && shopTop <= eave + 1e-9;
+    if (shop) panel('storefront', b.baseY, Math.min(eave, shopTop), (h) => (shopTop - h) / storeyY);
+    panel(b.facade, shop ? shopTop : b.baseY, eave, (h) => (y - h) / storeyY);
+    if (top > eave) wall(s.city, a, end, Math.max(base, eave), top, '#e3ddd0', '#e3ddd0');
   }
 }
 
 const LEAVES = ['#719c74', '#7da67a', '#68936d'];
 function tree(s, [x, z], h, pine, simple) {
   const leaf = LEAVES[Math.floor((Math.abs(x * 7919 + z * 104729) * 1000) % LEAVES.length)];
-  rod(s.city, [x, 0.0015, z], [x, h * 0.58, z], h * 0.045, '#826b51', simple ? 3 : 5);
+  const start = s.city.indices.length / 3;
+  rod(s.city, [x, 0, z], [x, h * 0.58, z], h * 0.045, '#826b51', simple ? 3 : 5);
+  s.trunks.push([start, s.city.indices.length / 3]);
   if (pine) {
     for (let i = 0; i < (simple ? 2 : 3); i++) {
       const y = h * (0.22 + i * 0.18),
@@ -799,8 +891,9 @@ const roadColor = (road) =>
         : road.kind === 'service'
           ? '#777a82'
           : '#5b5f69';
+// Keep service pavement below residential streets at junctions, including their end discs.
 const roadY = (road) =>
-  (isFoot(road) ? 0.00184 : road.major ? 0.0024 : 0.0021) + (road.lift ?? 0) - (road.tunnel === 'yes' ? 0.00035 : 0);
+  (isFoot(road) ? 0.00184 : road.major ? 0.0024 : road.kind === 'service' ? 0.00206 : 0.0021) + (road.lift ?? 0) - (road.tunnel === 'yes' ? 0.00035 : 0);
 const hasSidewalk = (road) =>
   road.tunnel !== 'yes' && (road.bridge || !(isFoot(road) || road.kind === 'service' || road.kind === 'motorway'));
 const sidewalkWidth = (road) => roadWidth(road) + (isFoot(road) ? 1.2 : road.kind === 'motorway' ? 2.4 : 5);
@@ -863,7 +956,7 @@ function archways(s, ways, buildings, scale) {
         bounds = boundsOf([a, c]);
       for (const b of buildings) {
         if (!overlaps(bounds, b.bounds)) continue;
-        for (const [u, v, base] of b.visibleWalls) {
+        for (const [u, v, base, top] of b.visibleWalls) {
           if (base > GROUND_Y + 1e-6) continue;
           const d0 = turn(u, v, a),
             d1 = turn(u, v, c);
@@ -877,8 +970,8 @@ function archways(s, ways, buildings, scale) {
             out = [along[1], -along[0]];
           const t = Math.hypot(...sub(x, u)),
             half = Math.min((w.width * scale) / 2, t - 0.4 * scale, wallLength - t - 0.4 * scale);
-          const rise = Math.min((w.foot ? 2.8 : 4.3) * scale * VERTICAL, (b.height - GROUND_Y) * 0.8);
-          if (half < 0.7 * scale || inBounds(x) === false) continue;
+          const rise = Math.min((w.foot ? 2.8 : 4.3) * scale * VERTICAL, (top - GROUND_Y) * 0.8);
+          if (rise <= 0 || half < 0.7 * scale || inBounds(x) === false) continue;
           for (const sign of [-1, 1]) {
             const corner = (k) => x.map((n, j) => n + along[j] * k * half + out[j] * sign * 0.00012);
             const quad = [to3(corner(-1), 0.0015), to3(corner(-1), GROUND_Y + rise), to3(corner(1), GROUND_Y + rise), to3(corner(1), 0.0015)];
@@ -1056,8 +1149,12 @@ export function segments(dir, only) {
     for (const [kind, { label }] of Object.entries(FACADES)) {
       const material = m.material(label, { rough: kind === 'curtain' ? 0.38 : 0.86, metal: kind === 'curtain' ? 0.25 : 0 });
       s.facades[kind] = m.surface(material);
-      m.textures.push({ bytes: facadeTexture(kind), material, name: label });
+      // A storefront repeats across the street. Below its original sill, carry the bottom
+      // texel down to the deck so the foundation cannot show a second row of shop signs.
+      m.textures.push({ bytes: facadeTexture(kind), material, name: label,
+        ...(kind === 'storefront' && { sampler: { wrapT: 33071 } }) });
     }
+    const audit = { solids: [], trunks: [] };
     // The ground plate follows the shoreline; the island's turf meets it edge to edge.
     for (let i = 0; i < outline.length; i++)
       face(
@@ -1068,6 +1165,7 @@ export function segments(dir, only) {
         GROUND_COLOR,
       );
 
+    audit.deckEnd = s.city.indices.length / 3;
     const venues = all.filter((v) => depthInside(v.p) >= VENUE_INSET);
     if (depthInside(stationAt) < VENUE_INSET) throw new Error(id + ' station falls outside the shoreline');
     const venuePoints = venues.map((v) => v.p);
@@ -1081,6 +1179,8 @@ export function segments(dir, only) {
       .map((p) => polygon(p, scale, 0.00033))
       .filter(Boolean);
     for (const p of cover) {
+      indexFootprint(p);
+      p.baseY = 0;
       p.height = 0.0015;
       p.groundPriority = 1 / p.area;
     }
@@ -1100,14 +1200,16 @@ export function segments(dir, only) {
     // Pale sidewalks under every carriageway outline the city blocks.
     const ways = gradeWays(area);
     const atGrade = ways.filter((w) => !w.hidden);
+    audit.roadStart = s.city.indices.length / 3;
     for (const w of atGrade) if (!w.rail) sidewalk(s, w, scale);
     const roads = atGrade.filter((w) => !w.rail).map((w) => street(s, w, scale));
     // Surface rail: a ballast bed with the line colour running down the centre.
     roadJoints(s, atGrade.filter((w) => !w.rail), scale);
     for (const rail of atGrade.filter((w) => w.rail)) {
       ribbon(s, rail.points, scale, 3, 0.00245 + rail.lift, '#9c9588');
-      ribbon(s, rail.points, scale, 0.8, 0.0025 + rail.lift, rail.kind === 'rail' ? '#5f636b' : lineColor);
+      ribbon(s, rail.points, scale, 0.8, (rail.kind === 'rail' ? 0.00251 : 0.00252) + rail.lift, rail.kind === 'rail' ? '#5f636b' : lineColor);
     }
+    audit.roadEnd = s.city.indices.length / 3;
     for (const platform of area.platforms ?? []) {
       const y = GROUND_Y + 0.5 * scale * VERTICAL;
       if (!platform.closed) {
@@ -1120,34 +1222,57 @@ export function segments(dir, only) {
       for (const [a, end] of slab.walls) wall(s.city, a, end, 0.0015, y, '#b9b5ab', '#b9b5ab');
     }
 
-    let buildings = kept
-      .filter((b) => b.ring.some((p) => depthInside(p.map((n) => n * scale)) >= 0))
-      .map((b) => polygon(b, scale, 0.00036))
+    // Simplifying away a shared survey vertex can pull a host wall back from a skybridge end.
+    const candidates = kept.filter((b) => b.ring.every((p) => inBounds(p.map((n) => n * scale))));
+    const raisedBridges = candidates.filter((b) => b.kind === 'bridge' && b.minHeightM > 0);
+    const junctions = new Set();
+    for (const span of raisedBridges) {
+      const ends = bridgeEnds(span.ring, orientedBox(span.ring));
+      const hosts = ends.map((end) => candidates.filter((b) => b.kind !== 'bridge' &&
+        (contains(b.ring, end) || b.ring.some((p, i) => segmentDistance(end, p, b.ring[(i + 1) % b.ring.length]) < 1e-6))));
+      if (hosts[0].some((a) => hosts[1].some((b) => a !== b)))
+        for (const p of span.ring) junctions.add(p.join(','));
+    }
+    let buildings = candidates
+      .map((b) => polygon(b, scale, 0.00036, junctions))
       .filter((b) => b && b.area >= 12 * scale * scale);
-    // Where OSM models a building as parts, the parts replace its overall outline.
-    const parts = buildings.filter((b) => b.part);
-    const centroid = (b) => [0, 1].map((k) => b.ring.reduce((n, p) => n + p[k], 0) / b.ring.length);
-    buildings = buildings.filter((b) => {
-      if (b.part) return true;
-      const inside = parts.filter((p) => contains(b.ring, centroid(p)));
-      return inside.reduce((n, p) => n + Math.abs(signedArea(p.ring)), 0) < 0.5 * Math.abs(signedArea(b.ring));
-    });
-    let surveyed = 0;
     const yOf = (meters) => GROUND_Y + compress(meters) * scale * VERTICAL;
     for (const b of buildings) {
+      indexFootprint(b);
+      b.heightExplicit = b.heightM != null;
       Object.assign(b, classify(b, scale));
       b.height = yOf(b.heightM);
       b.rise = b.riseM * scale * VERTICAL;
-      b.baseY = b.minHeightM > 0 && b.minHeightM < b.heightM - 1 ? yOf(b.minHeightM) : GROUND_Y;
-      if (b.surveyed) surveyed++;
+      b.baseY = b.minHeightM > 0 ? yOf(b.minHeightM) : 0;
+      // Some roof-only surveys put both heights at the eave. Give the edge a 10 cm fascia.
+      if (b.baseY >= b.height) b.height = yOf(b.minHeightM + 0.1);
     }
+    buildings = resolveParts(buildings);
+    buildings = buildings.filter((b) => b.kind !== 'bridge' || !b.baseY || bridgeHosts(b, buildings));
+    const surveyed = buildings.filter((b) => b.surveyed).length;
     const rendered = exposedShells(buildings);
     const sites = fallbackSites(rendered);
     const pins = sites.concat(venuePoints);
-    for (const b of rendered) renderBuilding(s, b, pins, scale);
+    // Keep source-to-triangle provenance through material batching, including fully occluded solids.
+    const byId = new Map(area.buildings.map((b) => [b.id, b]));
+    const batches = [s.city, ...Object.values(s.facades)];
+    audit.batches = batches.map((surface) => surface.name);
+    const renderedSet = new Set(rendered);
+    for (const b of buildings) {
+      const starts = batches.map((surface) => surface.indices.length / 3);
+      if (renderedSet.has(b)) renderBuilding(s, b, pins, scale);
+      const ranges = batches.flatMap((surface, i) => {
+        const end = surface.indices.length / 3;
+        return end > starts[i] ? [[i, starts[i], end]] : [];
+      });
+      const raw = byId.get(b.id).ring;
+      const ring = b.ring.map(([x, z]) => raw.findIndex(([u, v]) => u * scale === x && v * scale === z));
+      audit.solids.push({ id: b.id, ring, base: b.baseY, top: b.height, ...(b.pitched && { pitched: true }), ranges });
+    }
     const archCount = archways(s, ways, rendered, scale);
     // A wider crop covers more parks and streets, so it carries proportionally more trees.
     const treeLimit = spanMeters > 480 ? 300 : 130;
+    s.trunks = audit.trunks;
     const treeCount = plant(s, area, cover, buildings, roads, venuePoints.concat(sites), random, scale, treeLimit);
 
     const meshes = m.surfaces.map((surface) => ({
@@ -1201,7 +1326,7 @@ export function segments(dir, only) {
       offDeck,
       pinAnchors: sites.map((p) => topAt(meshes, p)),
     };
-    m.save(dir + 'segment-' + id + '.glb');
+    m.save(dir + 'segment-' + id + '.glb', { stationGeometry: audit });
     console.log(
       id,
       `1:${Math.round(1 / scale)}`,

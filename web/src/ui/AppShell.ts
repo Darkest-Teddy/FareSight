@@ -7,7 +7,7 @@ import { SoundEngine } from '../audio/SoundEngine';
 import { api, type PairMessage, type Trip } from '../api/client';
 import { offlineCatalog, offlineManifest } from '../data/fallbackData';
 import { countPreviewsByStop, isSplat } from '../data/preview3D';
-import { maxBriefingCards, type BriefingCard, type BriefingMode } from '../data/reviewBriefing';
+import { buildComparisonBriefingCard, loadPlaceDecision, maxBriefingCards, type BriefingCard, type BriefingMode } from '../data/reviewBriefing';
 import { LiveController, type AppControlSurface } from '../live/LiveController';
 import { RealtimeVoice } from '../voice/RealtimeVoice';
 import { AdminModal } from './AdminModal';
@@ -19,7 +19,7 @@ import { LiveVoiceDock } from './LiveVoiceDock';
 import { lineDots } from './lineDots';
 import { PairingModal } from './PairingModal';
 import type { DishComparison, Load, Seating } from './viewState';
-import { budgetRange, initialFilters, matchingPlaces, type Filters } from './state';
+import { filtersNarrowed, initialFilters, matchingPlaces, type Filters } from './state';
 import { UploadPipelineModal } from './UploadPipelineModal';
 
 const pollInterval = 18_000;
@@ -71,10 +71,12 @@ export class AppShell {
   private place?: Place;
   private dish?: Dish;
   private comparison?: DishComparison;
+  private comparedPlaces: Place[] = [];
+  private comparisonRun = 0;
+  private comparisonLoading = false;
   private dishRequest = 0;
   private inside = false;
   private fit = false;
-  private fitGroupSize = 1;
   private seating: Seating = 'seated';
   private rotation = 0;
   private virtualTable = true;
@@ -131,19 +133,21 @@ export class AppShell {
         this.engine?.setVoiceState(state);
         this.renderMenuBadge();
       },
+      onNotice: (detail) => this.liveDock.setNotice(detail),
+      onMicrophone: (hasMic, muted, requesting) => this.liveDock.setMicrophone(hasMic, muted, requesting),
+      onAudioBlocked: (blocked) => this.liveDock.setAudioBlocked(blocked),
+      onPaused: (paused) => this.liveDock.setPaused(paused),
+      onUnsentText: (text) => this.liveDock.restoreDraft(text),
       onTranscript: (entry) => this.liveDock.appendTranscript(entry),
       onModel: (model) => this.liveDock.setModel(model),
       onTool: (name, args, current) => this.liveController.executeRealtime(name, args, current),
       getContext: () => this.liveController.describeContext(),
     });
     this.liveDock = new LiveVoiceDock({
-      toggle: () => this.liveClient.toggle(),
+      startVoice: () => void this.liveClient.start(),
+      enableAudio: () => this.liveClient.enableAudio(),
       stop: () => this.liveClient.stop(),
-      toggleMute: () => {
-        const next = !this.liveClient.isMuted;
-        this.liveClient.setMuted(next);
-        this.liveDock.setMuted(next);
-      },
+      toggleMute: () => this.liveClient.setMuted(!this.liveClient.isMuted),
       sendText: (text) => this.liveClient.sendText(text),
       opened: () => this.settleOverlays('voice'),
       returnFocus: () => this.menu.focusTrigger(),
@@ -159,7 +163,7 @@ export class AppShell {
     this.stationBoard.setAttribute('aria-label', 'Boston stops');
     this.stationBoard.append(this.stationList, this.routeFeedback);
 
-    this.filterControls = new FilterControls(this.filters, (patch) => this.updateFilters(patch), () => this.locate());
+    this.filterControls = new FilterControls(this.filters, (patch) => this.updateFilters(patch), () => void this.locate());
     this.pairing = new PairingModal((data) => void this.receivePair(data), (paired) => {
       setNavItem(this.pairButton, paired ? 'Paired' : 'Pair');
     });
@@ -311,7 +315,7 @@ export class AppShell {
   /** Red for an MBTA problem; sunflower while a voice session runs or the budget is narrowed. */
   private renderMenuBadge() {
     const voice = this.liveClient.state;
-    const active = this.filters.maxBudget < budgetRange.max || voice === 'listening' || voice === 'thinking' || voice === 'speaking' || voice === 'connecting';
+    const active = filtersNarrowed(this.filters) || voice === 'listening' || voice === 'thinking' || voice === 'speaking' || voice === 'connecting';
     this.menu.setBadge(this.status.dataset.alert === 'true' ? 'alert' : active ? 'active' : 'none');
   }
 
@@ -464,26 +468,34 @@ export class AppShell {
     if (!this.engineReady) return;
     this.engine?.setFilters(this.filters);
     this.engine?.setPlaces(this.places, matched);
-    if (this.fit && this.inside) this.engine?.setWillWeFit(true, this.fitGroupSize, this.seating);
+    if (this.fit && this.inside) this.engine?.setWillWeFit(true, this.filters.groupSize, this.seating);
   }
 
-  private locate() {
-    if (!navigator.geolocation) { this.notify('GPS is unavailable in this browser. Choose your start stop.'); return; }
+  private async locate(current = () => true): Promise<{ ok: boolean; stop?: Stop; message: string }> {
+    const fail = (message: string) => {
+      if (current()) this.notify(message);
+      return { ok: false, message };
+    };
+    if (!current()) return { ok: false, message: 'Location request cancelled.' };
+    if (!navigator.geolocation) return fail('GPS is unavailable in this browser. Choose your start stop.');
     const request = ++this.gpsRequest;
     this.notify('Finding the nearest demo stop…');
-    navigator.geolocation.getCurrentPosition(({ coords }) => {
-      if (request !== this.gpsRequest) return;
-      const distance = (stop: Stop) => haversineMeters(coords.latitude, coords.longitude, stop.lat, stop.lon);
-      const nearest = [...this.stops].sort((a, b) => distance(a) - distance(b))[0];
-      if (!nearest) { this.notify('No stops are available.'); return; }
-      this.filters = { ...this.filters, startStopId: nearest.stop_id };
-      this.origin = { lat: coords.latitude, lon: coords.longitude };
-      this.applyFilters();
-      void this.refreshTrip();
-      this.notify(`Starting from ${nearest.name}, your nearest demo stop.`);
-    }, () => {
-      if (request === this.gpsRequest) this.notify('Could not read your location. Choose a start stop from the list.');
-    }, { timeout: 10_000, maximumAge: 60_000 });
+    const position = await new Promise<GeolocationPosition>((resolve, reject) =>
+      navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10_000, maximumAge: 60_000 }),
+    ).catch(() => undefined);
+    if (request !== this.gpsRequest || !current()) return { ok: false, message: 'Location request cancelled.' };
+    if (!position) return fail('Could not read your location. Choose a start stop from the list.');
+    const { latitude, longitude } = position.coords;
+    const distance = (stop: Stop) => haversineMeters(latitude, longitude, stop.lat, stop.lon);
+    const nearest = [...this.stops].sort((a, b) => distance(a) - distance(b))[0];
+    if (!nearest) return fail('No stops are available.');
+    this.filters = { ...this.filters, startStopId: nearest.stop_id };
+    this.origin = { lat: latitude, lon: longitude };
+    this.applyFilters();
+    void this.refreshTrip();
+    const message = `Starting from ${nearest.name}, your nearest demo stop.`;
+    this.notify(message);
+    return { ok: true, stop: nearest, message };
   }
 
   private navigate(mode: SceneMode) {
@@ -565,9 +577,17 @@ export class AppShell {
     if (arrivals?.predictions.some((entry) => entry.arrival_min !== null)) this.sound.playTrainChime();
   }
 
-  private async showVenue(place: Place, options?: { inside?: boolean }) {
-    ++this.navigation;
+  private async showVenue(place: Place, options?: { inside?: boolean; current?: () => boolean }) {
+    const current = options?.current ?? (() => true);
+    if (!current()) return;
     const changed = this.place?.id !== place.id;
+    let prepared: Load<RestaurantManifest> | undefined;
+    if (options?.current && (changed || !this.manifest.data)) {
+      const requestedFrom = this.navigation;
+      prepared = await this.loadManifest(place);
+      if (!current() || requestedFrom !== this.navigation) return;
+    }
+    ++this.navigation;
     const cameFromDish = this.mode === 'dish';
     if (changed) {
       this.manifest = {};
@@ -579,6 +599,7 @@ export class AppShell {
     } else if (options?.inside !== undefined) {
       this.inside = options.inside;
     }
+    if (prepared) this.manifest = prepared;
     this.place = place;
     this.stop = this.findStop(place.stop_id);
     this.dish = undefined;
@@ -592,8 +613,9 @@ export class AppShell {
     this.renderPanels();
     this.renderScene();
     void this.refreshTrip();
-    if (changed || !this.manifest.data) await this.refreshManifest();
-    void this.refreshMenuPrices(place);
+    const navigation = this.navigation;
+    if (!prepared && (changed || !this.manifest.data)) await this.refreshManifest();
+    if (current() && this.isCurrentVenue(navigation, place.id)) void this.refreshMenuPrices(place);
   }
 
   /**
@@ -605,13 +627,29 @@ export class AppShell {
     const navigation = this.navigation;
     const result = await api.liveMenuPrices(place.id).catch(() => undefined);
     if (!result?.prices.length || !this.isCurrentVenue(navigation, place.id)) return;
-    const prices = new Map(result.prices.map(({ dish_id, price }) => [dish_id, price]));
+    this.applyLiveMenuPrices(place.id, result.prices);
+  }
+
+  private applyLiveMenuPrices(placeId: string, updates: { dish_id: string; price: number }[]) {
+    const prices = new Map(updates.map(({ dish_id, price }) => [dish_id, price]));
     const apply = (dish: Dish) => {
       const price = prices.get(dish.id);
       if (price !== undefined && dish.price == null) dish.price = price;
     };
-    place.dishes.forEach(apply);
-    this.manifest.data?.menu_items.forEach(({ dish }) => apply(dish));
+    this.places.find(({ id }) => id === placeId)?.dishes.forEach(apply);
+    if (this.comparison?.place.id === placeId) {
+      apply(this.comparison.dish);
+      this.comparison = { ...this.comparison };
+    }
+    if (this.place?.id === placeId) {
+      this.place.dishes.forEach(apply);
+      const manifest = this.manifest.data;
+      if (manifest) {
+        manifest.menu_items.forEach(({ dish }) => apply(dish));
+        this.manifest = { ...this.manifest, data: { ...manifest } };
+      }
+      if (this.dish) apply(this.dish);
+    } else if (this.comparison?.place.id !== placeId) return;
     if (this.mode === 'venue' || this.mode === 'dish') this.renderScene();
   }
 
@@ -627,7 +665,13 @@ export class AppShell {
   }
 
   private async loadManifest(place: Place): Promise<Load<RestaurantManifest>> {
-    try { return { data: await api.manifest(place.id) }; }
+    try {
+      const data = await api.manifest(place.id);
+      for (const { dish } of data.menu_items) {
+        dish.price ??= place.dishes.find(({ id }) => id === dish.id)?.price ?? null;
+      }
+      return { data };
+    }
     catch (error) {
       const offline = offlineManifest(place);
       return offline ? { data: offline, offline: true, error: 'Live previews are unavailable.' } : { error: errorText(error) };
@@ -665,7 +709,8 @@ export class AppShell {
     this.renderScene();
   }
 
-  private async showDish(dish: Dish, compareId = '', comparePlaceId?: string): Promise<boolean> {
+  private async showDish(dish: Dish, compareId = '', comparePlaceId?: string, current = () => true): Promise<boolean> {
+    if (!current()) return false;
     const request = ++this.dishRequest;
     const place = this.place;
     const mode = this.mode;
@@ -681,7 +726,7 @@ export class AppShell {
         ? this.places.find((entry) => entry.id === comparePlaceId)
         : inCurrentMenu ? place : this.places.find((entry) => entry.dishes.some((item) => item.id === compareId));
       const manifest = !venue ? undefined : venue.id === place.id ? this.manifest : await this.loadManifest(venue);
-      if (request !== this.dishRequest || !this.isCurrentVenue(navigation, place.id) || this.mode !== mode) return false;
+      if (!current() || request !== this.dishRequest || !this.isCurrentVenue(navigation, place.id) || this.mode !== mode) return false;
       const item = manifest?.data?.menu_items.find((entry) => entry.dish.id === compareId);
       if (!venue || !item || !isSplat(item.dish_asset)) {
         this.notify('The comparison dish does not have a published 3D preview.');
@@ -703,12 +748,45 @@ export class AppShell {
     return true;
   }
 
-  private async setFit(enabled: boolean, seating: Seating, groupSize = this.fitGroupSize) {
+  private async setFit(enabled: boolean, seating: Seating) {
     this.fit = enabled;
-    this.fitGroupSize = groupSize;
     this.seating = seating;
     if (enabled && !this.inside) await this.enterRoom();
-    else this.engine?.setWillWeFit(enabled, this.fitGroupSize, seating);
+    else this.engine?.setWillWeFit(enabled, this.filters.groupSize, seating);
+  }
+
+  /** The venues the voice assistant is comparing. There is no tray on screen; the result is a briefing. */
+  private setComparedPlaces(places: Place[]): void {
+    this.comparisonRun++;
+    this.comparisonLoading = false;
+    this.comparedPlaces = places;
+  }
+
+  private async openRestaurantComparison(current = () => true): Promise<boolean> {
+    if (!current() || this.comparedPlaces.length < 2 || this.comparisonLoading) return false;
+    const pairs = this.comparedPlaces.flatMap((place) => {
+      const stop = this.findStop(place.stop_id);
+      return stop ? [{ place, stop }] : [];
+    });
+    if (pairs.length !== this.comparedPlaces.length) return false;
+    const filters = this.filters;
+    const navigation = this.navigation;
+    const request = ++this.comparisonRun;
+    this.comparisonLoading = true;
+    try {
+      const decisions = await Promise.all(pairs.map(({ place, stop }) => loadPlaceDecision(place, stop, filters)));
+      if (!current() || request !== this.comparisonRun || navigation !== this.navigation) return false;
+      const controls = this.createControlSurface();
+      controls.setHighlightedStops([...new Set(pairs.map(({ stop }) => stop.stop_id))]);
+      controls.setHighlightedPlaces(pairs.map(({ place }) => place.id));
+      this.showReviewCard(buildComparisonBriefingCard(decisions, this.findStop(filters.startStopId)?.name ?? 'your start stop'));
+      return true;
+    } catch (error) {
+      if (current() && request === this.comparisonRun && navigation === this.navigation) this.notify(errorText(error));
+      return false;
+    } finally {
+      if (request === this.comparisonRun) this.comparisonLoading = false;
+    }
   }
 
   private showReviewCard(card: BriefingCard, mode: BriefingMode = 'add'): void {
@@ -756,7 +834,7 @@ export class AppShell {
           const preview = manifest && !inside ? { ...manifest, room_asset: null, rooms: [] } : manifest;
           const previewPlace = inside ? place : { ...place, rooms: [] };
           const opened = engine.openVenue(previewPlace, preview ?? null);
-          engine.setWillWeFit(this.fit && inside, this.fitGroupSize, this.seating);
+          engine.setWillWeFit(this.fit && inside, this.filters.groupSize, this.seating);
           await opened;
         } else if (mode === 'dish' && place && dish && manifest) {
           const otherDish = comparison ? { ...comparison.dish, asset: comparison.asset } : null;
@@ -772,17 +850,19 @@ export class AppShell {
     })();
   }
 
-  private async launchVR() {
+  private async launchVR(current = () => true): Promise<boolean> {
     const engine = this.engine;
-    if (!engine || !this.engineReady) { this.notify('The 3D viewer is still starting.'); return; }
+    if (!engine || !this.engineReady) { this.notify('The 3D viewer is still starting.'); return false; }
     if (this.vrButton.dataset.supported !== 'true') {
       engine.resetCamera();
-      return;
+      return false;
     }
     try {
       await engine.enterVR();
+      return true;
     } catch (error) {
-      this.notify('Could not start the XR session. ' + errorText(error));
+      if (current()) this.notify('Could not start the XR session. ' + errorText(error));
+      return false;
     }
   }
 
@@ -908,7 +988,9 @@ export class AppShell {
         comparePlaceId: this.comparison?.place.id,
         inside: this.inside,
         fit: this.fit,
-        fitGroupSize: this.fitGroupSize,
+        // The drawer is gone; the assistant's view of it stays closed.
+        drawerOpen: false,
+        sheetExpanded: false,
         seating: this.seating,
         rotation: this.rotation,
         virtualTable: this.virtualTable,
@@ -917,6 +999,8 @@ export class AppShell {
         xrMode: this.xrMode,
         manifest: this.manifest.data,
         trip: this.trip.data,
+        origin: this.origin,
+        comparedPlaces: [...this.comparedPlaces],
         highlightedStops: [...this.highlightedStops],
         highlightedPlaces: [...this.highlightedPlaces],
         highlightedDishId: this.highlightedDishId,
@@ -925,7 +1009,11 @@ export class AppShell {
       showMap: () => this.showMap(),
       showStation: (stop) => this.showStation(stop),
       showVenue: (place, options) => this.showVenue(place, options),
-      showDish: (dish, compareId, comparePlaceId) => this.showDish(dish, compareId, comparePlaceId),
+      showDish: (dish, compareId, comparePlaceId, current) => this.showDish(dish, compareId, comparePlaceId, current),
+      setComparedPlaces: (places) => this.setComparedPlaces(places),
+      openRestaurantComparison: (current) => this.openRestaurantComparison(current),
+      locateNearestStop: (current) => this.locate(current),
+      applyLiveMenuPrices: (placeId, prices) => this.applyLiveMenuPrices(placeId, prices),
       updateFilters: (patch) => this.updateFilters(patch),
       setHighlightedStops: (stopIds, pulse = true) => {
         this.highlightedStops = [...stopIds];
@@ -949,7 +1037,10 @@ export class AppShell {
         this.engine?.setHighlightedDish(undefined);
         this.renderStationBoard(new Set(this.filtered.map((p) => p.id)));
       },
-      setFit: (enabled, seating, groupSize) => this.setFit(enabled, seating, groupSize),
+      // Dishes are picked from the menu book in the scene; there is no menu panel to focus or drawer to move.
+      focusMenu: () => {},
+      setDrawerState: () => {},
+      setFit: (enabled, seating) => this.setFit(enabled, seating),
       showReviewCard: (card, mode) => this.showReviewCard(card, mode),
       dismissReviewCard: (cardId) => this.dismissReviewCard(cardId),
       setDishRotation: (degrees) => this.setDishRotation(degrees),
@@ -988,19 +1079,15 @@ export class AppShell {
         if (sent) this.notify('Trip sent to the paired device.');
         return sent;
       },
-      controlXR: async (action) => {
+      controlXR: async (action, current) => {
         if (action === 'exit_xr') {
           this.engine?.exitXR();
-          return 'Exited XR session';
+          return { ok: true, message: 'Exited XR session' };
         }
         // The AR table has no entry point in the app any more, so only VR can be launched by voice.
-        if (action !== 'enter_vr') return 'The AR table is not available';
-        try {
-          await this.launchVR();
-          return 'Launched VR';
-        } catch (error) {
-          return `XR requires a direct button tap in the browser (${errorText(error)})`;
-        }
+        if (action !== 'enter_vr') return { ok: false, message: 'The AR table is not available' };
+        const ok = await this.launchVR(current);
+        return { ok, message: ok ? 'Launched VR' : 'Could not start VR. Use the Enter VR button on a supported device.' };
       },
       announce: (text) => this.notify(text),
     };

@@ -70,6 +70,7 @@ small { color: var(--muted); }
 
 /* ───────── Stage ───────── */
 .app-shell {
+  --stop-board-width: 18.5rem;
   position: relative;
   height: 100vh;
   height: 100dvh;
@@ -172,7 +173,7 @@ small { color: var(--muted); }
 }
 .voice-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
 .voice-head .quiet { min-height: 2rem; margin: -.25rem -.25rem -.25rem 0; padding: 0 .625rem; border-radius: var(--radius-sm); }
-.voice-title-wrap { display: flex; align-items: center; gap: .5rem; min-width: 0; padding-inline-start: .25rem; }
+.voice-title-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .5rem; min-width: 0; padding-inline-start: .25rem; }
 .voice-state { font-size: .9375rem; font-weight: 700; letter-spacing: -.01em; }
 .voice-dock[data-state=error] .voice-state { color: var(--error); }
 .voice-model { padding: .125rem .4375rem; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--muted); font-size: .6875rem; font-weight: 550; }
@@ -204,6 +205,7 @@ small { color: var(--muted); }
 .notice {
   position: absolute;
   z-index: 7;
+  pointer-events: none;
   inset: max(var(--gutter), env(safe-area-inset-top)) auto auto 50%;
   transform: translateX(-50%);
   width: max-content;

@@ -16,6 +16,7 @@ export interface Alert {
   severity: number;
   route_ids: string[];
   stop_ids: string[];
+  source?: MbtaSource;
 }
 export interface Upload {
   id: string;
@@ -35,10 +36,15 @@ export interface ModerationItem {
 export type ModerationKind = 'review' | 'upload';
 
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number) { super(message); }
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
 }
 
-const apiOrigin = String(import.meta.env.VITE_API_ORIGIN ?? '').replace(/\/$/, '');
+const apiOrigin = String(import.meta.env?.VITE_API_ORIGIN ?? '').replace(/\/$/, '');
 export function assetUrl(path: string): string {
   const url = new URL(path, apiOrigin || window.location.origin);
   if (url.origin === 'http://localhost:3001' || url.origin === 'http://127.0.0.1:3001') {
@@ -84,7 +90,7 @@ export const api = {
   place: (id: string) => request<Place>(`/restaurants/${pathId(id)}`),
   liveReviews: (id: string) => request<LiveReviewsResponse>(`/restaurants/${pathId(id)}/live-reviews`, undefined, undefined, undefined, 25_000),
   liveMenuPrices: (id: string) => request<LiveMenuPricesResponse>(`/restaurants/${pathId(id)}/live-prices`, undefined, undefined, undefined, 25_000),
-  review: (id: string, data: { author_label: string; text: string }) =>
+  review: (id: string, data: { author_label: string; text: string; rating?: number }) =>
     request<unknown>(`/restaurants/${pathId(id)}/reviews`, data),
   vehicles: () => request<{ vehicles: MbtaVehicle[]; source: MbtaSource; updated_at: string }>('/mbta/vehicles'),
   async predictions(stop: string) {
@@ -102,9 +108,10 @@ export const api = {
     return { predictions, source: result.source };
   },
   async alerts(): Promise<Alert[]> {
-    const result = await request<MbtaAlert[] | { alerts: (MbtaAlert & { route_id?: string })[] }>('/mbta/alerts');
+    const result = await request<MbtaAlert[] | { source?: MbtaSource; alerts: (MbtaAlert & { route_id?: string })[] }>('/mbta/alerts');
     return (Array.isArray(result) ? result : result.alerts).map((alert) => ({
       ...alert,
+      source: Array.isArray(result) ? undefined : result.source,
       route_ids: alert.route_ids ?? ('route_id' in alert && typeof alert.route_id === 'string' ? [alert.route_id] : []),
       stop_ids: alert.stop_ids ?? [],
     }));

@@ -41,4 +41,20 @@ test('researched hours and details reach the catalog and refresh stale stored pl
   assert.deepEqual(taiwan.hours.fri, ['11:00', '01:00']);
   assert.ok(taiwan.details.awards.some(({ org }) => org === 'Boston Magazine'));
   assert.equal(taiwan.room_asset_id, 'kept-asset');
+
+  // Every catalog restaurant has scraped ratings, highlights, excerpts, and scoped awards.
+  const catalog = (await app.inject('/api/restaurants')).json();
+  const restaurants = catalog.filter(({ category }) => category === 'restaurant');
+  assert.equal(restaurants.length, 35);
+  const validScopes = new Set(['local', 'national', 'international']);
+  for (const place of restaurants) {
+    assert.ok(place.details, `Missing details for ${place.id}`);
+    assert.ok(place.details.ratings.length > 0, `Missing ratings for ${place.id}`);
+    assert.ok(place.details.review_highlights.length >= 3, `Missing review highlights for ${place.id}`);
+    assert.ok(place.details.review_excerpts?.length >= 2, `Missing review excerpts for ${place.id}`);
+    assert.ok(place.details.review_sources.length > 0, `Missing review sources for ${place.id}`);
+    for (const award of place.details.awards) {
+      assert.ok(validScopes.has(award.scope), `Invalid award scope ${award.scope} on ${place.id}`);
+    }
+  }
 });
