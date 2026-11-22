@@ -41,7 +41,7 @@ const GROW = 0.085;
 const KEEP = 0.018;
 
 /** How far the rim then takes to dissolve into the backdrop. */
-const FADE = 0.028;
+const FADE = 0.042;
 
 /**
  * Grid step for sampling the field.
@@ -129,52 +129,59 @@ export function groundBlob(surface, sites, y) {
   const rows = Math.ceil((maxZ - minZ) / STEP) + 1;
   const at = (c, r) => r * cols + c;
 
-  // Grow: every vertex within GROW of a building. This is the sealed, over-generous shape.
-  const grown = new Uint8Array(cols * rows);
+  // Distance from every grid vertex to the nearest building's edge.
+  const field = new Float64Array(cols * rows);
   for (let r = 0; r < rows; r++)
     for (let c = 0; c < cols; c++)
-      grown[at(c, r)] = distanceAt(minX + c * STEP, minZ + r * STEP) <= GROW ? 1 : 0;
+      field[at(c, r)] = distanceAt(minX + c * STEP, minZ + r * STEP);
 
-  // Shrink: how far each vertex is from the nearest point outside that shape. Vertices deep
-  // inside keep a large clearance; ones near the grown edge lose it, which is what walks the
-  // boundary back in towards the buildings.
-  const window = Math.ceil((erode + FADE) / STEP) + 1;
-  const clearance = new Float64Array(cols * rows);
+  // The closing, done on the field itself rather than on a mask of it.
+  //
+  // A point survives if a disc of radius `erode` around it still lies entirely inside the grown
+  // shape -- that is, if the largest distance-to-a-building anywhere in that disc is still within
+  // GROW. So the test is a dilation of the field, and GROW minus that peak is how deep the point
+  // sits inside the closed region.
+  //
+  // Thresholding the field into a grown/not-grown mask first, as this did before, throws away
+  // everything between one grid step and the next: the boundary could then only land on a cell
+  // edge, and the rim came out in visible squares before cutting off. Keeping the field
+  // continuous means the depth varies smoothly across a cell and the vertex colours interpolate
+  // over it.
+  const stencil = [];
+  const reach = Math.ceil(erode / STEP);
+  for (let j = -reach; j <= reach; j++)
+    for (let i = -reach; i <= reach; i++)
+      if (Math.hypot(i, j) * STEP <= erode) stencil.push([i, j]);
+
+  const depth = new Float64Array(cols * rows);
   for (let r = 0; r < rows; r++)
     for (let c = 0; c < cols; c++) {
-      if (!grown[at(c, r)]) continue;
-      let best = Infinity;
-      for (let j = -window; j <= window; j++) {
+      let peak = -Infinity;
+      for (const [i, j] of stencil) {
+        const cc = c + i;
         const rr = r + j;
-        if (rr < 0 || rr >= rows) continue;
-        for (let i = -window; i <= window; i++) {
-          const cc = c + i;
-          // Outside the grid counts as outside the shape, so the edge cannot leak off it.
-          const outside = cc < 0 || cc >= cols || !grown[at(cc, rr)];
-          if (!outside) continue;
-          const d = Math.hypot(i, j) * STEP;
-          if (d < best) best = d;
-        }
+        // Off the grid counts as infinitely far from any building, so the shape cannot leak out.
+        const v = cc < 0 || cc >= cols || rr < 0 || rr >= rows ? Infinity : field[at(cc, rr)];
+        if (v > peak) peak = v;
       }
-      clearance[at(c, r)] = best;
+      depth[at(c, r)] = GROW - peak;
     }
 
-  // Solid once a vertex clears the erode depth; dissolving over the FADE just inside that.
-  const tintAt = (d) =>
-    1 - smoothstep(Math.max(0, Math.min(1, (d - (erode - FADE)) / FADE)));
+  // Solid once a vertex sits a full FADE inside the closed edge, dissolving to nothing at it.
+  const tintAt = (d) => 1 - smoothstep(Math.max(0, Math.min(1, d / FADE)));
   const up = [0, 1, 0];
   let quads = 0;
 
   for (let r = 0; r < rows - 1; r++)
     for (let c = 0; c < cols - 1; c++) {
       const corners = [
-        clearance[at(c, r)],
-        clearance[at(c + 1, r)],
-        clearance[at(c + 1, r + 1)],
-        clearance[at(c, r + 1)],
+        depth[at(c, r)],
+        depth[at(c + 1, r)],
+        depth[at(c + 1, r + 1)],
+        depth[at(c, r + 1)],
       ];
       // Nothing to draw where every corner has already dissolved.
-      if (corners.every((d) => d <= erode - FADE)) continue;
+      if (corners.every((d) => d <= 0)) continue;
 
       const x0 = minX + c * STEP;
       const z0 = minZ + r * STEP;
