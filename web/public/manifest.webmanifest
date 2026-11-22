@@ -1,0 +1,16 @@
+{
+  "id": "/",
+  "name": "Vantage",
+  "short_name": "Vantage",
+  "description": "Find Boston spots by MBTA stop and explore rooms and dishes in 3D.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#FBF9F4",
+  "theme_color": "#FBF9F4",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

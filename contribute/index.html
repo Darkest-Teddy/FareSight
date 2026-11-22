@@ -1,20 +1,70 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" prefix="og: https://ogp.me/ns#">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#F5F0E6" />
     <meta name="color-scheme" content="light" />
+    <title>Vantage Contribute · Capture Boston in 3D</title>
+    <meta name="description" content="Capture 360° room scans and dish photos near Boston's T stops. Upload from your phone and track your scans as they become 3D previews for Vantage." />
+    <meta name="application-name" content="Vantage Contribute" />
+    <meta name="author" content="Vantage team" />
+    <meta name="keywords" content="Boston, MBTA, 360 room scan, mobile 3D capture, restaurant photography, dish photos" />
+    <meta name="robots" content="index, follow" />
+    <meta name="apple-mobile-web-app-title" content="Contribute" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="description" content="Add photos of Boston places near the T and turn them into 3D previews for Vantage." />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Vantage Contribute" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:title" content="Vantage Contribute · Capture Boston in 3D" />
+    <meta property="og:description" content="Capture 360° room scans and dish photos near Boston's T stops. Upload from your phone and track your scans as they become 3D previews for Vantage." />
+    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Capture Boston in 3D with Vantage Contribute. A street map traces the Orange Line through the building footprints around Chinatown station." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Vantage Contribute · Capture Boston in 3D" />
+    <meta name="twitter:description" content="Capture 360° room scans and dish photos near Boston's T stops. Upload from your phone and track your scans as they become 3D previews for Vantage." />
+    <meta name="twitter:image" content="/og-image.png" />
+    <meta name="twitter:image:alt" content="Capture Boston in 3D with Vantage Contribute. A street map traces the Orange Line through the building footprints around Chinatown station." />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Vantage Contribute",
+        "description": "Capture 360° room scans and dish photos near Boston's T stops. Upload from your phone and track your scans as they become 3D previews for Vantage.",
+        "image": "/og-image.png",
+        "inLanguage": "en-US",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "iOS, Android",
+        "browserRequirements": "Camera and motion sensor access over HTTPS for guided 360° room scans.",
+        "availableOnDevice": "Phone",
+        "about": {
+          "@type": "Service",
+          "name": "3D capture for venues near Boston's MBTA stops",
+          "areaServed": {
+            "@type": "City",
+            "name": "Boston",
+            "containedInPlace": { "@type": "State", "name": "Massachusetts" }
+          }
+        },
+        "featureList": [
+          "Venue maps organized by MBTA station",
+          "Guided 360° room photo capture with phone motion sensors",
+          "Room and dish photo uploads from camera or photo library",
+          "3D scan processing and review status tracking"
+        ]
+      }
+    </script>
     <link rel="preconnect" href="https://api.fontshare.com" />
     <link rel="preconnect" href="https://cdn.fontshare.com" crossorigin />
     <link href="https://api.fontshare.com/v2/css?f[]=switzer@1&display=swap" rel="stylesheet" />
-    <title>Vantage Contribute</title>
   </head>
   <body>
     <div id="app"></div>

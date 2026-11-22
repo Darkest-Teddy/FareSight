@@ -1,16 +1,69 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" prefix="og: https://ogp.me/ns#">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#FBF9F4" />
     <meta name="color-scheme" content="light" />
-    <meta name="description" content="Find places near Boston's T stops and explore venues and dishes in 3D." />
+    <title>Vantage · Boston by train</title>
+    <meta name="description" content="Explore 58 spots across 10 MBTA station neighborhoods. Compare prices with train fare included, then preview rooms and dishes in 3D on the web or Meta Quest 3." />
+    <meta name="application-name" content="Vantage" />
+    <meta name="author" content="Vantage team" />
+    <meta name="keywords" content="Boston, MBTA, Boston restaurants, 3D venue previews, live train arrivals, WebXR, Meta Quest 3" />
+    <meta name="robots" content="index, follow" />
+    <meta name="apple-mobile-web-app-title" content="Vantage" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Vantage" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:title" content="Vantage · Boston by train, in 3D" />
+    <meta property="og:description" content="Explore 58 spots across 10 MBTA station neighborhoods. Compare prices with train fare included, then preview rooms and dishes in 3D on the web or Meta Quest 3." />
+    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Boston by train, in 3D. Four colored MBTA lines wind among the towers and waterways of the Vantage map sculpture." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Vantage · Boston by train, in 3D" />
+    <meta name="twitter:description" content="Explore 58 spots across 10 MBTA station neighborhoods. Compare prices with train fare included, then preview rooms and dishes in 3D on the web or Meta Quest 3." />
+    <meta name="twitter:image" content="/og-image.png" />
+    <meta name="twitter:image:alt" content="Boston by train, in 3D. Four colored MBTA lines wind among the towers and waterways of the Vantage map sculpture." />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Vantage",
+        "description": "Explore 58 spots across 10 MBTA station neighborhoods. Compare prices with train fare included, then preview rooms and dishes in 3D on the web or Meta Quest 3.",
+        "image": "/og-image.png",
+        "inLanguage": "en-US",
+        "applicationCategory": "TravelApplication",
+        "operatingSystem": "Any operating system with a compatible web browser",
+        "browserRequirements": "WebGL for 3D. A WebXR-capable browser and HTTPS for immersive mode.",
+        "availableOnDevice": ["Desktop", "Phone", "Meta Quest 3"],
+        "about": {
+          "@type": "Service",
+          "name": "Boston venue discovery by MBTA stop",
+          "areaServed": {
+            "@type": "City",
+            "name": "Boston",
+            "containedInPlace": { "@type": "State", "name": "Massachusetts" }
+          }
+        },
+        "featureList": [
+          "3D map of 10 MBTA station neighborhoods and 58 places",
+          "Live MBTA train positions and arrival estimates when available",
+          "Place filters for category, group size, and total budget including T fare",
+          "3D room scans and real-scale dish previews at selected venues",
+          "Immersive WebXR on Meta Quest 3",
+          "GPT Live voice navigation and place comparisons when configured"
+        ]
+      }
+    </script>
     <link rel="preconnect" href="https://api.fontshare.com" />
     <link rel="preconnect" href="https://cdn.fontshare.com" crossorigin />
     <link href="https://api.fontshare.com/v2/css?f[]=switzer@1&display=swap" rel="stylesheet" />
-    <title>Vantage · Boston by train</title>
   </head>
   <body>
     <main id="app"></main>

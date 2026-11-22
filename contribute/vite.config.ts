@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
+import { seoMetadata } from '../web/vite-seo.ts';
 
 // The Contribute app is served from its own subdomain (contribute.<domain>).
 // In development it answers on http://contribute.localhost:5180 and proxies the API to the Fastify server.
@@ -16,6 +17,7 @@ const https = certDir ? { key: readFileSync(certDir + 'key.pem'), cert: readFile
 const allowedHosts = ['.localhost', ...(process.env.CONTRIBUTE_HOST ? [process.env.CONTRIBUTE_HOST] : [])];
 
 export default defineConfig({
+  plugins: [seoMetadata('VITE_CONTRIBUTE_URL', loadEnv)],
   resolve: { alias: { '@faresight/shared': fileURLToPath(new URL('../shared/src/index.ts', import.meta.url)) } },
   server: { port: https ? 5181 : 5180, strictPort: true, https, allowedHosts, proxy },
   preview: { port: 4180, strictPort: true, allowedHosts, proxy },

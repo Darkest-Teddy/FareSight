@@ -197,7 +197,7 @@ export class AppShell {
     this.sound.setMuted(true);
     this.sound.onStateChange = () => this.renderAudioState();
     this.filterControls.setStops(this.stops);
-    this.renderBack();
+    this.renderNavigation();
     this.applyFilters();
     this.renderStatus();
     this.renderPanels();
@@ -337,7 +337,7 @@ export class AppShell {
     this.filterControls.setStops(this.stops);
     if (this.engineReady) this.engine?.setStops(this.stops);
     this.applyFilters();
-    this.renderBack();
+    this.renderNavigation();
   }
 
   private async refreshTransit() {
@@ -362,8 +362,15 @@ export class AppShell {
     }
   }
 
-  /** The back button names where one step back goes: the map, the station, the restaurant. */
-  private renderBack() {
+  private renderNavigation() {
+    const name = {
+      map: undefined,
+      station: this.stop?.name,
+      venue: this.place?.name,
+      dish: this.dish?.name,
+    }[this.mode];
+    if ('title' in document) document.title = name ? `${name} · Vantage` : 'Vantage · Boston by train';
+
     const target = this.mode === 'dish' ? this.place?.name ?? 'Restaurant'
       : this.mode === 'venue' ? this.stop?.name ?? 'Station'
         : this.mode === 'station' ? 'Map' : undefined;
@@ -551,7 +558,7 @@ export class AppShell {
     ++this.chimeRequest;
     // Without the 3D map the stop list is the only way in, so it is the one thing left open.
     this.panel = this.root.dataset.viewer === 'failed' ? 'stops' : undefined;
-    this.renderBack();
+    this.renderNavigation();
     this.renderPanels();
     this.renderScene();
   }
@@ -568,7 +575,7 @@ export class AppShell {
     this.inside = this.fit = false;
     this.mode = 'station';
     this.panel = undefined;
-    this.renderBack();
+    this.renderNavigation();
     this.renderPanels();
     if (changed) {
       this.sound.playSelect();
@@ -618,7 +625,7 @@ export class AppShell {
     this.mode = 'venue';
     this.panel = undefined;
     if (changed || cameFromDish) this.sound.playSelect();
-    this.renderBack();
+    this.renderNavigation();
     this.renderPanels();
     this.renderScene();
     void this.refreshTrip();
@@ -750,7 +757,7 @@ export class AppShell {
     if (previous !== dish.id) this.rotation = 0;
     this.panel = undefined;
     this.sound.playSelect();
-    this.renderBack();
+    this.renderNavigation();
     this.renderPanels();
     this.renderScene();
     return true;
