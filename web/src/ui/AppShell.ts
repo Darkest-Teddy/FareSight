@@ -132,6 +132,7 @@ export class AppShell {
         this.engine?.setVoiceState(state);
       },
       onTranscript: (entry) => this.liveDock.appendTranscript(entry),
+      onModel: (model) => this.liveDock.setModel(model),
       onTool: (name, args) => this.liveController.executeRealtime(name, args),
       getContext: () => this.liveController.describeContext(),
     });
@@ -440,7 +441,6 @@ export class AppShell {
     this.filters = { ...this.filters, ...patch };
     this.applyFilters();
     if (originChanged) void this.refreshTrip();
-    this.syncLiveContext();
   }
 
   private applyFilters() {
@@ -485,7 +485,6 @@ export class AppShell {
     this.renderBreadcrumbs();
     this.renderPanels();
     this.renderScene();
-    this.syncLiveContext();
   }
 
   private showStation(stop: Stop) {
@@ -517,7 +516,6 @@ export class AppShell {
       void this.refreshStation();
       this.renderScene();
     }
-    this.syncLiveContext();
   }
 
   private updateStationDrawer() {
@@ -586,7 +584,6 @@ export class AppShell {
     this.renderScene();
     void this.refreshTrip();
     if (changed || !this.manifest.data) await this.refreshManifest();
-    this.syncLiveContext();
   }
 
   private async refreshManifest() {
@@ -680,7 +677,6 @@ export class AppShell {
     this.renderPanels();
     this.renderDrawer(previous !== dish.id);
     this.renderScene();
-    this.syncLiveContext();
     return true;
   }
 
@@ -748,7 +744,6 @@ export class AppShell {
     }
     this.briefings.set(card.id, card);
     this.renderReviewCards(card.id);
-    this.syncLiveContext();
   }
 
   private renderReviewCards(activeId?: string): void {
@@ -762,7 +757,6 @@ export class AppShell {
     if (cardId === undefined) this.briefings.clear();
     else this.briefings.delete(cardId);
     this.renderReviewCards();
-    this.syncLiveContext();
   }
 
   private async openBriefingVenue(placeId: string, dishId?: string, compareDishId?: string, comparePlaceId?: string): Promise<void> {
@@ -1046,10 +1040,6 @@ export class AppShell {
       },
       announce: (text) => this.notify(text),
     };
-  }
-
-  private syncLiveContext() {
-    this.liveClient.updateContext();
   }
 
   private notify(text: string) {

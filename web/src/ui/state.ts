@@ -1,9 +1,6 @@
-import { MBTA_SUBWAY_FARE, type Place, type Stop } from '@faresight/shared';
+import { CRAVING_FILTERS as cravings, MBTA_SUBWAY_FARE, type Place, type Stop } from '@faresight/shared';
 
-export const cravings = [
-  ['all', 'All'], ['ramen', 'Ramen & Noodles'], ['cheap', 'Cheap Eats'], ['study', 'Study Cafes'],
-  ['groups', 'Karaoke & Groups'], ['music', 'Live Music'], ['shops', 'Shops & Markets'], ['parks', 'Parks & Views'],
-] as const;
+export { cravings };
 
 export type Craving = typeof cravings[number][0];
 export interface Filters {

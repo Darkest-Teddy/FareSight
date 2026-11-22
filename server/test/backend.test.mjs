@@ -8,7 +8,7 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { gzipSync } from 'node:zlib';
 import { WebSocket } from 'ws';
-import { computeTotalCost, computeTripEstimate, latLonToSculpture, STOPS } from '@faresight/shared';
+import { computeTotalCost, computeTripEstimate, demoAssets, demoPlaces, formatDishPrice, latLonToSculpture, STOPS } from '@faresight/shared';
 import { createApp } from '../dist/app.js';
 import { getConfig } from '../dist/config.js';
 import { pollAtlasSplats, submitAtlasSplats } from '../dist/services/atlasClient.js';
@@ -108,11 +108,11 @@ test('HTTP catalog and live MBTA proxy plus two-way WebSocket pairing', { timeou
   const [places, stops, manifest] = await Promise.all([
     server.request('/api/restaurants'), server.request('/api/stops'), server.request(`/api/restaurants/${placeId}/manifest`),
   ]);
-  assert.equal(places.length, 28);
+  assert.equal(places.length, 30);
   assert.equal(stops.length, 5);
   for (const stop of stops) {
     const pins = places.filter((place) => place.stop_id === stop.stop_id).map((place) => place.pin_index);
-    assert([5, 6].includes(pins.length));
+    assert([5, 6, 7].includes(pins.length));
     assert.equal(new Set(pins).size, pins.length);
     assert(pins.every((pin) => pin >= 0 && pin <= 7));
   }
@@ -171,6 +171,91 @@ test('HTTP catalog and live MBTA proxy plus two-way WebSocket pairing', { timeou
       socket.close();
       return closed;
     }));
+  }
+});
+
+test('catalog startup refreshes bundled SOG previews and preserves uploaded assets', async (t) => {
+  const server = await setup(t);
+  await server.start({ worker: false });
+  await server.stop();
+  const db = new DatabaseSync(server.config.database);
+  try {
+    const getPlace = (id) => JSON.parse(db.prepare('SELECT data FROM places WHERE id = ?').get(id).data);
+    const putPlace = (place) => db.prepare('UPDATE places SET data = ? WHERE id = ?').run(JSON.stringify(place), place.id);
+    const jefes = getPlace('kenmore-jefes-01');
+    const [tacos, burrito] = jefes.dishes;
+    putPlace({ ...jefes, room_asset_id: null, dishes: [{ ...tacos, name: "El Jefe's Tacos (Three)", price: 15.5 }, burrito],
+      seed_status: 'planning_estimate', price_checked_on: '' });
+    const shu = getPlace('kenmore-shudaxia-01');
+    const [shrimp, beef] = shu.dishes;
+    putPlace({ ...shu, dishes: [{ ...shrimp, name: 'Dual-Broth (Yin-Yang) Hot Pot', price: null },
+      { ...beef, name: 'Marbled Beef Mountain', price: null }] });
+    const starbucks = getPlace('bu-starbucks-01');
+    putPlace({ ...starbucks, dishes: starbucks.dishes.slice(0, 2) });
+    const ramen = getPlace(placeId);
+    const [tonkotsu, katsu] = ramen.dishes;
+    putPlace({ ...ramen, room_asset_id: 'uploaded-room', dishes: [
+      { ...tonkotsu, price: 13 }, { ...katsu, name: 'Custom curry' },
+      { ...tonkotsu, id: 'obsolete-demo-dish', asset_id: 'obsolete-demo-preview' },
+      { ...tonkotsu, id: 'uploaded-dish', name: 'Uploaded appetizer', asset_id: 'uploaded-discrete-preview' },
+    ] });
+    const putAsset = (asset) => db.prepare('INSERT OR REPLACE INTO assets VALUES (?, ?)').run(asset.id, JSON.stringify(asset));
+    const asset = (id) => demoAssets.find((asset) => asset.id === id);
+    putAsset({ ...asset('kenmore-jefes-01-room'), format: 'ply', url: '/assets-demo/room-ramen-house.ply', gaussian_count: 0 });
+    putAsset({ ...asset('kenmore-shudaxia-01-room'), gaussian_count: 349_369 });
+    putAsset({ ...asset('bu-starbucks-macchiato-splat'), gaussian_count: 0 });
+    putAsset({ ...asset(tonkotsu.asset_id), id: 'obsolete-demo-preview' });
+    putAsset({ ...asset(katsu.asset_id), backend: 'trellis', format: 'sog', url: '/storage/outputs/custom-curry.sog' });
+    putAsset({ ...asset(katsu.asset_id), id: 'uploaded-discrete-preview', backend: 'trellis', format: 'sog', url: '/storage/outputs/appetizer.sog' });
+    putAsset({ ...asset(ramen.room_asset_id), id: 'uploaded-room', backend: 'atlas', format: 'sog', url: '/storage/outputs/uploaded-room.sog' });
+  } finally {
+    db.close();
+  }
+  await server.start({ worker: false });
+  const results = await Promise.all([placeId, 'kenmore-jefes-01', 'kenmore-shudaxia-01', 'bu-starbucks-01']
+    .map((id) => server.request(`/api/restaurants/${id}/manifest`)));
+  const [ramen, jefes, shu, starbucks] = results;
+  assert.equal(ramen.room_asset.id, 'uploaded-room');
+  assert.equal(ramen.menu_items.length, 3);
+  assert.equal(ramen.menu_items[0].dish_asset.url, '/assets-demo/dish-tonkotsu-ramen.ply');
+  assert.equal(ramen.menu_items[0].dish.price, 14.5);
+  assert.equal(ramen.menu_items[1].dish.name, 'Custom curry');
+  assert.equal(ramen.menu_items[1].dish_asset.url, '/storage/outputs/custom-curry.sog');
+  assert.equal(ramen.menu_items[2].dish.name, 'Uploaded appetizer');
+  assert.equal(ramen.menu_items[2].dish_asset.url, '/storage/outputs/appetizer.sog');
+  assert.equal(jefes.restaurant.price_checked_on, '2026-11-21');
+  for (const [manifest, name, count] of [[jefes, 'eljefes', 344_961], [shu, 'shudaxia', 349_370], [starbucks, 'starbucks', 349_990]]) {
+    assert.equal(manifest.room_asset.url, `/assets-demo/room-${name}-atlas.sog`);
+    assert.equal(manifest.room_asset.format, 'sog');
+    assert.equal(manifest.room_asset.gaussian_count, count);
+    assert.deepEqual(manifest.spawn_point, [0, 1.55, 2]);
+  }
+  const bundled = [jefes, shu, starbucks].flatMap(({ menu_items }) => menu_items);
+  assert.deepEqual([jefes, shu, starbucks].map(({ menu_items }) => menu_items.length), [6, 29, 27]);
+  assert.equal(new Set(bundled.map(({ dish }) => dish.id)).size, 62);
+  assert.equal(new Set(bundled.map(({ dish_asset }) => dish_asset.url)).size, 62);
+  assert.ok(bundled.every(({ dish_asset }) =>
+    dish_asset.format === 'sog' && dish_asset.scale_status === 'approximate' &&
+    dish_asset.gaussian_count >= 59_000 && dish_asset.gaussian_count <= 60_000));
+  assert.ok([...jefes.menu_items, ...starbucks.menu_items].every(({ dish }) => dish.price === null));
+  assert.deepEqual(shu.menu_items.map(({ dish }) => dish.price), [
+    15, 12.5, 15, 18, 13, 16, 17, 13, 24, 21, 12, 9, 15, 13, 10, 14, 9.5, 8, 7, 5, 14.5, 4.5, 15.5, 4, 6.5, 12, 7, 6, 6.5,
+  ]);
+  const preview = (id) => {
+    const { dish, dish_asset } = bundled.find(({ dish }) => dish.id === id);
+    return [dish.name, dish.price, dish_asset.gaussian_count, dish_asset.plate_diameter_m];
+  };
+  assert.deepEqual(preview('kenmore-jefes-tacos'), ['Tacos (Three)', null, 60_000, 0.22]);
+  assert.deepEqual(preview('kenmore-jefes-burrito'), ['Carnitas Burrito', null, 60_000, 0.22]);
+  assert.deepEqual(preview('kenmore-shudaxia-hotpot'), ['Taiji Shrimp Paste 2.0', 15, 59_998, 0.32]);
+  assert.deepEqual(preview('kenmore-shudaxia-beef'), ['Premium Fatty Beef Slice', 12.5, 59_938, 0.26]);
+  assert.deepEqual(preview('bu-starbucks-macchiato'), ['Iced Caramel Macchiato', null, 60_000, 0.095]);
+  assert.deepEqual(preview('bu-starbucks-croissant'), ['Butter Croissant', null, 60_000, 0.16]);
+  const catalog = await server.request('/api/restaurants');
+  for (const manifest of [jefes, shu, starbucks]) {
+    const listing = catalog.find(({ id }) => id === manifest.restaurant.id);
+    assert.deepEqual(listing.dishes.map(({ id, name, price }) => [id, name, price]),
+      manifest.menu_items.map(({ dish }) => [dish.id, dish.name, dish.price]));
   }
 });
 
@@ -526,7 +611,7 @@ test('MBTA rate-limit fallback keeps all seven subway routes and labels estimate
   assert(Number.isFinite(Date.parse(trip.last_train_time)));
 });
 
-test('gpt-live-1.1 session broker validates config, forwards full toolset, and retries without standby if rejected', async (t) => {
+test('gpt-live-1.1 broker preserves SDP, forwards the app tools and ballad, and retries if standby is rejected', async (t) => {
   const unconfigured = await setup(t, { openaiKey: undefined });
   await unconfigured.start();
   const statusOff = await unconfigured.request('/api/live/status');
@@ -540,49 +625,76 @@ test('gpt-live-1.1 session broker validates config, forwards full toolset, and r
     openaiBaseUrl: 'https://openai.example/v1',
     openaiLiveModel: 'gpt-live-1.1',
     openaiLiveBackendModel: 'gpt-6-luna',
-    openaiLiveVoice: 'marin',
+    openaiLiveVoice: 'ballad',
   });
-  await server.start();
-  const statusOn = await server.request('/api/live/status');
-  assert.equal(statusOn.configured, true);
-
-  await server.request('/api/live/sessions', { body: { sdp: 'not-sdp' }, status: 400 });
-
   const originalFetch = globalThis.fetch;
   const requests = [];
+  const offer = 'v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=offer\r\na=candidate:example\r\n';
+  const answer = 'v=0\r\no=- 2 2 IN IP4 127.0.0.1\r\ns=answer\r\n';
   t.mock.method(globalThis, 'fetch', async (input, init) => {
     const url = new URL(input);
     if (url.hostname !== 'openai.example') return originalFetch(input, init);
-    assert.equal(url.pathname, '/v1/live/sessions');
     assert.equal(init.method, 'POST');
     assert.equal(init.headers.Authorization, 'Bearer test-openai-live');
     const body = JSON.parse(init.body);
+    if (url.pathname === '/v1/realtime/client_secrets') {
+      assert.equal(body.session.model, 'gpt-realtime');
+      assert.equal(body.session.audio.output.voice, 'ballad');
+      return Response.json({ value: 'realtime_test_secret', expires_at: 1_900_000_000 });
+    }
+    assert.equal(url.pathname, '/v1/live/sessions');
     requests.push(body);
+    assert.equal(body.transport.sdp, offer);
+    assert.equal(body.transport.type, 'webrtc');
+    assert.equal(body.session.model, 'gpt-live-1.1');
+    assert.equal(body.session.audio.output.voice, 'ballad');
     if (requests.length === 1) {
-      assert.equal(body.session.model, 'gpt-live-1.1');
-      assert.equal(body.session.audio.output.voice, 'quartz');
       assert.equal(body.session.idle_timeout_s, 30);
+      assert.deepEqual(body.session.wake_policy, { type: 'speech' });
+      assert.match(body.session.instructions, /Received Pronunciation/);
       assert.equal(body.session.delegation.type, 'responses');
       assert.equal(body.session.delegation.responses.model, 'gpt-6-luna');
-      const toolNames = body.session.delegation.responses.tools.map((tool) => tool.name);
-      for (const expected of ['open_place', 'show_menu', 'open_dish', 'highlight_map_stops', 'highlight_station_places', 'set_filters', 'control_camera', 'control_ui']) {
-        assert(toolNames.includes(expected), `Missing tool ${expected}`);
+      const { tools, instructions } = body.session.delegation.responses;
+      assert.deepEqual(tools.map(({ name }) => name), [
+        'list_places', 'set_filters', 'focus_stop', 'open_venue', 'open_dish', 'navigate_scene',
+        'get_next_trains', 'set_will_we_fit', 'get_place_details', 'compare_places', 'show_review_card', 'dismiss_review_card',
+        'get_current_view',
+      ]);
+      assert.deepEqual(tools.find(({ name }) => name === 'get_current_view').parameters, {
+        type: 'object', properties: {}, required: [], additionalProperties: false,
+      });
+      assert.equal(tools.find(({ name }) => name === 'show_review_card').parameters.properties.sections.items.anyOf.length, 4);
+      for (const expected of ['Scene: map | Open clipboards: []', 'PLACES & MENU ITEMS:', 'comparePlaceId', 'up to four clipboards', 'A null dish price', 'call get_current_view first']) {
+        assert.ok(instructions.includes(expected), `Missing instruction: ${expected}`);
+      }
+      const catalogDishes = demoPlaces.flatMap(({ dishes }) => dishes);
+      assert.equal(catalogDishes.length, 65);
+      for (const dish of catalogDishes) {
+        assert.ok(instructions.includes(`${dish.id} "${dish.name}" ${formatDishPrice(dish.price)} [3D]`), `Missing dish and price: ${dish.id}`);
       }
       return Response.json({ error: { message: 'Unknown parameter: idle_timeout_s' } }, { status: 400 });
     }
-    assert.equal(body.session.idle_timeout_s, undefined);
-    assert.equal(body.transport.type, 'webrtc');
+    if (requests.length === 2) assert.equal(body.session.idle_timeout_s, undefined);
     return Response.json({
       session: { id: 'live_test_123' },
-      transport: { type: 'webrtc', sdp: 'v=0\r\no=- 2 2 IN IP4 127.0.0.1\r\ns=answer\r\n' },
+      transport: { type: 'webrtc', sdp: answer },
     }, { status: 201 });
+  });
+
+  await server.start();
+  const statusOn = await server.request('/api/live/status');
+  assert.equal(statusOn.configured, true);
+  assert.equal(statusOn.voice, 'ballad');
+  assert.ok(['ballad', 'cedar', 'ash', 'marin'].every((voice) => statusOn.voices.includes(voice)));
+  await server.request('/api/live/sessions', { body: { sdp: 'not-sdp' }, status: 400 });
+  assert.deepEqual(await server.request('/api/realtime/session', { method: 'POST' }), {
+    client_secret: 'realtime_test_secret', expires_at: 1_900_000_000, model: 'gpt-realtime',
   });
 
   const created = await server.request('/api/live/sessions', {
     body: {
-      sdp: 'v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=offer\r\n',
-      voice: 'quartz',
-      context: 'Scene: map',
+      sdp: offer.replaceAll('\r\n', '\n').trimEnd(),
+      context: 'Scene: map | Open clipboards: []',
     },
     status: 201,
   });
@@ -590,6 +702,8 @@ test('gpt-live-1.1 session broker validates config, forwards full toolset, and r
   assert.equal(created.session_id, 'live_test_123');
   assert.equal(created.model, 'gpt-live-1.1');
   assert.equal(created.backend_model, 'gpt-6-luna');
-  assert.equal(created.voice, 'quartz');
-  assert(created.sdp.includes('s=answer'));
+  assert.equal(created.voice, 'ballad');
+  assert.equal(created.sdp, answer);
+  await server.request('/api/live/sessions', { body: { sdp: offer }, status: 201 });
+  assert.equal(requests.length, 3);
 });

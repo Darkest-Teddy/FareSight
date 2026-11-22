@@ -1,5 +1,5 @@
 import {
-  buildMbtaTripPlannerUrl, MBTA_SUBWAY_FARE, ROUTE_COLORS,
+  buildMbtaTripPlannerUrl, formatDishPrice, MBTA_SUBWAY_FARE, ROUTE_COLORS,
   type Asset, type Dish, type MbtaSource, type Place, type RestaurantManifest, type Stop,
 } from '@faresight/shared';
 import { api, type Alert, type Prediction, type Trip } from '../api/client';
@@ -352,12 +352,14 @@ export class PlaceDrawer {
     const group = filters.groupSize;
     const roomPrice = !dish && place.rooms.find((room) => /hour/i.test(room.price_unit));
     const price = dish?.price ?? place.typical_price;
+    const spendLabel = dish && dish.price == null ? 'Typical venue spend (estimate)'
+      : dish || place.category === 'restaurant' ? 'Food' : 'Typical venue spend';
     const fare = trip.data?.fare ?? (filters.startStopId === place.stop_id ? 0 : MBTA_SUBWAY_FARE);
     const roundTrip = trip.data?.round_trip_fare ?? fare * 2;
     const food = roomPrice ? roomPrice.price / group : price;
     node.append(element('p', 'cost-total price', `${money(food + fare)} ${group > 1 ? 'per person' : 'one way'}`));
     node.append(breakdown([
-      [roomPrice ? 'Room hire' : dish || place.category === 'restaurant' ? 'Food' : 'Typical venue spend', roomPrice ? `${money(roomPrice.price)} / hour` : money(price)],
+      [roomPrice ? 'Room hire' : spendLabel, roomPrice ? `${money(roomPrice.price)} / hour` : money(price)],
       ['T fare, one way', money(fare)],
       ['T fare, round trip', money(roundTrip)],
       [group > 1 ? 'Round trip per person' : 'Total with round trip', money(food + roundTrip)],
@@ -424,32 +426,35 @@ export class PlaceDrawer {
       if (dish) {
         const active = menu.find((entry) => entry.dish.id === dish.id)?.dish_asset;
         if (active) badgeAsset(active, node);
+        node.append(element('p', 'price', formatDishPrice(dish.price)));
         if (dish.portion_note) node.append(element('p', '', dish.portion_note));
 
         const compare = element('select');
         compare.dataset.control = 'compare';
         compare.append(option('', 'One dish'));
-        for (const entry of menu) {
-          if (entry.dish.id !== dish.id && isSplat(entry.dish_asset)) compare.append(option(entry.dish.id, entry.dish.name));
-        }
-        const others = element('optgroup');
-        others.label = 'Other Boston restaurants';
+        const addVenue = (venue: Place, dishes: readonly Dish[]) => {
+          if (!dishes.length) return;
+          const group = element('optgroup');
+          group.label = venue.name;
+          for (const entry of dishes) {
+            const choice = option(entry.id, entry.name);
+            choice.dataset.placeId = venue.id;
+            group.append(choice);
+          }
+          compare.append(group);
+        };
+        addVenue(place, menu.filter((entry) => entry.dish.id !== dish.id && isSplat(entry.dish_asset)).map((entry) => entry.dish));
         for (const venue of data.places) {
           if (venue.id === place.id) continue;
-          for (const entry of venue.dishes.filter(hasDishPreview)) {
-            const choice = option(entry.id, `${venue.name} — ${entry.name}`);
-            choice.dataset.placeId = venue.id;
-            others.append(choice);
-          }
+          addVenue(venue, venue.dishes.filter(hasDishPreview));
         }
-        if (others.children.length) compare.append(others);
         compare.value = comparison?.dish.id ?? '';
         compare.disabled = compare.options.length < 2;
         compare.addEventListener('change', () => this.actions.openDish(dish, compare.value, compare.selectedOptions[0]?.dataset.placeId));
         node.append(field('Compare side-by-side', compare));
         if (compare.disabled) node.append(message('No other published 3D dish previews are available.'));
         if (comparison) {
-          node.append(element('p', '', `${comparison.dish.name} · ${comparison.place.name}`));
+          node.append(element('p', '', `${comparison.dish.name} · ${comparison.place.name} · ${formatDishPrice(comparison.dish.price)}`));
           badgeAsset(comparison.asset, node);
           if (comparison.offline) node.append(message('The comparison uses a bundled preview.'));
           if (active?.scale_status !== 'measured' || comparison.asset.scale_status !== 'measured') {
@@ -515,7 +520,7 @@ export class PlaceDrawer {
         const label = element('div');
         const name = element('strong', '', entry.dish.name);
         if (hasDishPreview(entry.dish) || isSplat(entry.dish_asset)) name.append(previewBadge());
-        label.append(name, element('p', 'price', money(entry.dish.price)));
+        label.append(name, element('p', 'price', formatDishPrice(entry.dish.price)));
         row.append(label);
         if (entry.dish_asset) row.append(button('View dish on table', () => this.actions.openDish(entry.dish)));
         else row.append(element('span', 'muted', 'No 3D preview'));

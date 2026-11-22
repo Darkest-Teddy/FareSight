@@ -150,10 +150,9 @@ export const api = {
   moderate: (type: ModerationKind, id: string, action: 'approve' | 'reject', passcode: string) =>
     request<unknown>('/admin/moderation', { type, id, action }, passcode),
   createPair: () => request<{ code: string }>('/pairing/create', {}),
-  realtimeSession: (signal: AbortSignal) =>
-    request<{ client_secret: string; expires_at: number; model: string }>('/realtime/session', {}, undefined, signal),
   liveStatus: () => request<LiveStatusResponse>('/live/status'),
-  createLiveSession: (data: LiveSessionRequest) => request<LiveSessionResponse>('/live/sessions', data),
+  createLiveSession: (data: LiveSessionRequest, signal?: AbortSignal) =>
+    request<LiveSessionResponse>('/live/sessions', data, undefined, signal),
   logs: (logs: string[]) => request<unknown>('/debug/logs', { logs }),
 };
 
