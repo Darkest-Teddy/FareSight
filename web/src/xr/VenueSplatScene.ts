@@ -1,7 +1,7 @@
 import * as pc from 'playcanvas';
 import type { XRAssetData, XRManifestData, XRPlaceData, XRRoomData } from './bridgeTypes';
 import { isSplat, measuredRoomForAsset, menuDishes } from '../data/preview3D';
-import { PhysicalPlaque } from './CanvasPanel3D';
+import { CanvasSurface, facePlane, PhysicalPlaque } from './CanvasPanel3D';
 import { jarvisPoints, type JarvisReveal } from './JarvisReveal';
 import { PhysicalMenuBook } from './PhysicalMenuBook';
 import type { SplatLoader } from './SplatLoader';
@@ -16,6 +16,8 @@ export class VenueSplatScene {
   readonly menu: PhysicalMenuBook;
   private cardsRoot: pc.Entity;
   private galleryRoot: pc.Entity;
+  private soonRoot: pc.Entity;
+  private soonText: CanvasSurface;
   private peopleRoot: pc.Entity;
   private fitPanel: PhysicalPlaque;
   private plaqueModel: Promise<pc.ContainerResource | null>;
@@ -50,6 +52,17 @@ export class VenueSplatScene {
     this.plaqueModel = models.load(`${assetBase}room-plaque-stand.glb`);
     this.fitPanel = this.makePlaque(this.peopleRoot, 'Floor-space estimate', 0.85, 0.205);
     this.menu = new PhysicalMenuBook(device, this.cardsRoot, models, reveal, selectDish);
+    // A place with nothing captured yet gets a few words hanging in the empty room: no sign, no stand.
+    this.soonRoot = child(this.cardsRoot, 'Coming soon');
+    this.soonText = new CanvasSurface(device, 1024, 512);
+    const words = this.soonText.material;
+    words.opacityMap = this.soonText.texture;
+    words.opacityMapChannel = 'a';
+    words.blendType = pc.BLEND_NORMAL;
+    words.depthWrite = false;
+    words.update();
+    facePlane(this.soonRoot, 'Coming soon text', this.soonText, [0, 0, 0], 1, 0.5);
+    this.soonRoot.enabled = false;
     this.peopleRoot.enabled = false;
     this.galleryRoot.enabled = false;
   }
@@ -95,6 +108,7 @@ export class VenueSplatScene {
     this.positionCards();
     if (contentChanged) this.buildGallery();
     this.updateMenu();
+    this.updateSoon();
     this.updateGallery();
     this.updateFit();
 
@@ -110,11 +124,37 @@ export class VenueSplatScene {
     if (this.cardsVisible === showCards) return;
     this.cardsVisible = showCards;
     this.updateMenu();
+    this.updateSoon();
     this.updateGallery();
     this.updateFit();
   }
 
-  /** An empty menu says nothing, so a place that is still coming soon is left with its one sign. */
+  private updateSoon(): void {
+    this.soonRoot.enabled = this.cardsVisible && this.comingSoon;
+  }
+
+  private drawSoon(name: string): void {
+    this.soonText.draw(name, (ctx, width) => {
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = '#725b43';
+      ctx.font = '600 30px Switzer, system-ui, sans-serif';
+      ctx.letterSpacing = '9px';
+      ctx.fillText('COMING SOON', width / 2, 150);
+      ctx.letterSpacing = '0px';
+      ctx.fillStyle = '#221b15';
+      ctx.font = '700 84px Georgia, serif';
+      // A long name is set smaller so it stays on one line.
+      const size = Math.min(84, 84 * (width - 80) / ctx.measureText(name).width);
+      ctx.font = `700 ${size}px Georgia, serif`;
+      ctx.fillText(name, width / 2, 206);
+      ctx.fillStyle = '#725b43';
+      ctx.font = 'italic 34px Georgia, serif';
+      ctx.fillText('Add photos in Vantage Contribute', width / 2, 326);
+    });
+  }
+
+  /** An empty menu says nothing, so a place that is still coming soon is left with its few words. */
   private updateMenu(): void {
     const visible = this.cardsVisible && !this.comingSoon;
     if (this.menuVisible === visible) return;
@@ -153,6 +193,7 @@ export class VenueSplatScene {
     this.comingSoon = false;
     this.fitKey = '';
     this.setPresentation(false, false);
+    this.updateSoon();
     for (const entity of [this.menu.entity, this.galleryRoot, this.peopleRoot]) {
       this.reveal.finish(entity, false);
     }
@@ -166,6 +207,8 @@ export class VenueSplatScene {
     const [x, y, z] = this.spawn;
     this.fitPanel.entity.setLocalPosition(x - 0.33, y - 0.25, z - 1.12);
     this.galleryRoot.setLocalPosition(x, y - 0.09, z);
+    // In line with where the desktop camera looks, and just below eye level in a headset.
+    this.soonRoot.setLocalPosition(x + 0.16, y - 0.23, z - 1.65);
     for (const panel of this.gallery) {
       const stand = panel.entity.findByName('Exhibit stand');
       if (stand instanceof pc.Entity) this.groundStand(stand);
@@ -177,7 +220,11 @@ export class VenueSplatScene {
     this.clearGallery();
     const place = this.place;
     if (!place) return;
-    const photos = this.comingSoon ? [] : place.photos.slice(0, 5);
+    if (this.comingSoon) {
+      this.drawSoon(place.name);
+      return;
+    }
+    const photos = place.photos.slice(0, 5);
     const radius = 1.65;
     const count = Math.max(photos.length, 1);
     this.gallery = Array.from({ length: count }, (_, index) => {
@@ -186,13 +233,7 @@ export class VenueSplatScene {
         [Math.sin(angle) * radius, 0, -Math.cos(angle) * radius]);
       panel.entity.setLocalEulerAngles(0, -angle * pc.math.RAD_TO_DEG, 0);
       this.mountPlaque(panel);
-      if (this.comingSoon) {
-        panel.setText([
-          { text: place.name, size: 85, weight: 700, wrap: true },
-          { text: 'COMING SOON', color: '#725b43', size: 46 },
-          { text: 'Add photos in Vantage Contribute.', size: 52, wrap: true },
-        ]);
-      } else if (!photos[index]) {
+      if (!photos[index]) {
         panel.setText([
           { text: place.name, size: 85, weight: 700, wrap: true },
           { text: place.category.replaceAll('_', ' ').toUpperCase(), color: '#725b43', size: 46 },
@@ -295,6 +336,7 @@ export class VenueSplatScene {
   destroy(): void {
     this.clear();
     this.fitPanel.destroy();
+    this.soonText.destroy();
     this.menu.destroy();
     this.root.destroy();
     this.standMaterial.destroy();
