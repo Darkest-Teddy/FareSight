@@ -24,7 +24,8 @@ const STEP_JOLT = 1.4;
 const STEP_GAP_MS = 250;
 const WALK_WINDOW_MS = 2500;
 const WALK_STEPS = 3;
-const AMBER = '255 181 71';
+// The aiming ring while the phone is moving or tilted. Far enough from the sunflower dots to tell apart.
+const AMBER = '255 122 89';
 const MOTION_TIMEOUT_MS = 400;
 const POP_MS = 420;
 // Long-side field of view the dots are drawn with. It is wider than the camera's own (about 64°) on purpose:
@@ -32,7 +33,8 @@ const POP_MS = 420;
 // A dot still reaches the aiming ring exactly when the camera points at it.
 const OVERLAY_FOV = 105;
 const RAD = Math.PI / 180;
-const ACCENT = '79 227 255';
+// Sunflower, the main app's highlight (--sun in web/src/styles/tokens.css).
+const ACCENT = '255 201 60';
 
 interface Card {
   title: string;

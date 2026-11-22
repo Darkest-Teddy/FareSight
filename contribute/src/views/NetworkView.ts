@@ -3,23 +3,22 @@ import { api } from '../api';
 import { catalog } from '../catalog';
 import { coverage, networkData, type NetworkStation } from '../data';
 import { button, el, haptic, svg } from '../dom';
+import { LEAD_FROM, placeLabels } from '../labelLayout';
 import { MapCanvas, type Box } from '../MapCanvas';
 
 type FocalStation = NetworkStation & { stopId: string; code: string };
+interface StopLabel { station: FocalStation; node: HTMLElement; tag: HTMLElement; lead: HTMLElement }
 
 // Model units are thousandths of the sculpture's own units.
 const UNIT = 1000;
 const DIVE_ZOOM = 3.4;
 const TRAIN_POLL_MS = 10_000;
-// Map units kept clear on each side of the outermost stops for their name labels.
-const LABEL_ROOM = 185;
-// Hand-placed so the station labels never sit on a line or on each other.
-const labelSide: Record<string, 'top' | 'bottom' | 'left' | 'right'> = {
-  'place-brico': 'top', 'place-bucen': 'bottom', 'place-kencl': 'top', 'place-harsq': 'right', 'place-chncl': 'bottom',
-  'place-haecl': 'top', 'place-coecl': 'bottom', 'place-aqucl': 'right', 'place-cntsq': 'top', 'place-cool': 'bottom',
-};
-// A few well-known stations label the rest of the network for orientation.
-const landmarks: Record<string, 'above' | 'below'> = { 'Park Street': 'above', 'North Station': 'above' };
+// Screen pixels kept clear beside the outermost stops, so their nodes stay whole.
+const NODE_ROOM = 34;
+// Labels keep this far from the edge of the map.
+const LABEL_MARGIN = 8;
+// A label standing further than this from its node is too far to read as that stop's.
+const FAR_LABEL = 90;
 let introPlayed = false;
 
 function nearestOnLine(points: number[], x: number, y: number) {
@@ -47,12 +46,11 @@ export class NetworkView {
   private readonly focal: FocalStation[];
   private readonly nodes = new Map<string, HTMLButtonElement>();
   private readonly counts = new Map<string, HTMLElement>();
+  private readonly labels: StopLabel[] = [];
+  /** The screen size and label texts the labels were last placed for. */
+  private placedFor = '';
   private readonly trains = new Map<string, SVGGElement>();
   private readonly trainLayer = svg('g', { class: 'net-trains' });
-  /** How far the whole map is along: places already in 3D out of all of them. */
-  private readonly progress = el('p', 'progress-pill');
-  private readonly progressText = el('span');
-  private readonly progressArc = svg('circle', { cx: 12, cy: 12, r: 9, pathLength: 1, class: 'count-arc' });
   private readonly unsubscribe: () => void;
   private trainTimer = 0;
   private leaving = false;
@@ -66,24 +64,22 @@ export class NetworkView {
     const [x, y, w, h] = networkData.bounds;
     const xs = this.focal.map((station) => station.x);
     const ys = networkData.lines.flatMap((line) => line.points.filter((_, index) => index % 2 === 1));
-    // As tall as the tracks, and wide enough for the focal stops and their labels. The ground runs on past this box.
+    // As tall as the tracks and as wide as the focal stops. The ground runs on past this box.
     const home: Box = {
-      x: Math.min(...xs) - LABEL_ROOM, y: Math.min(...ys),
-      w: Math.max(...xs) - Math.min(...xs) + LABEL_ROOM * 2, h: Math.max(...ys) - Math.min(...ys),
+      x: Math.min(...xs), y: Math.min(...ys),
+      w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys),
     };
     this.map = new MapCanvas({
-      bounds: { x, y, w, h }, home, fixed: true, maxZoom: 4.5,
+      bounds: { x, y, w, h }, home, padding: NODE_ROOM, fixed: true, maxZoom: 4.5,
       label: `Map of the MBTA subway lines through Boston. ${this.focal.length} stops are open for contributions.`,
     });
+    // Runs when the map first has a size and whenever that size changes.
+    this.map.onView = () => this.placeLabels();
     this.draw();
     this.focal.forEach((station, index) => this.addNode(station, index));
 
     const mapHost = el('div', 'network-map');
-    const ring = svg('svg', { viewBox: '0 0 24 24', class: 'count-ring', 'aria-hidden': 'true' });
-    ring.append(svg('circle', { cx: 12, cy: 12, r: 9, class: 'count-track' }), this.progressArc);
-    this.progress.hidden = true;
-    this.progress.append(ring, this.progressText);
-    mapHost.append(this.map.root, this.progress);
+    mapHost.append(this.map.root);
 
     this.root.append(mapHost);
 
@@ -135,19 +131,19 @@ export class NetworkView {
         if (i % 2 === 0) pairs.push(`${value} ${line.points[i + 1]}`);
         return pairs;
       }, []).join('L');
-      const group = svg('g', { class: 'net-line', style: `--i:${index}` });
-      const tube = svg('path', { d, class: 'line-tube', stroke: line.tube, pathLength: 1 });
-      const core = svg('path', { d, class: 'line-core', stroke: line.core, pathLength: 1 });
+      const group = svg('g', { class: 'net-line', style: `--i:${index};--line:${line.color}` });
+      // A printed-map line: the official colour over a darker keyline.
+      const casing = svg('path', { d, class: 'line-casing', pathLength: 1 });
+      const tube = svg('path', { d, class: 'line-tube', stroke: line.color, pathLength: 1 });
       const title = svg('title');
       title.textContent = line.name;
       // A glint that keeps running down the line. It is ambient light, not a train.
       const flow = svg('path', { d, class: 'line-flow', pathLength: 1 });
-      group.append(title, svg('path', { d, class: 'line-casing' }), tube, core, flow);
+      group.append(title, casing, tube, flow);
       lines.append(group);
     });
 
     const stations = svg('g', { class: 'net-stations' });
-    const labels = svg('g', { class: 'net-labels' });
     [...networkData.stations].sort((a, b) => a.x - b.x).forEach((station, index) => {
       if (station.stopId) return;
       const interchange = station.colors.length > 1;
@@ -159,19 +155,13 @@ export class NetworkView {
       title.textContent = station.name;
       dot.append(title);
       stations.append(dot);
-      const side = landmarks[station.name];
-      if (!side) return;
-      const label = svg('text', { x: station.x, y: station.y + (side === 'above' ? -17 : 30), class: 'net-label', 'text-anchor': 'middle' });
-      label.textContent = station.name;
-      labels.append(label);
     });
 
-    canvas.append(defs, ground, lines, stations, labels, this.trainLayer);
+    canvas.append(defs, ground, lines, stations, this.trainLayer);
   }
 
   private addNode(station: FocalStation, index: number) {
     const node = button('', () => void this.dive(station), 'stop-node');
-    node.dataset.side = labelSide[station.stopId] ?? 'top';
     node.style.setProperty('--line', station.colors[0]);
     node.style.setProperty('--i', String(index));
     const ring = el('span', 'stop-ring');
@@ -179,12 +169,70 @@ export class NetworkView {
     const tag = el('span', 'stop-tag');
     const count = el('small');
     tag.append(el('strong', '', station.name), count);
-    node.append(el('span', 'stop-halo'), ring, tag);
+    // The line that ties a label back to its stop when it has to stand off. The ring covers its start.
+    const lead = el('span', 'stop-lead');
+    lead.hidden = true;
+    node.append(el('span', 'stop-halo'), lead, ring, tag);
     this.nodes.set(station.stopId, node);
     this.counts.set(station.stopId, count);
+    this.labels.push({ station, node, tag, lead });
     const anchor = el('div');
     anchor.append(node);
     this.map.addMarker(anchor, station.x, station.y);
+  }
+
+  /**
+   * Finds every label a spot where it can be read on this screen. The stops are too close together
+   * for one fixed side each, and the map cannot be zoomed by hand, so the home view is the one that counts.
+   */
+  private placeLabels() {
+    const { width, height } = this.map.size;
+    if (!width || !this.alive) return;
+    const placedFor = [width, height, ...this.labels.map(({ tag }) => tag.textContent)].join('|');
+    if (placedFor === this.placedFor) return;
+    const home = this.map.homeView();
+    const acrossAt = (x: number) => (x - home.cx) * home.scale + width / 2;
+    const downAt = (y: number) => (y - home.cy) * home.scale + height / 2;
+    const frame = this.map.root.getBoundingClientRect();
+    // The app's floating bars sit over the map.
+    const blocked = [...document.querySelectorAll('.topbar > *, .tabbar')].map((bar) => {
+      const box = bar.getBoundingClientRect();
+      return { left: box.left - frame.left, top: box.top - frame.top, right: box.right - frame.left, bottom: box.bottom - frame.top };
+    });
+    const tracks = networkData.lines.flatMap((line) => line.points.map((value, index) => index % 2 ? downAt(value) : acrossAt(value)));
+    const arrange = () => {
+      const spots = this.labels.map(({ station, tag }) => ({
+        x: acrossAt(station.x), y: downAt(station.y), w: tag.offsetWidth, h: tag.offsetHeight,
+      }));
+      const places = placeLabels(spots, {
+        radius: this.labels[0].node.offsetWidth / 2,
+        bounds: { left: LABEL_MARGIN, top: LABEL_MARGIN, right: width - LABEL_MARGIN, bottom: height - LABEL_MARGIN },
+        blocked,
+        tracks,
+      });
+      return { spots, places };
+    };
+    this.root.classList.remove('is-tight');
+    let { spots, places } = arrange();
+    // Not on screen yet, so there is nothing to measure.
+    if (spots.some((spot) => !spot.w)) return;
+    this.placedFor = placedFor;
+    // Where two-line labels would end up far from their stops, they drop to the name alone and try again.
+    if (places.some((place) => place.gap > FAR_LABEL)) {
+      this.root.classList.add('is-tight');
+      ({ spots, places } = arrange());
+    }
+    places.forEach(({ dx, dy, gap }, index) => {
+      const { tag, lead } = this.labels[index];
+      const { w, h } = spots[index];
+      tag.style.translate = `${(dx - w / 2).toFixed(1)}px ${(dy - h / 2).toFixed(1)}px`;
+      // The line ends on the point of the label nearest the node.
+      const endX = Math.max(dx - w / 2, Math.min(0, dx + w / 2));
+      const endY = Math.max(dy - h / 2, Math.min(0, dy + h / 2));
+      lead.hidden = gap < LEAD_FROM;
+      lead.style.width = `${Math.hypot(endX, endY).toFixed(1)}px`;
+      lead.style.rotate = `${Math.atan2(endY, endX).toFixed(3)}rad`;
+    });
   }
 
   /** Refreshes the contribution counts on the map labels. */
@@ -203,11 +251,7 @@ export class NetworkView {
         node.setAttribute('aria-label', station.name);
       }
     }
-    const all = this.focal.flatMap((station) => catalog.at(station.stopId));
-    const inThreeD = all.filter((place) => coverage(place).room).length;
-    this.progress.hidden = catalog.status !== 'ready' || !all.length;
-    this.progressText.textContent = inThreeD === all.length ? `All ${all.length} places in 3D` : `${inThreeD} of ${all.length} places in 3D`;
-    this.progressArc.style.strokeDashoffset = String(1 - (all.length ? inThreeD / all.length : 0));
+    this.placeLabels();
   }
 
   /** Zooms into the tapped stop, then hands over to its neighborhood view. */

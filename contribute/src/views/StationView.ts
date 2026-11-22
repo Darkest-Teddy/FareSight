@@ -1,7 +1,7 @@
 import type { Place, Stop } from '@faresight/shared';
 import { catalog } from '../catalog';
-import { categoryLabel, coverage, loadArea, projectToArea, reviewSummary, servesDishes, type AreaData, type AreaLayer } from '../data';
-import { button, el, errorText, haptic, icon, iconButton, svg, type IconName } from '../dom';
+import { categoryLabel, coverage, loadArea, placePhoto, projectToArea, reviewSummary, servesDishes, type AreaData, type AreaLayer } from '../data';
+import { button, el, errorText, haptic, icon, iconButton, svg } from '../dom';
 import { MapCanvas, type Box } from '../MapCanvas';
 import { reviewSheet } from '../ui/ReviewSheet';
 
@@ -213,49 +213,65 @@ export class StationView {
   }
 
   /**
-   * The overview of the selected place, kept to what someone needs before deciding to go in:
-   * what it is, whether its space and its menu are in 3D yet, and one line of what people say.
+   * The overview of the selected place, laid out like a listing card: a photo of it on top, then
+   * what it is, what people say, and whether its space and its menu are in 3D yet.
    */
   private renderOverview() {
     const place = this.places.find((entry) => entry.id === this.selected);
     this.overview.hidden = !place;
     if (!place) return;
     const status = coverage(place);
-    const head = el('header', 'overview-head');
-    const title = el('div', 'overview-title');
-    title.append(el('h2', '', place.name), el('p', '', `${categoryLabel(place)} · ${place.walk_from_stop_m} m from the stop`));
-    head.append(el('span', 'card-number', String(place.pin_index + 1)), title,
+
+    // The photo leads, with the pin's number and the close button over its corners.
+    const media = el('figure', 'overview-photo');
+    const photo = placePhoto(place.id);
+    if (photo) {
+      const image = el('img');
+      image.alt = photo.nearby ? `The area around ${place.name}` : place.name;
+      image.decoding = 'async';
+      // A photo that has gone from its host leaves the plain tile, not a broken image.
+      image.addEventListener('error', () => media.classList.add('is-missing'));
+      image.src = photo.url;
+      const credit = el('a', 'photo-credit', `${photo.credit} · ${photo.license}`);
+      credit.href = photo.page;
+      credit.target = '_blank';
+      credit.rel = 'noopener';
+      credit.setAttribute('aria-label', `Photo by ${photo.credit}, ${photo.license}, on ${photo.provider}`);
+      media.append(image, credit);
+      if (photo.nearby) media.append(el('span', 'photo-tag', 'Area photo'));
+    } else media.classList.add('is-missing');
+    media.append(el('span', 'card-number', String(place.pin_index + 1)),
       iconButton('close', 'Close the overview', () => this.clearSelection(), 'overview-close'));
 
-    const facts = el('ul', 'facts');
-    facts.append(this.fact('room', '3D space', status.room ? 'In 3D' : 'Needs photos', status.room));
-    if (servesDishes(place)) {
-      facts.append(this.fact('dish', 'Menu', status.dishes ? `${status.dishesDone} of ${status.dishes} dishes in 3D` : 'No dishes yet',
-        status.dishes > 0 && status.dishesDone === status.dishes));
-    }
+    const title = el('div', 'overview-title');
+    title.append(el('h2', '', place.name), el('p', '', `${categoryLabel(place)} • ${place.walk_from_stop_m} m from the stop`));
+
+    // What people say: the rating and one line of it, opening the reviews.
     const review = reviewSummary(place);
-    const reviews = button('', () => reviewSheet.open(place), 'fact fact-reviews');
-    const words = el('span', 'fact-text');
-    words.append(
-      el('strong', '', review.rating ? `${review.rating.toFixed(1)} ★ on ${review.source}` : 'Reviews'),
-      el('small', '', review.quote ?? 'No reviews yet. Be the first.'),
-    );
-    reviews.append(icon('star'), words, icon('next'));
-    const row = el('li');
-    row.append(reviews);
-    facts.append(row);
+    const reviews = button('', () => reviewSheet.open(place), 'overview-review');
+    reviews.append(icon('star'),
+      el('strong', '', review.rating ? `${review.rating.toFixed(1)} on ${review.source}` : 'No rating yet'),
+      el('span', '', review.quote ?? 'Be the first to review it.'), icon('next'));
+
+    // Where the place stands in 3D: its space, and its menu where food is served.
+    const progress = el('ul', 'overview-status');
+    progress.append(this.status(status.room, status.room ? 'Space in 3D' : 'Space needs photos'));
+    if (servesDishes(place)) {
+      progress.append(this.status(status.dishes > 0 && status.dishesDone === status.dishes,
+        status.dishes ? `${status.dishesDone} of ${status.dishes} dishes in 3D` : 'No dishes yet'));
+    }
 
     const cta = button('Add photos', () => this.actions.openPlace(place), 'primary overview-cta');
     cta.append(icon('next'));
-    this.overview.replaceChildren(head, el('p', 'overview-about', place.vibe), facts, cta);
+    this.overview.replaceChildren(media, title, reviews, progress, cta);
   }
 
-  private fact(symbol: IconName, label: string, value: string, done: boolean) {
-    const row = el('li', done ? 'fact is-done' : 'fact');
+  private status(done: boolean, label: string) {
+    const item = el('li', done ? 'is-done' : '');
     const mark = el('i', 'fact-mark');
     mark.append(icon(done ? 'check' : 'camera'));
-    row.append(icon(symbol), el('span', 'fact-label', label), el('b', '', value), mark);
-    return row;
+    item.append(mark, label);
+    return item;
   }
 
   /**
