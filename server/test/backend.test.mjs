@@ -93,12 +93,21 @@ test('the hosted web app and API share an origin', async (t) => {
   await mkdir(webRoot);
   await writeFile(join(webRoot, 'index.html'), '<h1>App</h1>');
   await writeFile(join(webRoot, 'intro.html'), '<h1>Intro</h1>');
-  await server.start({ webRoot, worker: false });
+  const contributeRoot = join(server.dir, 'contribute');
+  await mkdir(contributeRoot);
+  await writeFile(join(contributeRoot, 'index.html'), '<h1>Contribute</h1>');
+  await server.start({ webRoot, contributeRoot, worker: false });
 
   for (const [path, html] of [['/', '<h1>App</h1>'], ['/intro', '<h1>Intro</h1>'], ['/intro.html', '<h1>Intro</h1>']]) {
     const response = await fetch(server.origin() + path);
     assert.equal(response.status, 200, path);
     assert.equal(await response.text(), html);
+  }
+  for (const path of ['/contribute', '/contribute/', '/contribute/index.html']) {
+    const response = await fetch(server.origin() + path);
+    assert.equal(response.status, 200, path);
+    assert.equal(new URL(response.url).pathname, path === '/contribute' ? '/contribute/' : path);
+    assert.equal(await response.text(), '<h1>Contribute</h1>');
   }
   assert.equal((await server.request('/api/health')).status, 'ok');
   await server.request('/api/admin/moderation', { passcode: false, status: 401 });

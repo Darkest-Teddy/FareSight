@@ -25,7 +25,7 @@ import { startCaptureSync } from './services/captureSync.ts';
 import { startCaptureBridge } from './worker/captureBridge.ts';
 import { startJobWorker } from './worker/jobWorker.ts';
 
-export async function createApp(config: Config = getConfig(), options: { logger?: boolean; worker?: boolean; webRoot?: string } = {}) {
+export async function createApp(config: Config = getConfig(), options: { logger?: boolean; worker?: boolean; webRoot?: string; contributeRoot?: string } = {}) {
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 1024 * 1024 });
   mkdirSync(config.uploads, { recursive: true });
   mkdirSync(config.outputs, { recursive: true });
@@ -68,6 +68,11 @@ export async function createApp(config: Config = getConfig(), options: { logger?
     const { webRoot } = options;
     await app.register(staticFiles, { root: webRoot, decorateReply: false });
     app.get('/intro', async (_request, reply) => reply.sendFile('intro.html', webRoot));
+  }
+  // Vantage Contribute shares the origin, under its own folder. The web pages send phones here.
+  if (options.contributeRoot) {
+    await app.register(staticFiles, { root: options.contributeRoot, prefix: '/contribute/', decorateReply: false });
+    app.get('/contribute', async (_request, reply) => reply.redirect('/contribute/'));
   }
 
   app.get<{ Params: { file: string } }>('/storage/uploads/:file', { onRequest: guards.uploadFile }, async ({ params }, reply) => {

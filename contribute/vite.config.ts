@@ -17,6 +17,8 @@ const https = certDir ? { key: readFileSync(certDir + 'key.pem'), cert: readFile
 const allowedHosts = ['.localhost', ...(process.env.CONTRIBUTE_HOST ? [process.env.CONTRIBUTE_HOST] : [])];
 
 export default defineConfig({
+  // Relative, so one build works on its own subdomain and in a folder of the main site (/contribute/).
+  base: './',
   plugins: [seoMetadata('VITE_CONTRIBUTE_URL', loadEnv)],
   resolve: { alias: { '@faresight/shared': fileURLToPath(new URL('../shared/src/index.ts', import.meta.url)) } },
   // The http and https dev servers run side by side, so each keeps its own cache.
