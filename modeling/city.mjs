@@ -13,6 +13,21 @@ import { face, norm, rng, sub } from './geometry.mjs';
 
 const blockGap = 0.009;
 
+/**
+ * Nothing is built within this distance of either end of a line, measured along the track.
+ *
+ * The MBTA runs out of the city at both ends -- the B branch finishes at Boston College, the Red
+ * Line at Alewife and Braintree -- and those outer stretches are low-rise residential and
+ * parkland, not the dense blocks found downtown. Building right to the end of every line made the
+ * map read as uniformly urban, which Boston is not.
+ *
+ * 0.18 units is about two and a half average stop gaps.
+ */
+const endClear = 0.18;
+
+/** Density then ramps back in over this much more track, so the city fades in rather than starts. */
+const endFade = 0.22;
+
 /** Where Boston's character changes, in sculpture coordinates, with the buildings each favours. */
 const districts = [
   {
@@ -448,15 +463,35 @@ export function cityBlocks(surface, lines, slabTop) {
   let count = 0;
   for (const line of lines) {
     const pts = line.points;
-    for (let i = 2; i < pts.length - 2; i += 2) {
+    // Cumulative distance along the track, so placement can tell how near a line's end it is.
+    const along = [0];
+    for (let i = 1; i < pts.length; i++)
+      along[i] = along[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][2] - pts[i - 1][2]);
+    const span = along[pts.length - 1];
+    // Capped at a share of the line, so a short one is not swallowed whole. The Blue Line runs
+    // only 0.417 units here and a flat 0.18 off each end left just 14% of it built, which is
+    // wrong: the stretch it covers is downtown and East Boston, some of the densest ground on
+    // the map. The long radial branches are unaffected and keep the full clearance.
+    const clear = Math.min(endClear, span * 0.3);
+
+    // Every sample, not every other one. The inner band wants to read as a continuous street
+    // wall along the track; sampling at half the rate left visible gaps in it.
+    for (let i = 2; i < pts.length - 2; i += 1) {
+      // How far this sample is from whichever end of the line is nearer.
+      const fromEnd = Math.min(along[i], span - along[i]);
+      if (fromEnd < clear) continue;
+      // Ramps 0 to 1 across the fade stretch just inside the cleared ends.
+      const reached = Math.min(1, (fromEnd - clear) / endFade);
+
       const tangent = norm(sub(pts[i + 1], pts[i - 1]));
       const side = [-tangent[2], 0, tangent[0]];
       for (const hand of [-1, 1])
         for (const row of [0, 1, 2, 3]) {
-          // Four bands out from each line rather than two: the map read as a thin ribbon of
-          // buildings in a large empty frame, which is the thing that felt awkward on a wide
-          // screen. Outer bands are progressively sparser so it thins rather than tiles.
-          if (random() < [0.34, 0.56, 0.72, 0.82][row]) continue;
+          // Four bands out from the line, each markedly sparser than the one inside it, so blocks
+          // crowd the track and give out well before the edge of the map rather than tiling it.
+          const band = [0.18, 0.5, 0.76, 0.9][row];
+          // Near a line's end even the inner band is thin, and the outer ones never arrive.
+          if (random() > (1 - band) * reached) continue;
           const probe = [
             pts[i][0] + side[0] * 0.04 * hand,
             pts[i][2] + side[2] * 0.04 * hand,
