@@ -108,6 +108,8 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private manualPlacement = new Set<SurfaceScene>();
   private resizeObserver?: ResizeObserver;
   private insetLeft = 0;
+  private insetTarget = 0;
+  private insetFrame = 0;
   private picker = new ScenePicker();
   private ray = new pc.Ray();
   private rayEnd = new pc.Vec3();
@@ -278,10 +280,17 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     const device = this.app.graphicsDevice;
     device.maxPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
     device.resizeCanvas(width, height);
-    // Widen the view a little when a sidebar covers the left edge so the whole network still fits beside it.
+    this.applyFraming();
+  }
+
+  private applyFraming(): void {
+    const width = Math.max(1, this.canvas.clientWidth);
+    const height = Math.max(1, this.canvas.clientHeight);
+    // Widen the view so the whole network, including Chinatown's label at its east end, fits in the uncovered width.
+    // Desktop also gets a little headroom with no sidebar; phones keep the original framing.
     const visible = Math.max(1, width - this.insetLeft);
     const base = clamp(48 + (1 - width / height) * 38, 48, 74) * Math.PI / 360;
-    const widen = Math.min(1.45, (width / visible) * 1.06);
+    const widen = Math.min(1.45, (width / visible) * (width > 768 ? 1.08 : 1));
     this.lens.fov = clamp(Math.atan(Math.tan(base) * widen) * 360 / Math.PI, 48, 80);
     // A negative x offset moves the image centre right by half the inset; picking and labels use the same matrix.
     // 0.85 rather than 1: the network's east end (Chinatown) carries a label that hangs to the right of its stop.
@@ -289,14 +298,26 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   }
 
   private stationHome(): XYZ {
-    return this.insetLeft > 0 ? stationHomeBesideSidebar : stationHomeFullWidth;
+    return this.insetTarget > 0 ? stationHomeBesideSidebar : stationHomeFullWidth;
   }
 
   setViewportInset(left: number): void {
-    const inset = Math.max(0, Math.round(left));
-    if (inset === this.insetLeft) return;
-    this.insetLeft = inset;
-    this.resize();
+    const target = Math.max(0, Math.round(left));
+    if (target === this.insetTarget) return;
+    this.insetTarget = target;
+    cancelAnimationFrame(this.insetFrame);
+    if (!this.app || this.activeXR !== 'none') { this.insetLeft = target; return; }
+    // Hiding or showing the sidebar glides the view to its new centre instead of jumping.
+    const from = this.insetLeft;
+    const start = performance.now();
+    const duration = this.reducedMotion.matches || from === target ? 0 : 380;
+    const step = (now: number) => {
+      const t = duration ? Math.min(1, (now - start) / duration) : 1;
+      this.insetLeft = from + (target - from) * (1 - (1 - t) ** 3);
+      this.applyFraming();
+      if (t < 1) this.insetFrame = requestAnimationFrame(step);
+    };
+    step(start);
   }
 
   setStops(stops: XRStopData[]): void {

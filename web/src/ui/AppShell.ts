@@ -39,8 +39,7 @@ function labelAndIcon(control: HTMLButtonElement, label: string, name: Parameter
 export class AppShell {
   private readonly canvas = element('canvas', 'viewport');
   private readonly canvasNotice = element('div', 'canvas-notice');
-  private readonly status = element('span', 'service-status surface-quiet');
-  private readonly xrStatus = element('span', 'xr-status surface-quiet');
+  private serviceNotice?: string;
   private readonly notice = element('div', 'notice surface');
   private readonly breadcrumbs = element('nav', 'breadcrumbs');
   private readonly sidebarHead = element('header', 'sidebar-head');
@@ -48,6 +47,10 @@ export class AppShell {
   private readonly sidebarBack = button('', () => this.goBack(), 'quiet sidebar-back');
   private readonly sidebarBackLabel = element('span');
   private readonly sidebarHome = button('', () => this.showMap(), 'quiet icon-button sidebar-home');
+  private readonly sidebar = element('aside', 'sidebar surface');
+  private readonly sidebarHide = button('', () => this.setSidebarHidden(true), 'quiet icon-button sidebar-hide');
+  private readonly sidebarShow = button('', () => this.setSidebarHidden(false), 'icon-button sidebar-show surface-quiet');
+  private sidebarHidden = false;
   private readonly stationBoard = element('section', 'station-board panel');
   private readonly stationSummary = element('p', 'station-summary');
   private readonly stationList = element('div', 'station-board-list');
@@ -223,15 +226,13 @@ export class AppShell {
     operations.append(this.liveDock.trigger, this.vrButton, this.arButton, this.xrExit, this.moreButton);
     head.append(brand, this.breadcrumbs, operations);
 
-    this.status.setAttribute('role', 'status');
-    this.xrStatus.hidden = true;
     const indicators = element('div', 'indicators');
     const reset = button('', () => this.engine?.resetCamera(), 'quiet icon-button map-reset surface-quiet');
     reset.append(icon('reset'));
     reset.setAttribute('aria-label', 'Reset view');
     reset.title = 'Reset view';
     const mapControls = element('div', 'map-controls');
-    mapControls.append(this.status, this.xrStatus, reset);
+    mapControls.append(reset);
     indicators.append(mapControls);
     this.canvas.setAttribute('aria-label', 'FareSight interactive 3D view');
     this.canvas.tabIndex = 0;
@@ -294,16 +295,28 @@ export class AppShell {
       this.mobileButtons.set(label, tab);
     }
 
-    const sidebar = element('aside', 'sidebar surface');
+    const sidebar = this.sidebar;
+    sidebar.id = 'explore-sidebar';
     sidebar.setAttribute('aria-label', 'Explore FareSight');
+    for (const [control, label] of [[this.sidebarHide, 'Hide sidebar'], [this.sidebarShow, 'Show sidebar']] as const) {
+      control.append(icon('sidebar'));
+      control.setAttribute('aria-label', label);
+      control.setAttribute('aria-controls', sidebar.id);
+      control.title = label;
+    }
+    this.sidebarHide.setAttribute('aria-expanded', 'true');
+    this.sidebarShow.setAttribute('aria-expanded', 'false');
+    this.sidebarShow.hidden = true;
+    const headActions = element('div', 'sidebar-actions');
+    headActions.append(this.sidebarHome, this.sidebarHide);
     this.sidebarBrand.append(brandMark(), element('span', 'sidebar-name', 'FareSight'));
     this.sidebarBack.append(icon('back'), this.sidebarBackLabel);
     this.sidebarHome.append(brandMark());
     this.sidebarHome.setAttribute('aria-label', 'Return to the map');
     this.sidebarHome.title = 'Return to the map';
-    this.sidebarHead.append(this.sidebarBrand, this.sidebarBack, this.sidebarHome);
+    this.sidebarHead.append(this.sidebarBrand, this.sidebarBack, headActions);
     sidebar.append(this.sidebarHead, this.filterBar.root, this.stationBoard, this.drawer.root);
-    root.replaceChildren(this.canvas, this.canvasNotice, head, this.moreMenu, this.liveDock.root, indicators, sidebar, tabs, this.notice);
+    root.replaceChildren(this.canvas, this.canvasNotice, head, this.moreMenu, this.liveDock.root, indicators, sidebar, this.sidebarShow, tabs, this.notice);
     this.debug.body.append(this.renderStats, this.debugLogs,
       button('Reset camera', () => this.engine?.resetCamera()),
       button('Send debug logs', () => void this.sendDebugLogs(), 'quiet'));
@@ -388,10 +401,6 @@ export class AppShell {
           this.vrButton.dataset.supported = String(state.vrSupported);
           const xrCapable = state.vrSupported || state.arSupported;
           this.drawer.setXrCapable(xrCapable);
-          this.xrStatus.hidden = !xrCapable && this.xrMode === 'none';
-          this.xrStatus.textContent = state.activeMode === 'ar' ? 'AR table active'
-            : state.activeMode === 'vr' ? 'VR active'
-              : xrCapable ? 'WebXR available' : '';
           if (changed) this.renderReviewCards();
         },
         onStatsUpdate: (stats) => {
@@ -402,11 +411,13 @@ export class AppShell {
       await this.engine.init();
       this.engineReady = true;
       // On desktop the 3D view centres in the space right of the floating sidebar.
-      const sidebar = this.root.querySelector<HTMLElement>('.sidebar');
-      const syncInset = () => this.engine?.setViewportInset(!this.mobile.matches && sidebar ? sidebar.getBoundingClientRect().right : 0);
-      if (sidebar) new ResizeObserver(syncInset).observe(sidebar);
-      this.mobile.addEventListener('change', syncInset);
-      syncInset();
+      new ResizeObserver(() => this.syncViewportInset()).observe(this.sidebar);
+      this.mobile.addEventListener('change', () => {
+        // Phones lay the sidebar's panels out on their own; never leave them inert there.
+        if (this.mobile.matches) this.setSidebarHidden(false, false);
+        this.syncViewportInset();
+      });
+      this.syncViewportInset();
       this.engine.setVoiceState(this.liveClient.state);
       this.canvasNotice.hidden = true;
       this.engine.setStops(this.stops);
@@ -425,6 +436,24 @@ export class AppShell {
     }
   }
 
+  /** Layout box, not the transformed one, so the inset is right even while the sidebar slides. */
+  private syncViewportInset() {
+    const covered = !this.mobile.matches && !this.sidebarHidden;
+    this.engine?.setViewportInset(covered ? this.sidebar.offsetLeft + this.sidebar.offsetWidth : 0);
+  }
+
+  private setSidebarHidden(hidden: boolean, moveFocus = true) {
+    if (hidden === this.sidebarHidden) return;
+    this.sidebarHidden = hidden;
+    this.root.dataset.sidebar = hidden ? 'hidden' : 'shown';
+    this.sidebar.inert = hidden;
+    this.sidebarHide.setAttribute('aria-expanded', String(!hidden));
+    this.sidebarShow.setAttribute('aria-expanded', String(!hidden));
+    this.sidebarShow.hidden = !hidden;
+    if (moveFocus) (hidden ? this.sidebarShow : this.sidebarHide).focus({ preventScroll: true });
+    this.syncViewportInset();
+  }
+
   private setMenuOpen(open: boolean) {
     if (open) this.liveDock.setOpen(false);
     this.moreMenu.hidden = !open;
@@ -438,14 +467,13 @@ export class AppShell {
 
   private findStop(id: string) { return this.stops.find((stop) => stop.stop_id === id); }
 
+  /** Live data is the normal case and says nothing; a degraded source is announced once, as a toast, when it starts. */
   private renderStatus() {
-    this.status.textContent = this.catalogState === 'offline' ? 'Offline catalog'
-      : this.vehicleSource === 'live' ? 'Live MBTA'
-        : this.vehicleSource === 'simulated' ? 'Simulated trains'
-          : this.vehicleSource === 'unavailable' ? 'Trains unavailable' : 'Checking MBTA';
-    this.status.dataset.source = this.catalogState === 'offline' ? 'offline' : this.vehicleSource ?? 'pending';
-    // Live data is the normal case and needs no badge; the chip only appears when something is degraded.
-    this.status.hidden = this.catalogState !== 'offline' && (this.vehicleSource === 'live' || this.vehicleSource === undefined);
+    const text = this.catalogState === 'offline' ? 'Showing the offline catalog. Live prices and trains are unavailable.'
+      : this.vehicleSource === 'simulated' ? 'Live train positions are unavailable. Showing simulated trains.'
+        : this.vehicleSource === 'unavailable' ? 'Train positions are unavailable right now.' : undefined;
+    if (text && text !== this.serviceNotice) this.notify(text);
+    this.serviceNotice = text;
   }
 
   private async loadCatalog() {
