@@ -187,7 +187,12 @@ class GuidedScan {
     window.addEventListener('devicemotion', this.onMotion);
     const sensed = allowed && camera && await this.firstReading();
     if (this.settled) return;
-    if (import.meta.env.DEV && (!camera || !sensed)) this.simulate();
+    if (import.meta.env.DEV && (!camera || !sensed)) {
+      // Says why the real camera was skipped, so a phone on http://<LAN-IP> is not left guessing.
+      this.dialog.dataset.simulatedWhy = camera ? 'No motion sensors on this device.'
+        : `This page is not secure (https), so the camera is blocked. Open https://${location.hostname}:5181 for the real one.`;
+      this.simulate();
+    }
     else if (!camera) return this.fail('This page cannot open the camera. The scan needs a secure (https) connection.');
     else if (!sensed) return this.fail('This device did not share its motion sensors, which the scan uses to know where the phone points. Allow motion access for this site and try again.');
     else {

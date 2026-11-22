@@ -44,11 +44,11 @@
 pnpm install
 cp .env.example .env      # Optional: add OPENAI_API_KEY, GEMINI_API_KEY, WLT_API_KEY, REPLICATE_API_TOKEN, MBTA_API_KEY
 pnpm assets:sync          # Sync modeling/output/* into web/public/assets-demo/
-pnpm dev                  # Starts Fastify server (:3001) + Vite web app (:5173) + Contribute app (:5180)
+pnpm dev                  # Starts Fastify server (:3001) + Vite web app (:5173) + Contribute app (:5180, and :5181 over https)
 ```
 
 - Open `http://localhost:5173` on desktop/mobile (or deploy over HTTPS for Meta Quest 3 WebXR).
-- Open `http://contribute.localhost:5180` for Vantage Contribute, or `http://<your-LAN-IP>:5180` from a phone on the same network. To deploy it, build `contribute/` (`pnpm --filter @faresight/contribute build`) and point the `contribute.` subdomain at `contribute/dist`. Either proxy `/api` and `/storage` to the Fastify server from that host, or build with `VITE_API_ORIGIN=https://<api-host>`.
+- Open `http://contribute.localhost:5180` for Vantage Contribute, or `https://<your-LAN-IP>:5181` from a phone on the same network (accept the self-signed certificate once). The phone needs the https address for the 360° scan: over `http://<your-LAN-IP>:5180` browsers block the camera and the scan falls back to a simulated one. To deploy it, build `contribute/` (`pnpm --filter @faresight/contribute build`) and point the `contribute.` subdomain at `contribute/dist`. Either proxy `/api` and `/storage` to the Fastify server from that host, or build with `VITE_API_ORIGIN=https://<api-host>`.
 - An Atlas project API key needs `tasks.create`, `operations.read`, `assets.create`, and `assets.read`. Set `WLT_API_KEY` or leave it unset and use `WORLDLABS_API_KEY`. Override `WLT_API_BASE_URL` to use a different Atlas v2 endpoint.
 - Install a current `@playcanvas/splat-transform` CLI on the server's PATH to keep Atlas room previews within the 100,000-Gaussian conversion target. Large original SPZs can exceed the viewer's existing Gaussian safety limit.
 - Without API keys (`PIPELINE_MODE=auto`), the Upload 3D studio runs a labeled demo simulation through all pipeline stages (`Queued -> Generating -> Downloading -> Converting -> Needs review -> Ready`) and publishes into the live manifest.
