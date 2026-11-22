@@ -63,13 +63,32 @@ const ramp = (value: number, from: number, to: number): number => {
 };
 
 let travel = 1;
-const measure = () => { travel = Math.max(1, root.scrollHeight - window.innerHeight); };
+/**
+ * The lines of the opening copy, with the top row, as boxes on screen. While that copy is up,
+ * the map's station labels keep off them, so a label never lands on the headline.
+ */
+const heroCopy = document.querySelector<HTMLElement>('.beat-hero .copy')!;
+const heroBeat = beats.find((beat) => beat.copy === heroCopy)!;
+let heroLines: { left: number; top: number; right: number; bottom: number }[] = [];
+/** The brand and the button in the top row. Labels keep off those for as long as they show. */
+let barBoxes: typeof heroLines = [];
+const measure = () => {
+  travel = Math.max(1, root.scrollHeight - window.innerHeight);
+  const range = document.createRange();
+  barBoxes = [...document.querySelectorAll('.bar > a')].map((node) => {
+    const { left, top, right, bottom } = node.getBoundingClientRect();
+    return { left, top, right, bottom };
+  });
+  heroLines = [...barBoxes, ...[...heroCopy.children].flatMap((node) => {
+    range.selectNodeContents(node);
+    return [...range.getClientRects()].map(({ left, top, right, bottom }) => ({ left, top, right, bottom }));
+  })];
+};
 measure();
 
 const scrolled = () => Math.max(0, Math.min(window.scrollY / travel, 1));
 let eased = scrolled();
 const meterSpring = { value: eased, velocity: 0 };
-let lookState = '';
 let phoneShown = -1;
 let scanShown = -1;
 /** How far through the scan recording the scroll is, 0 to 1, and the last moment it was moved to. */
@@ -134,20 +153,10 @@ function frame(dt: number): number {
   const story = eased * STORY;
   const stage = stageAt(story);
 
-  // Inside the room the visitor can turn their head. As they turn away, the copy clears off the view.
-  const away = scene.lookAway;
-  const look = !scene.lookReady ? '' : scene.lookHeld ? 'held' : 'ready';
-  if (look !== lookState) {
-    lookState = look;
-    if (look) root.dataset.look = look;
-    else delete root.dataset.look;
-  }
-
   for (const beat of beats) {
     const arrive = ramp(story, ...beat.enter);
     const leave = ramp(story, ...beat.exit);
-    const clear = beat.node.id === 'inside' ? 1 - away : 1;
-    const shown = Math.round(arrive * (1 - leave) * clear * 1000) / 1000;
+    const shown = Math.round(arrive * (1 - leave) * 1000) / 1000;
     if (shown === beat.shown) continue;
     beat.shown = shown;
     beat.node.style.visibility = shown > 0.004 ? 'visible' : 'hidden';
@@ -155,10 +164,11 @@ function frame(dt: number): number {
     const drift = reducedMotion.matches ? 0 : (1 - arrive) * 30 - leave * 30;
     beat.copy.style.transform = `translate3d(0, ${drift.toFixed(2)}px, 0)`;
   }
+  scene.labelKeepOut = heroBeat.shown > 0.05 ? heroLines : barBoxes;
 
   showPhone(story);
   const interior = body.dataset.room === 'ready' ? ramp(stage, ROOM_START, 0.98) : 0;
-  veil.style.opacity = (interior * 0.5 * (1 - away)).toFixed(3);
+  veil.style.opacity = (interior * 0.5).toFixed(3);
   root.style.setProperty('--interior', interior.toFixed(3));
   if (reducedMotion.matches) {
     meterSpring.value = goal;
@@ -197,6 +207,8 @@ function tick(now: number) {
   if (eased !== scrolled() || meterSpring.value !== scrolled()) fallbackFrame = requestAnimationFrame(tick);
 }
 
+// The copy's lines move once its font arrives.
+void document.fonts.ready.then(() => { measure(); wake(); });
 const observer = new ResizeObserver(() => { measure(); wake(); });
 observer.observe(body);
 window.addEventListener('scroll', wake, { passive: true, signal: events.signal });

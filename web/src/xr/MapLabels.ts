@@ -13,7 +13,8 @@ interface Label {
   shown: boolean;
 }
 
-interface Box { left: number; top: number; right: number; bottom: number }
+/** A rectangle on screen, in the pixels of the label layer. */
+export interface Box { left: number; top: number; right: number; bottom: number }
 
 /**
  * Something on the map a label should not sit on top of, as the world-space corners of the box it
@@ -136,11 +137,12 @@ export class MapLabels {
 
   /**
    * Project every label; `opacity` 0 removes the layer from hit testing and the tab order.
-   * `keepClear` is what the labels step aside for, on top of each other.
+   * `keepClear` is what the labels step aside for in the scene, on top of each other, and `keepOut`
+   * what they step aside for on the page, such as copy laid over the map.
    */
   update(
     camera: pc.CameraComponent, position: (id: string) => pc.Vec3 | undefined, opacity: number,
-    keepClear: readonly KeepClear[] = [],
+    keepClear: readonly KeepClear[] = [], keepOut: readonly Box[] = [],
   ): void {
     if (opacity !== this.opacity) {
       this.opacity = opacity;
@@ -151,7 +153,7 @@ export class MapLabels {
     if (opacity <= 0.01) return;
     const width = this.root.clientWidth;
     const height = this.root.clientHeight;
-    const placed: Box[] = [];
+    const placed: Box[] = [...keepOut];
     for (const corners of keepClear) {
       const box: Box = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
       let ahead = true;

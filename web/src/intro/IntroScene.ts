@@ -2,6 +2,7 @@ import * as pc from 'playcanvas';
 import { STOPS } from '@faresight/shared';
 import { offlineCatalog, offlineManifest } from '../data/fallbackData';
 import { JarvisReveal, jarvisPoints } from '../xr/JarvisReveal';
+import type { Box } from '../xr/MapLabels';
 import { MapSculptureScene } from '../xr/MapSculptureScene';
 import { SplatLoader } from '../xr/SplatLoader';
 import { StationDioramaScene } from '../xr/StationDioramaScene';
@@ -42,20 +43,14 @@ export const CLEAR_AT = 0.305;
 /** Over this stretch every flag but the hot pot's folds back into its roof. */
 export const FOCUS: [number, number] = [0.775, 0.835];
 export const ROOM_START = 0.92;
-/** Over this stretch the camera comes to rest inside the room; past it the visitor may turn their head. */
-export const LOOK: [number, number] = [0.972, 0.992];
-/** How far up or down the visitor can look, in degrees from the entry view. */
-const LOOK_PITCH_LIMIT = 60;
-/** Turning this many degrees away from the entry view clears the copy off the room. */
-const LOOK_CLEAR = 16;
 const PIN_REVEAL = [0.557, 0.635] as const;
 const CITY_EXIT = [0.91, 0.96] as const;
 const featured = offlineCatalog.places.find((place) => place.id === PLACE_ID);
 
 const shots: Shot[] = [
-  // The visitor sees the full network above the gallery floor.
-  { at: 0.00, look: 'map', yaw: -0.44, pitch: 0.44, distance: 2.02, shiftX: 0.31, shiftY: 0.12 },
-  { at: 0.10, look: 'map', yaw: -0.30, pitch: 0.47, distance: 1.88, shiftX: 0.31, shiftY: 0.12 },
+  // The visitor sees the full network above the gallery floor, set to the right of the headline's column.
+  { at: 0.00, look: 'map', yaw: -0.44, pitch: 0.44, distance: 2.02, shiftX: 0.42, shiftY: 0.12 },
+  { at: 0.10, look: 'map', yaw: -0.30, pitch: 0.47, distance: 1.88, shiftX: 0.42, shiftY: 0.12 },
   // Lean in over the table until Kenmore's marker fills the view.
   { at: 0.27, look: 'stop', yaw: 0.10, pitch: 0.62, distance: 0.74, shiftX: 0, shiftY: 0.26 },
   { at: 0.36, look: 'stop', yaw: 0.22, pitch: 1.12, distance: 0.36, shiftX: 0, shiftY: 0 },
@@ -95,6 +90,8 @@ export class IntroScene {
   private roomSpawn = new pc.Vec3();
   private roomOffset = new pc.Vec3();
   private roomEye = new pc.Vec3();
+  /** Page copy laid over the map, as boxes in canvas pixels. The station labels keep off them. */
+  labelKeepOut: readonly Box[] = [];
   private resizeObserver?: ResizeObserver;
   private events = new AbortController();
   private reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -112,14 +109,6 @@ export class IntroScene {
   private started = false;
   private loadRoom?: () => void;
   private pointer = { x: 0, y: 0, easedX: 0, easedY: 0 };
-  /** Whether the visitor can turn the camera right now, and whether they are dragging it. */
-  lookReady = false;
-  lookHeld = false;
-  /** How far the view is turned from the one the scroll arrived at: 0 facing it, 1 clear of the copy. */
-  lookAway = 0;
-  /** The head turn inside the room, in degrees. Only the camera's rotation ever reads it. */
-  private look = { yaw: 0, pitch: 0, easedYaw: 0, easedPitch: 0, free: 0 };
-  private drag?: { id: number; x: number; y: number };
   private anchor = new pc.Vec3();
   private stage = new pc.Vec3();
   private center = new pc.Vec3();
@@ -179,33 +168,7 @@ export class IntroScene {
       this.pointer.x = event.clientX / Math.max(1, window.innerWidth) * 2 - 1;
       this.pointer.y = event.clientY / Math.max(1, window.innerHeight) * 2 - 1;
       if (!this.reducedMotion.matches && event.pointerType === 'mouse') this.wake();
-      const drag = this.drag;
-      if (!drag || event.pointerId !== drag.id) return;
-      // The room follows the pointer one to one, as if the visitor held it and turned.
-      const degrees = this.lens.fov / Math.max(1, this.canvas.clientHeight);
-      this.look.yaw += (event.clientX - drag.x) * degrees;
-      this.look.pitch = clamp(this.look.pitch + (event.clientY - drag.y) * degrees, -LOOK_PITCH_LIMIT, LOOK_PITCH_LIMIT);
-      drag.x = event.clientX;
-      drag.y = event.clientY;
-      this.wake();
     }, { signal, passive: true });
-    window.addEventListener('pointerdown', (event) => {
-      if (!this.lookReady || event.button !== 0 || (event.target as Element | null)?.closest?.('a, button')) return;
-      this.drag = { id: event.pointerId, x: event.clientX, y: event.clientY };
-      this.wake();
-    }, { signal, passive: true });
-    const release = (event: PointerEvent) => {
-      if (this.drag?.id !== event.pointerId) return;
-      this.drag = undefined;
-      this.wake();
-    };
-    window.addEventListener('pointerup', release, { signal, passive: true });
-    window.addEventListener('pointercancel', release, { signal, passive: true });
-    window.addEventListener('keydown', (event) => {
-      if (!this.lookReady || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
-      this.look.yaw += event.key === 'ArrowLeft' ? 15 : -15;
-      this.wake();
-    }, { signal });
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(this.canvas);
     this.resize();
@@ -388,37 +351,6 @@ export class IntroScene {
     const shiftX = mix(a.shiftX, b.shiftX) * wide;
     const shiftY = pc.math.lerp(0.26, mix(a.shiftY, b.shiftY), wide);
     this.camera.translateLocal(-shiftX * distance * tanV * aspect, -shiftY * distance * tanV, 0);
-
-    const look = this.look;
-    if (look.free <= 0) return;
-    // Inside the room only the head turns. The eye stays exactly where the scroll left it.
-    const follow = this.reducedMotion.matches ? 1 : damp(dt, 14);
-    look.easedYaw += (look.yaw - look.easedYaw) * follow;
-    look.easedPitch += (look.pitch - look.easedPitch) * follow;
-    this.camera.setEulerAngles(
-      -pitch * pc.math.RAD_TO_DEG + look.easedPitch * look.free,
-      yaw * pc.math.RAD_TO_DEG + look.easedYaw * look.free,
-      0,
-    );
-  }
-
-  /** Opens the head turn once the camera has come to rest in the room, and unwinds it on the way out. */
-  private applyLook(p: number): void {
-    const look = this.look;
-    look.free = this.roomReady ? smooth(progressAt(p, ...LOOK)) : 0;
-    const ready = look.free >= 1;
-    if (this.lookReady && !ready) {
-      // Leaving the room: let go, and drop whole turns so the view swings back the short way.
-      this.drag = undefined;
-      const turns = Math.round(look.yaw / 360) * 360;
-      look.yaw -= turns;
-      look.easedYaw -= turns;
-    }
-    if (look.free <= 0) look.yaw = look.pitch = look.easedYaw = look.easedPitch = 0;
-    this.lookReady = ready;
-    this.lookHeld = !!this.drag;
-    const turned = Math.abs(look.easedYaw - Math.round(look.easedYaw / 360) * 360);
-    this.lookAway = clamp(Math.hypot(turned, look.easedPitch) / LOOK_CLEAR, 0, 1) * look.free;
   }
 
   private update(dt: number): void {
@@ -447,10 +379,9 @@ export class IntroScene {
       this.roomRoot.enabled = false;
     }
     this.splats.seekReveal('room', inside);
-    this.applyLook(p);
     this.poseCamera(this.roomReady ? p : Math.min(p, 0.925), dt);
     this.backdrop.update(this.camera);
-    this.map.update(dt, this.camera, this.lens, labels);
+    this.map.update(dt, this.camera, this.lens, labels, this.labelKeepOut);
     if (this.station.root.enabled) this.station.update(this.reducedMotion.matches ? 1 : dt, this.camera);
     this.reveal.update(dt);
     const app = this.app;
@@ -463,9 +394,6 @@ export class IntroScene {
   destroy(): void {
     if (!this.app) return;
     this.events.abort();
-    this.drag = undefined;
-    this.lookReady = this.lookHeld = false;
-    this.lookAway = 0;
     this.started = false;
     this.loadRoom = undefined;
     this.resizeObserver?.disconnect();

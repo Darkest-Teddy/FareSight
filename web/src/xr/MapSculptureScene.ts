@@ -3,7 +3,7 @@ import { countPreviewsByStop } from '../data/preview3D';
 import type { XRPlaceData, XRStopData, XRVehicleData } from './bridgeTypes';
 import { PhysicalPlaque } from './CanvasPanel3D';
 import { jarvisPoints, type JarvisReveal } from './JarvisReveal';
-import { MapLabels, type KeepClear } from './MapLabels';
+import { MapLabels, type Box, type KeepClear } from './MapLabels';
 import { assetBase, brass, child, clamp, damp, fetchAssetJson, highlightInk, ink, material, project, shape, target,
   type DebugLog, type HitTarget, type ModelLibrary, type XYZ } from './sceneSupport';
 
@@ -712,8 +712,13 @@ export class MapSculptureScene {
     }
   }
 
-  /** `labelOpacity` fades the HTML labels; 0 hides them (station view, headset, mid-dive). */
-  update(dt: number, camera: pc.Entity, lens: pc.CameraComponent, labelOpacity: number): void {
+  /**
+   * `labelOpacity` fades the HTML labels; 0 hides them (station view, headset, mid-dive).
+   * `labelKeepOut` is page content over the map that the labels should not sit on.
+   */
+  update(
+    dt: number, camera: pc.Entity, lens: pc.CameraComponent, labelOpacity: number, labelKeepOut: readonly Box[] = [],
+  ): void {
     this.clock += dt;
     const visible = this.root.enabled;
     const worldOf = (id: string) => this.beacons.find((beacon) => beacon.stop.stop_id === id)?.root.getPosition();
@@ -724,7 +729,7 @@ export class MapSculptureScene {
       this.landmarks.forEach((corners, i) =>
         corners.forEach((corner, j) => world.transformPoint(corner, this.landmarkCorners[i][j])));
     }
-    this.labels.update(lens, worldOf, labelled ? labelOpacity : 0, this.landmarkCorners);
+    this.labels.update(lens, worldOf, labelled ? labelOpacity : 0, this.landmarkCorners, labelKeepOut);
     if (!visible) return;
 
     const focus = this.hovered ?? undefined;
