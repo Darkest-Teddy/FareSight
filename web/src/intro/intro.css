@@ -5,7 +5,7 @@
  */
 :root {
   color-scheme: dark;
-  --bg: #07080b;
+  --bg: #05070c;
   --ink: #f5f5f7;
   --dim: rgb(245 245 247 / 66%);
   --faint: rgb(245 245 247 / 52%);
@@ -48,9 +48,9 @@ body[data-stage=missing] #stage { display: none; }
   position: fixed; inset: 0; z-index: 1; pointer-events: none;
   opacity: calc(1 - .67 * var(--interior, 0));
   background:
-    radial-gradient(120% 85% at 50% 42%, transparent 46%, rgb(7 8 11 / 72%) 100%),
-    linear-gradient(to top, rgb(7 8 11 / 78%), transparent 34%),
-    linear-gradient(to bottom, rgb(7 8 11 / 55%), transparent 16%);
+    radial-gradient(120% 85% at 50% 42%, transparent 46%, rgb(5 7 12 / 72%) 100%),
+    linear-gradient(to top, rgb(5 7 12 / 78%), transparent 34%),
+    linear-gradient(to bottom, rgb(5 7 12 / 55%), transparent 16%);
 }
 .veil {
   position: fixed; inset: 0; z-index: 2; pointer-events: none; opacity: 0;
@@ -143,8 +143,8 @@ body[data-state=loading] .status::after {
   .lead { max-width: 30ch; }
   .shade {
     background:
-      linear-gradient(to top, rgb(7 8 11 / 92%), rgb(7 8 11 / 60%) 30%, transparent 56%),
-      linear-gradient(to bottom, rgb(7 8 11 / 60%), transparent 14%);
+      linear-gradient(to top, rgb(5 7 12 / 92%), rgb(5 7 12 / 60%) 30%, transparent 56%),
+      linear-gradient(to bottom, rgb(5 7 12 / 60%), transparent 14%);
   }
   .veil { background: radial-gradient(ellipse 90vw 32vh at 36% 82%, var(--bg) 12%, transparent 92%); }
 }

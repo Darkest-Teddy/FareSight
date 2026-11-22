@@ -6,7 +6,7 @@
 
 - **`modeling/`** — Deterministic procedural glTF 2.0 (`.glb`) and binary 3D Gaussian Splat (`.ply`) generators (`node modeling/generate_all.mjs && node modeling/validate_assets.mjs`):
   - **Boston Map Sculpture** (`boston-map-sculpture.glb`): a grounded base slab with an inlaid Charles River and street grid, MBTA Green (B/C/D/E), Red, Orange, and Blue tubes stacked in three shallow layers, white on-line stop markers, transfer posts at interchanges, raised drums for the five explorable stations, and `mbta-train-capsule.glb`.
-  - **5 Retro-Synth City Segment Dioramas** (`segment-place-*.glb`): BU Central, Packard's Corner, Kenmore, Harvard Square, and Chinatown, each with named `LCD_Screen` (live station telemetry texture) and `Rotary_Dial` (budget slider rotation) nodes and Boston landmarks.
+  - **5 Floating-Island City Segment Dioramas** (`segment-place-*.glb`): BU Central, Packard's Corner, Kenmore, Harvard Square, and Chinatown, each an OpenStreetMap city block with Boston landmarks on a low-poly island of turf, earth and rock (`modeling/segment-island.mjs`).
   - **6 Demo 3DGS `.ply` Assets**: Ramen house, karaoke suite, study café, tonkotsu ramen (`24 cm`), katsu curry (`26 cm`), and matcha tiramisu (`18 cm`), plus `table-pedestal.glb`.
 - **`shared/`** (`@faresight/shared`) — Shared TypeScript domain types, Boston flat-earth sculpture projection, MBTA fare constants (`$2.40` subway / `$1.70` bus), precomputed ride times, and trip estimate math.
 - **`server/`** (`@faresight/server`) — Node + TypeScript + Fastify + built-in SQLite (`node:sqlite`) + persistent resumable job worker:

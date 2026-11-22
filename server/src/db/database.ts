@@ -90,10 +90,10 @@ export class Store {
     this.transaction(() => {
       for (const place of places) {
         this.sqlite.prepare('INSERT OR IGNORE INTO places VALUES (?, ?)').run(place.id, JSON.stringify(place));
-        // Seed-owned public facts follow the seed; runtime fields (assets, dishes) stay as stored.
+        // Seed-owned public facts and surveyed positions follow the seed; runtime fields (assets, dishes) stay as stored.
         const stored = this.get('places', place.id)!;
-        const { name, vibe, hours, details } = place;
-        this.put('places', { ...stored, name, vibe, hours, details });
+        const { name, vibe, hours, details, lat, lon, walk_from_stop_m } = place;
+        this.put('places', { ...stored, name, vibe, hours, details, lat, lon, walk_from_stop_m });
       }
       for (const asset of demoAssets) this.sqlite.prepare('INSERT OR IGNORE INTO assets VALUES (?, ?)').run(asset.id, JSON.stringify(asset));
       const reviewed = new Set(this.all('reviews').map(({ place_id }) => place_id));

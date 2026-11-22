@@ -126,7 +126,6 @@ export interface FareSightSceneEngine {
   setVoiceState(state: VoiceState): void;
   setReviewCards(cards: readonly BriefingCard[]): void;
   setLiveVehicles(vehicles: XRVehicleData[]): void;
-  setStationTelemetry(stopId: string, nextArrivalMin: number | null, matchingCount: number): void;
   focusStop(stopId: string): Promise<void>;
   /** Highlight a stop on the map from outside the 3D view (for example the stop list). */
   setHoveredStop(stopId: string | undefined): void;

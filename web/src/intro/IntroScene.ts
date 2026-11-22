@@ -5,17 +5,17 @@ import { JarvisReveal, jarvisPoints } from '../xr/JarvisReveal';
 import { MapSculptureScene } from '../xr/MapSculptureScene';
 import { SplatLoader } from '../xr/SplatLoader';
 import { StationDioramaScene } from '../xr/StationDioramaScene';
-import { assetBase, child, clamp, damp, material, ModelLibrary, smooth } from '../xr/sceneSupport';
+import { Backdrop } from '../xr/Backdrop';
+import { assetBase, child, clamp, damp, ModelLibrary, smooth } from '../xr/sceneSupport';
 
 /**
- * The landing page's 3D stage. It builds the same gallery, map sculpture and station diorama a
- * headset shows. Scroll progress drives the camera, mesh reveals, and the room splat.
+ * The landing page's 3D stage. It floats the app's map sculpture and station diorama in the
+ * dusk sky dome. Scroll progress drives the camera, mesh reveals, and the room splat.
  */
 
 export const STOP_ID = 'place-bucen';
 export const PLACE_ID = 'bu-ramen-01';
 
-const backdrop = '#07080b';
 const mapHeight = 1.0;
 // Same constants as the in-app dive, so the landing page shows the real transition.
 const seedScale = 0.006;
@@ -83,13 +83,12 @@ export class IntroScene {
   private map!: MapSculptureScene;
   private station!: StationDioramaScene;
   private splats!: SplatLoader;
-  private gallery!: pc.Entity;
+  private backdrop!: Backdrop;
   private roomRoot!: pc.Entity;
   private roomReady = false;
   private roomSpawn = new pc.Vec3();
   private roomOffset = new pc.Vec3();
   private roomEye = new pc.Vec3();
-  private materials: pc.StandardMaterial[] = [];
   private resizeObserver?: ResizeObserver;
   private events = new AbortController();
   private reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -123,19 +122,14 @@ export class IntroScene {
     this.app = app;
     app.setCanvasFillMode(pc.FILLMODE_NONE);
     app.scene.ambientLight = new pc.Color(0.38, 0.39, 0.42);
-    // The gallery floor has no horizon: it falls off into the backdrop.
-    const fog = app.scene.fog;
-    fog.type = pc.FOG_LINEAR;
-    fog.color.fromString(backdrop);
-    fog.start = 2.3;
-    fog.end = 7.2;
 
     this.camera = child(app.root, 'Viewer');
+    // The same sky dome the app's flat-screen view uses.
+    this.backdrop = new Backdrop(app.root, app.graphicsDevice);
     this.lens = this.camera.addComponent('camera', {
-      clearColor: new pc.Color().fromString(backdrop), nearClip: 0.02, farClip: 40, fov: 44,
+      clearColor: this.backdrop.clearColor, nearClip: 0.02, farClip: 40, fov: 44,
     }) as pc.CameraComponent;
     this.addLights(app.root);
-    this.buildGallery(app.root, app.graphicsDevice);
 
     const log = (text: string, level?: string) => { if (level === 'error') console.error(text); };
     this.models = new ModelLibrary(app, log);
@@ -195,29 +189,6 @@ export class IntroScene {
       const light = child(root, name);
       light.addComponent('light', { type: 'directional', color: new pc.Color().fromString(tint), intensity });
       light.setLocalEulerAngles(angles[0], angles[1], angles[2]);
-    }
-  }
-
-  private buildGallery(root: pc.Entity, device: pc.GraphicsDevice): void {
-    const gallery = this.gallery = child(root, 'VR gallery');
-    const floor = material('#141821', 1);
-    const rings = material('#2a3242', 1);
-    for (const surface of [floor, rings]) {
-      surface.diffuse.set(0, 0, 0);
-      surface.useLighting = false;
-      surface.update();
-    }
-    this.materials.push(floor, rings);
-    const deck = child(gallery, 'Gallery floor');
-    const disk = pc.Mesh.fromGeometry(device, new pc.CircleGeometry({ radius: 8, sectors: 128, rings: 1 }));
-    deck.addComponent('render', { meshInstances: [new pc.MeshInstance(disk, floor, deck)] });
-    for (const radius of [1.5, 3.2]) {
-      const ring = child(gallery, `Floor ring ${radius} m`, [0, 0.002, 0]);
-      const mesh = pc.Mesh.fromGeometry(device, new pc.TorusGeometry({
-        ringRadius: radius, tubeRadius: 0.003, segments: 160, sides: 6,
-      }));
-      ring.setLocalScale(1, 0.2, 1);
-      ring.addComponent('render', { meshInstances: [new pc.MeshInstance(mesh, rings, ring)] });
     }
   }
 
@@ -381,11 +352,6 @@ export class IntroScene {
     }
     this.applyPins(p, leaving);
     const inside = this.roomReady ? progressAt(p, ROOM_START, 1) : 0;
-    const gallery = 1 - leaving;
-    if (gallery !== this.galleryProgress) {
-      this.galleryProgress = gallery;
-      this.reveal.seek(this.gallery, gallery, jarvisPoints.detail);
-    }
     if (inside > 0 && !this.roomRoot.enabled) {
       this.alignRoom();
       this.roomRoot.enabled = true;
@@ -394,6 +360,7 @@ export class IntroScene {
     }
     this.splats.seekReveal('room', inside);
     this.poseCamera(this.roomReady ? p : Math.min(p, 0.925), dt);
+    this.backdrop.update(this.camera);
     this.map.update(dt, this.camera, this.lens, 0);
     if (this.station.root.enabled) this.station.update(this.reducedMotion.matches ? 1 : dt, this.camera);
     this.reveal.update(dt);
@@ -408,7 +375,7 @@ export class IntroScene {
     this.splats?.destroy();
     this.reveal?.destroy();
     this.models?.destroy();
-    for (const surface of this.materials) surface.destroy();
+    this.backdrop?.destroy();
     this.app?.destroy();
     this.app = undefined;
   }
