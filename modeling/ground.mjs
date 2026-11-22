@@ -32,8 +32,12 @@ const SPOKES = 128;
  */
 const SKIRT = 0.3;
 
-/** How much further the fade runs before it is fully background. */
-const FADE = 0.42;
+/**
+ * How far the rim fades out. Short on purpose: the ground is one blob around the network, not a
+ * set of concentric shells. This was 0.42 across two extra rings, which read as two further blobs
+ * ringing the first rather than as one shape dissolving.
+ */
+const FADE = 0.1;
 
 const mixHex = (a, b, t) =>
   '#' +
@@ -102,11 +106,13 @@ export function groundBlob(surface, lines, y) {
   const reach = reaches(lines, centre);
 
   // Ring radii as a fraction of each spoke's reach, with the colour each is written at.
+  // One blob: a solid core, its edge, then a short rim that reaches the backdrop. The two wide
+  // outer rings that used to follow are gone -- they read as separate shapes rather than as this
+  // one fading out.
   const bands = [
     { scale: 0.42, pad: 0, tint: 0 },
-    { scale: 1, pad: SKIRT * 0.55, tint: 0.06 },
-    { scale: 1, pad: SKIRT, tint: 0.3 },
-    { scale: 1, pad: SKIRT + FADE * 0.45, tint: 0.72 },
+    { scale: 1, pad: SKIRT * 0.55, tint: 0.04 },
+    { scale: 1, pad: SKIRT, tint: 0.16 },
     { scale: 1, pad: SKIRT + FADE, tint: 1 },
   ];
 

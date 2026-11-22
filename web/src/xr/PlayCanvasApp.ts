@@ -592,12 +592,13 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     // Opens on the reference framing: at 48 degrees vertical the BU Central to Kenmore run
     // (0.1492 units) fills the same share of the frame as in the reference shot.
     const framing = 0.78 * portrait;
-    // Pitch floor: the widest the lens ever goes is 74 degrees, so half the frame is 0.65 rad.
-    // Staying above that keeps the top of the view pointed at ground rather than the horizon.
+    // Pitch floor sits just above zero: the camera can come all the way down to a side-on view of
+    // the skyline, but never to or below the ground plane, which would show the city's underside
+    // and let the viewer end up beneath it.
     return { pivot: new pc.Vec3(-0.13, 0.04, 0.15), yaw: 0.1, pitch: 0.86,
       // Zoom range is back to the original: the same 0.15 to 6 the camera had before it was
       // pinned, so pulling back all the way out is possible again.
-      distance: framing, min: 0.15, max: 6, minPitch: 0.72, maxPitch: 1.42,
+      distance: framing, min: 0.15, max: 6, minPitch: 0.035, maxPitch: 1.42,
       // Zoomed in this far, WASD is how the map gets explored. Kept well inside the ground's
       // faded rim: at 0.95 the camera could walk to the edge and see past it into the backdrop.
       roam: 0.58 };

@@ -32,7 +32,10 @@ const uiModels = [
 ];
 const genModels = [
   'boston-map-sculpture',
-  'mbta-train-capsule',
+  'mbta-train-green',
+  'mbta-train-red',
+  'mbta-train-orange',
+  'mbta-train-blue',
   'table-pedestal',
   ...uiModels,
   ...Object.keys(stationRef).map((k) => 'segment-' + k),
@@ -238,10 +241,10 @@ const map = models['boston-map-sculpture'];
 // tight enough to catch runaway geometry. The track geometry itself is bounded separately by
 // the per-line checks further down.
 assert.ok(
-  map.bounds.min[0] >= -1.45 && map.bounds.min[0] <= -1.05 &&
-    map.bounds.max[0] <= 1.45 && map.bounds.max[0] >= 1.05 &&
-    map.bounds.min[2] >= -1.3 && map.bounds.min[2] <= -0.85 &&
-    map.bounds.max[2] <= 1.3 && map.bounds.max[2] >= 0.85,
+  map.bounds.min[0] >= -1.12 && map.bounds.min[0] <= -0.88 &&
+    map.bounds.max[0] <= 1.12 && map.bounds.max[0] >= 0.88 &&
+    map.bounds.min[2] >= -0.92 && map.bounds.min[2] <= -0.62 &&
+    map.bounds.max[2] <= 0.92 && map.bounds.max[2] >= 0.62,
   'sculpture footprint ' + reportBounds(map.bounds),
 );
 // Floats above zero now: the lowest geometry is the station skirts, not a deck resting on y=0.
@@ -267,15 +270,25 @@ for (const r of [0.1, 0.15]) {
     }
   assert.ok(hits >= 240);
 }
-const train = models['mbta-train-capsule'];
-approx(train.bounds.min[2], -0.016);
-approx(train.bounds.max[2], 0.016);
-assert.ok(
-  train.meshes
-    .get('LED markers')
-    .positions.filter((v, i) => i % 3 === 2)
-    .every((z) => z < -0.015),
-);
+for (const line of ['green', 'red', 'orange', 'blue']) {
+  const train = models['mbta-train-' + line];
+  // Centred on its own origin, so the scene can place it straight onto a track sample.
+  approx(train.bounds.min[2], -train.bounds.max[2], 1e-6, line + ' train centring');
+  // Sits above the rail, never through it.
+  assert.ok(train.bounds.min[1] > 0, line + ' train floor ' + train.bounds.min[1]);
+  // Plausible size: longer than it is wide, and small enough to read as a train on the line.
+  const length = train.bounds.max[2] - train.bounds.min[2];
+  const width = train.bounds.max[0] - train.bounds.min[0];
+  assert.ok(length > width * 2 && length < 0.05, line + ' train proportions');
+  assert.ok(train.meshes.get('Head lamps'), line + ' train has no head lamps');
+}
+// Green and Blue are the two lines that collect from overhead wire, so only they carry a
+// pantograph, which makes them taller than the third-rail stock.
+for (const line of ['green', 'blue'])
+  assert.ok(
+    models['mbta-train-' + line].bounds.max[1] > 0.0077,
+    line + ' train is missing its pantograph',
+  );
 const offsets = new Map();
 assert.deepEqual(
   paths.map((l) => l.routeId).sort(),
@@ -292,7 +305,7 @@ for (const line of paths) {
   // Track plates, not tubes. loft() emits per-face vertices rather than shared rings, so each
   // span between two path points contributes 4 quads x 4 vertices, plus a 4-vertex cap at each
   // end. Within a span, vertex +0 and +3 belong to the near ring and +1/+2 to the far one.
-  const halfWidth = 0.0075,
+  const halfWidth = 0.0042,
     halfThick = 0.0014,
     cornerDistance = Math.hypot(halfWidth, halfThick);
   const offset = offsets.get(line.color) ?? 0;

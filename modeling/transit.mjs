@@ -196,8 +196,11 @@ function flatTrack(surface, points, halfWidth, thickness, color = '#ffffff') {
 
 // Sculpture layout: the network floats in three shallow layers, with no deck beneath it.
 const slabTop = 0.04;
-/** Half-width of a track plate. Wide enough to read as a road at map scale. */
-const trackHalfWidth = 0.0075;
+/**
+ * Half-width of a track plate. Thin: the lines are the diagram, and the station dots have to read
+ * as clearly larger than the line they sit on.
+ */
+const trackHalfWidth = 0.0042;
 /** Plate thickness. Small, but never zero: this is the "flat with a little depth" brief. */
 const trackThickness = 0.0028;
 // The layers exist only so lines sharing a corridor never z-fight; they are not meant to lift the
@@ -317,6 +320,37 @@ function landmarks(surface, accent) {
   }
 }
 
+/**
+ * A station bead: a white disc with the line's colour inset on top.
+ *
+ * Both discs are raised clear of the plate so neither z-fights with it, and the white ring is
+ * wider than the plate itself, which is what makes a stop legible at map scale.
+ */
+const dotOuter = 0.0068;
+const dotInner = 0.0042;
+
+function stationDot(white, colour, [x, , z], deck, tint) {
+  const base = deck + 0.0004;
+  const lip = base + 0.0014;
+  // White body.
+  loft(white, [circle(x, base, z, dotOuter, 20), circle(x, lip, z, dotOuter, 20)], '#f4f6fa', {
+    bottom: false,
+    top: false,
+  });
+  // The white rim left showing around the coloured centre.
+  const outer = circle(x, lip, z, dotOuter, 20);
+  const inner = circle(x, lip, z, dotInner, 20);
+  for (let j = 0; j < 20; j++) {
+    const k = (j + 1) % 20;
+    face(white, [outer[j], inner[j], inner[k], outer[k]], '#f4f6fa');
+  }
+  // Coloured cap, a hair proud of the white so it never z-fights.
+  const cap = lip + 0.0003;
+  loft(colour, [circle(x, lip, z, dotInner, 20), circle(x, cap, z, dotInner, 20)], tint, {
+    bottom: false,
+  });
+}
+
 export function mapSculpture(dir) {
   const m = new Model();
   const batch = (name, options) => m.surface(m.material(name, options));
@@ -389,8 +423,10 @@ export function mapSculpture(dir) {
 
       const focus = focal.find((f) => f[1] === key && f[4] === routeId);
       if (!focus) {
-        // Ordinary stop: a white pin through the tube that reads as a dot from above.
-        drum(marker, p, p[1], p[1] + trackThickness / 2 + 0.0012, 0.0034, '#f4f6fa', 12);
+        // Ordinary stop: a white disc with the route colour inset, deliberately wider than the
+        // track plate (0.0084 across) so every stop reads as a bead on the line rather than a
+        // bump in it.
+        stationDot(marker, enamel, p, p[1] + trackThickness / 2, core);
         continue;
       }
       // Explorable stop: a white-rimmed drum on the deck with the line colour on top.
@@ -516,7 +552,7 @@ export function accessories(dir) {
       0.00002,
       '#fff4bb',
     );
-  t.save(dir + 'mbta-train-capsule.glb');
+  // The shared capsule is retired: every line now has its own model in trains.mjs.
   const m = new Model(),
     slate = m.surface(m.material('Honed graphite', { rough: 0.75 })),
     steel = m.surface(
