@@ -1,0 +1,98 @@
+[
+  {
+    "name": "between-02-03-t1of3",
+    "render": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/repair/views/eljefes-kenmore-all-952/between-02-03-t1of3.render.webp",
+    "ref": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/boston/sources/eljefes-kenmore/IMG_5083.jpg",
+    "fixed": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/repair/views/eljefes-kenmore-all-952/between-02-03-t1of3.fixed.png",
+    "pair": [
+      2,
+      3
+    ],
+    "t": 0.3333333333333333,
+    "step_m": 1.031097328911621
+  },
+  {
+    "name": "between-02-03-t2of3",
+    "render": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/repair/views/eljefes-kenmore-all-952/between-02-03-t2of3.render.webp",
+    "ref": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/boston/sources/eljefes-kenmore/IMG_5084.jpg",
+    "fixed": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/repair/views/eljefes-kenmore-all-952/between-02-03-t2of3.fixed.png",
+    "pair": [
+      2,
+      3
+    ],
+    "t": 0.6666666666666666,
+    "step_m": 1.031097328911621
+  },
+  {
+    "name": "between-03-04-t1of3",
+    "render": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/repair/views/eljefes-kenmore-all-952/between-03-04-t1of3.render.webp",
+    "ref": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/boston/sources/eljefes-kenmore/IMG_5084.jpg",
+    "fixed": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/repair/views/eljefes-kenmore-all-952/between-03-04-t1of3.fixed.png",
+    "pair": [
+      3,
+      4
+    ],
+    "t": 0.3333333333333333,
+    "step_m": 1.7860689036714519
+  },
+  {
+    "name": "between-03-04-t2of3",
+    "render": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/repair/views/eljefes-kenmore-all-952/between-03-04-t2of3.render.webp",
+    "ref": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/boston/sources/eljefes-kenmore/IMG_5085.jpg",
+    "fixed": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/repair/views/eljefes-kenmore-all-952/between-03-04-t2of3.fixed.png",
+    "pair": [
+      3,
+      4
+    ],
+    "t": 0.6666666666666666,
+    "step_m": 1.7860689036714519
+  },
+  {
+    "name": "between-04-05-t1of3",
+    "render": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/repair/views/eljefes-kenmore-all-952/between-04-05-t1of3.render.webp",
+    "ref": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/boston/sources/eljefes-kenmore/IMG_5085.jpg",
+    "fixed": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/repair/views/eljefes-kenmore-all-952/between-04-05-t1of3.fixed.png",
+    "pair": [
+      4,
+      5
+    ],
+    "t": 0.3333333333333333,
+    "step_m": 4.009866732017108
+  },
+  {
+    "name": "between-04-05-t2of3",
+    "render": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/repair/views/eljefes-kenmore-all-952/between-04-05-t2of3.render.webp",
+    "ref": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/boston/sources/eljefes-kenmore/IMG_5086.jpg",
+    "fixed": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/repair/views/eljefes-kenmore-all-952/between-04-05-t2of3.fixed.png",
+    "pair": [
+      4,
+      5
+    ],
+    "t": 0.6666666666666666,
+    "step_m": 4.009866732017108
+  },
+  {
+    "name": "between-06-07-t1of3",
+    "render": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/repair/views/eljefes-kenmore-all-952/between-06-07-t1of3.render.webp",
+    "ref": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/boston/sources/eljefes-kenmore/IMG_5088.jpg",
+    "fixed": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/repair/views/eljefes-kenmore-all-952/between-06-07-t1of3.fixed.png",
+    "pair": [
+      6,
+      7
+    ],
+    "t": 0.3333333333333333,
+    "step_m": 3.0181047739218565
+  },
+  {
+    "name": "between-06-07-t2of3",
+    "render": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/repair/views/eljefes-kenmore-all-952/between-06-07-t2of3.render.webp",
+    "ref": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/boston/sources/eljefes-kenmore/IMG_5089.jpg",
+    "fixed": "/Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/repair/views/eljefes-kenmore-all-952/between-06-07-t2of3.fixed.png",
+    "pair": [
+      6,
+      7
+    ],
+    "t": 0.6666666666666666,
+    "step_m": 3.0181047739218565
+  }
+]

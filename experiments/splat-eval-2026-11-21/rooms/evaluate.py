@@ -65,8 +65,8 @@ def measure(path):
     stats = {
         "raw_gaussians": len(vertices), "raw_ply_bytes": path.stat().st_size,
         "bounds_raw_model_units": {"min": xyz.min(axis=0).tolist(), "max": xyz.max(axis=0).tolist()},
-        "opacity_logit": quantiles(opacity),
-        "opacity_linear": quantiles(1 / (1 + np.exp(-np.clip(opacity, -700, 700)))),
+        # WorldMirror stores activated (0-1) opacity, not the logit standard 3DGS readers expect.
+        "opacity_linear": quantiles(opacity),
         "scale_sigma_xyz_model_units": quantiles(scale),
     }
     return stats, xyz
@@ -77,10 +77,33 @@ def cli(*args):
     subprocess.run(["npx", "-y", CLI, *map(str, args)], cwd=ROOT, env=env, check=True)
 
 
+def fix_opacity(source, target):
+    """Copy a binary PLY with linear opacity rewritten as logits, which SplatTransform expects.
+
+    Without this, SplatTransform's sigmoid squeezes every Gaussian into 50-73% opacity. Run it on the
+    raw model output only: merged or decimated files are already in SplatTransform's convention.
+    """
+    vertices = read_ply(source)
+    opacity = np.asarray(vertices["opacity"], dtype=np.float64)
+    assert opacity.min() >= 0 and opacity.max() <= 1, f"{source} opacity is not in 0-1; already logit?"
+    fixed = np.array(vertices)
+    p = np.clip(opacity, 1e-6, 1 - 1e-6)
+    fixed["opacity"] = np.log(p / (1 - p)).astype(fixed.dtype["opacity"])
+    with source.open("rb") as file:
+        header = b""
+        while not header.endswith(b"end_header\n"):
+            header += file.readline()
+    target.write_bytes(header + fixed.tobytes())
+
+
 def compress(ply, count, directory, target):
     decimated = directory / f"decimated-{target}.ply"
     sog = directory / f"room-{target}.sog"
     if not sog.exists():
+        fixed = directory / "gaussians-opacity-fixed.ply"
+        if not fixed.exists():
+            fix_opacity(ply, fixed)
+        ply = fixed
         if count > target and not decimated.exists():
             cli("-g", "cpu", ply, "--decimate", target, decimated)
         cli("-g", "cpu", decimated if count > target else ply, sog)

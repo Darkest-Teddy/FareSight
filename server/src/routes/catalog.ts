@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Config } from '../config.ts';
 import type { PendingReview, Store } from '../db/database.ts';
 import { findDemoAsset } from '../services/demoAssets.ts';
+import { fetchLiveReviews } from '../services/liveReviews.ts';
 
 export function registerCatalog(app: FastifyInstance, store: Store, config: Config) {
   const demoCounts = new Map<string, number>();
@@ -58,6 +59,12 @@ export function registerCatalog(app: FastifyInstance, store: Store, config: Conf
     const place = store.get('places', params.id);
     if (!place) return reply.code(404).send({ error: 'Place not found' });
     return hydrate(place);
+  });
+  app.get<{ Params: { id: string } }>('/api/restaurants/:id/live-reviews', async ({ params }, reply) => {
+    const place = store.get('places', params.id);
+    if (!place) return reply.code(404).send({ error: 'Place not found' });
+    reply.header('Cache-Control', 'no-store');
+    return fetchLiveReviews(place, config);
   });
   app.get<{ Params: { id: string } }>('/api/restaurants/:id/manifest', async ({ params }, reply) => {
     const stored = store.get('places', params.id);

@@ -112,7 +112,7 @@ export function registerLive(app: FastifyInstance, store: Store, config: Config)
     const context = typeof body.context === 'string' ? body.context : undefined;
     const places = store.all('places');
 
-    const baseSession: Record<string, unknown> = {
+    const baseSession = {
       model: config.openaiLiveModel,
       instructions: buildVoiceInstructions(),
       audio: {
@@ -123,33 +123,35 @@ export function registerLive(app: FastifyInstance, store: Store, config: Config)
         responses: {
           model: config.openaiLiveBackendModel,
           instructions: buildBackendInstructions(places, context),
-          tools: LIVE_APP_TOOLS,
           tool_choice: 'auto',
           parallel_tool_calls: true,
         },
       },
     };
 
-    const requestWithStandby = {
-      session: {
-        ...baseSession,
-        idle_timeout_s: 30,
-        wake_policy: { type: 'speech' },
-      },
-      transport: {
-        type: 'webrtc',
-        sdp,
-      },
-    };
-
     try {
-      let result = await requestOpenAISession(config, requestWithStandby);
-      // If a snapshot/tier rejects optional standby fields, retry once with the core WebRTC session payload.
-      if (result.status === 400 && /idle_timeout|wake_policy|standby/i.test(result.rawText)) {
+      let standby = true;
+      let webSearch = true;
+      let result: Awaited<ReturnType<typeof requestOpenAISession>>;
+      for (;;) {
         result = await requestOpenAISession(config, {
-          session: baseSession,
+          session: {
+            ...baseSession,
+            ...(standby ? { idle_timeout_s: 30, wake_policy: { type: 'speech' } } : {}),
+            delegation: {
+              ...baseSession.delegation,
+              responses: {
+                ...baseSession.delegation.responses,
+                tools: webSearch ? [...LIVE_APP_TOOLS, { type: 'web_search' }] : LIVE_APP_TOOLS,
+              },
+            },
+          },
           transport: { type: 'webrtc', sdp },
         });
+        if (result.status !== 400) break;
+        if (webSearch && /web_search|web search/i.test(result.rawText)) webSearch = false;
+        else if (standby && /idle_timeout|wake_policy|standby/i.test(result.rawText)) standby = false;
+        else break;
       }
 
       if (result.status < 200 || result.status >= 300) {

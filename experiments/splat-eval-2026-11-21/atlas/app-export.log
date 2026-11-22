@@ -1,0 +1,277 @@
+splat-transform v3.12.0 (5d5be2b)
+▸ [2/2] Output /Users/liem/random/FareSight/web/public/assets-demo/room-eljefes-atlas.sog
+  · 345K gaussians · 0 SH bands
+  ▸ Writing
+    · room-eljefes-atlas.sog (4.2MB)
+done in 0.854s  [peak cpu=388.0MB]
+splat-transform v3.12.0 (5d5be2b)
+▸ [2/2] Output /Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/atlas/eljefes-kenmore/app-spawn-check.webp
+  · 345K gaussians · 0 SH bands
+  ▸ Render
+    · 528x704 fov 90°
+    · scene resident on GPU (42.1MB)
+    ▸ Encoding
+    · app-spawn-check.webp (327.9KB)
+done in 0.718s  [peak cpu=252.3MB gpu=58.3MB]
+splat-transform v3.12.0 (5d5be2b)
+▸ [2/2] Output /Users/liem/random/FareSight/web/public/assets-demo/room-shudaxia-atlas.sog
+  · 349K gaussians · 0 SH bands
+  ▸ Writing
+    · room-shudaxia-atlas.sog (4.3MB)
+done in 0.890s  [peak cpu=405.7MB]
+splat-transform v3.12.0 (5d5be2b)
+▸ [2/2] Output /Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/atlas/shudaxia-hotpot/app-spawn-check.webp
+  · 349K gaussians · 0 SH bands
+  ▸ Render
+    · 528x704 fov 90°
+    · scene resident on GPU (42.6MB)
+    ▸ Encoding
+    · app-spawn-check.webp (290.7KB)
+done in 0.668s  [peak cpu=228.9MB gpu=58.6MB]
+splat-transform v3.12.0 (5d5be2b)
+▸ [2/2] Output /Users/liem/random/FareSight/web/public/assets-demo/room-starbucks-atlas.sog
+  · 350K gaussians · 0 SH bands
+  ▸ Writing
+    · room-starbucks-atlas.sog (4.2MB)
+done in 0.952s  [peak cpu=400.5MB]
+splat-transform v3.12.0 (5d5be2b)
+▸ [2/2] Output /Users/liem/random/FareSight/experiments/splat-eval-2026-11-21/atlas/starbucks-warren/app-spawn-check.webp
+  · 350K gaussians · 0 SH bands
+  ▸ Render
+    · 528x704 fov 90°
+    · scene resident on GPU (42.7MB)
+    ▸ Encoding
+    · app-spawn-check.webp (249.3KB)
+done in 0.631s  [peak cpu=240.9MB gpu=60.1MB]
+splat-transform v3.12.0 (5d5be2b)
+▸ [2/2] Output /Users/liem/random/FareSight/web/public/assets-demo/dish-tiramisu-real.sog
+  · 60K gaussians · 0 SH bands
+  ▸ Writing
+    · dish-tiramisu-real.sog (721.6KB)
+done in 0.636s  [peak cpu=257.0MB]
+{
+  "rooms": [
+    {
+      "file": "room-eljefes-atlas.sog",
+      "kind": "room",
+      "splats": 344941,
+      "bytes": 4424733,
+      "spawn_point": [
+        0.0,
+        1.55,
+        2.0
+      ],
+      "start_photo": "IMG_5087",
+      "scale_applied": 1.0,
+      "photo_camera_height_m": 1.71,
+      "yaw_deg": 137.5,
+      "bounds_m": {
+        "min": [
+          -13.53,
+          -0.5,
+          -15.82
+        ],
+        "max": [
+          16.42,
+          6.0,
+          22.0
+        ]
+      },
+      "spawn_check_render": "atlas/eljefes-kenmore/app-spawn-check.webp"
+    },
+    {
+      "file": "room-shudaxia-atlas.sog",
+      "kind": "room",
+      "splats": 349369,
+      "bytes": 4542125,
+      "spawn_point": [
+        0.0,
+        1.55,
+        2.0
+      ],
+      "start_photo": "IMG_5099",
+      "scale_applied": 1.0,
+      "photo_camera_height_m": 1.48,
+      "yaw_deg": -156.1,
+      "bounds_m": {
+        "min": [
+          -8.99,
+          -0.5,
+          -7.83
+        ],
+        "max": [
+          13.77,
+          4.41,
+          13.75
+        ]
+      },
+      "spawn_check_render": "atlas/shudaxia-hotpot/app-spawn-check.webp"
+    },
+    {
+      "file": "room-starbucks-atlas.sog",
+      "kind": "room",
+      "splats": 349990,
+      "bytes": 4449667,
+      "spawn_point": [
+        0.0,
+        1.55,
+        2.0
+      ],
+      "start_photo": "IMG_5130",
+      "scale_applied": 0.6,
+      "photo_camera_height_m": 1.45,
+      "yaw_deg": -164.2,
+      "bounds_m": {
+        "min": [
+          -8.28,
+          -0.47,
+          -11.17
+        ],
+        "max": [
+          3.89,
+          3.77,
+          13.6
+        ]
+      },
+      "spawn_check_render": "atlas/starbucks-warren/app-spawn-check.webp"
+    }
+  ],
+  "dishes": [
+    {
+      "file": "dish-ramen-real.sog",
+      "kind": "dish",
+      "splats": 60000,
+      "bytes": 750174,
+      "provider": "sam",
+      "source_attempt": "dishes/outputs/ramen/sam/attempt1",
+      "plate_diameter_m": 0.24,
+      "measured_width_m": 0.242,
+      "height_m": 0.056,
+      "base_y_m": -0.0005,
+      "photo_credit": {
+        "author": "Quercus acuta",
+        "license": "CC BY-SA 4.0",
+        "page": "https://commons.wikimedia.org/wiki/File:Shoyu_Ramen%EF%BC%88Tokyo_Ramen%EF%BC%89_-_01.jpg"
+      }
+    },
+    {
+      "file": "dish-curry-real.sog",
+      "kind": "dish",
+      "splats": 60000,
+      "bytes": 727005,
+      "provider": "sam",
+      "source_attempt": "dishes/outputs/curry/sam/attempt1",
+      "plate_diameter_m": 0.26,
+      "measured_width_m": 0.262,
+      "height_m": 0.052,
+      "base_y_m": -0.0007,
+      "photo_credit": {
+        "author": "Ocdp",
+        "license": "CC0 1.0",
+        "page": "https://commons.wikimedia.org/wiki/File:Katsu-curry_002.jpg"
+      }
+    },
+    {
+      "file": "dish-tiramisu-real.sog",
+      "kind": "dish",
+      "splats": 59988,
+      "bytes": 738931,
+      "provider": "idol",
+      "source_attempt": "dishes/outputs/tiramisu/idol/attempt2",
+      "plate_diameter_m": 0.18,
+      "measured_width_m": 0.182,
+      "height_m": 0.049,
+      "base_y_m": -0.0006,
+      "photo_credit": {
+        "author": "Raffaele Diomede from Pordenone, ITALIA",
+        "license": "CC BY 2.0",
+        "page": "https://commons.wikimedia.org/wiki/File:Tiramisu_-_Raffaele_Diomede.jpg"
+      }
+    },
+    {
+      "file": "dish-burger-real.sog",
+      "kind": "dish",
+      "splats": 60000,
+      "bytes": 765704,
+      "provider": "idol",
+      "source_attempt": "dishes/outputs/burger/idol/attempt1",
+      "plate_diameter_m": 0.15,
+      "measured_width_m": 0.153,
+      "height_m": 0.078,
+      "base_y_m": -0.0004,
+      "photo_credit": {
+        "author": "Hongreddotbrewhouse",
+        "license": "CC BY-SA 3.0",
+        "page": "https://commons.wikimedia.org/wiki/File:RedDot_Burger.jpg"
+      }
+    },
+    {
+      "file": "dish-cocktail-real.sog",
+      "kind": "dish",
+      "splats": 60000,
+      "bytes": 793465,
+      "provider": "sam",
+      "source_attempt": "dishes/outputs/cocktail/sam/attempt2",
+      "plate_diameter_m": 0.085,
+      "measured_width_m": 0.087,
+      "height_m": 0.109,
+      "base_y_m": -0.0002,
+      "photo_credit": {
+        "author": "Erich Wagner (www.eventografie.de)",
+        "license": "CC BY-SA 4.0",
+        "page": "https://commons.wikimedia.org/wiki/File:Whiskey_Old_Fashioned1.jpg"
+      }
+    },
+    {
+      "file": "dish-pizza-real.sog",
+      "kind": "dish",
+      "splats": 60000,
+      "bytes": 749761,
+      "provider": "sam",
+      "source_attempt": "dishes/outputs/pizza/sam/attempt1",
+      "plate_diameter_m": 0.3,
+      "measured_width_m": 0.303,
+      "height_m": 0.041,
+      "base_y_m": -0.0011,
+      "photo_credit": {
+        "author": "\u98df\u9053\u697d",
+        "license": "CC BY-SA 3.0",
+        "page": "https://commons.wikimedia.org/wiki/File:PizzaMargarita.jpg"
+      }
+    },
+    {
+      "file": "dish-salad-real.sog",
+      "kind": "dish",
+      "splats": 60000,
+      "bytes": 753440,
+      "provider": "sam",
+      "source_attempt": "dishes/outputs/salad/sam/attempt1",
+      "plate_diameter_m": 0.24,
+      "measured_width_m": 0.244,
+      "height_m": 0.062,
+      "base_y_m": -0.0004,
+      "photo_credit": {
+        "author": "pastitio",
+        "license": "CC BY 2.0",
+        "page": "https://commons.wikimedia.org/wiki/File:Greek_salad.jpg"
+      }
+    },
+    {
+      "file": "dish-sushi-real.sog",
+      "kind": "dish",
+      "splats": 60000,
+      "bytes": 752426,
+      "provider": "sam",
+      "source_attempt": "dishes/outputs/sushi/sam/attempt2",
+      "plate_diameter_m": 0.26,
+      "measured_width_m": 0.265,
+      "height_m": 0.076,
+      "base_y_m": -0.0011,
+      "photo_credit": {
+        "author": "Angelicadlr",
+        "license": "CC BY-SA 3.0",
+        "page": "https://commons.wikimedia.org/wiki/File:Salmon_Sushi_and_Sashimi_Platter_-_W_Sushi.jpg"
+      }
+    }
+  ]
+}

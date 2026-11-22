@@ -611,7 +611,68 @@ test('MBTA rate-limit fallback keeps all seven subway routes and labels estimate
   assert(Number.isFinite(Date.parse(trip.last_train_time)));
 });
 
-test('gpt-live-1.1 broker preserves SDP, forwards the app tools and ballad, and retries if standby is rejected', async (t) => {
+test('live web reviews deduplicate lookups, retain only sourced reviews, and fall back to catalog facts', async (t) => {
+  const off = await setup(t, { openaiKey: undefined });
+  await off.start({ worker: false });
+  const venuePath = '/api/restaurants/bu-pavement-01';
+  const place = await off.request(venuePath);
+  const fallback = await off.request(venuePath + '/live-reviews');
+  assert.equal(fallback.live, false);
+  assert.deepEqual(fallback.ratings, place.details.ratings);
+  assert.deepEqual(fallback.highlights, place.details.review_highlights);
+  assert.deepEqual(fallback.reviews, []);
+  await off.request('/api/restaurants/missing/live-reviews', { status: 404 });
+
+  const server = await setup(t, { openaiKey: 'test-review-key', openaiBaseUrl: 'https://reviews.example/v1' });
+  const originalFetch = globalThis.fetch;
+  const source = 'https://www.yelp.com/biz/example-review-page';
+  let requests = 0;
+  let payload;
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    if (new URL(input).hostname !== 'reviews.example') return originalFetch(input, init);
+    requests++;
+    assert.equal(new URL(input).pathname, '/v1/responses');
+    assert.equal(init.redirect, 'error');
+    payload = JSON.parse(init.body);
+    if (!payload.input.includes(place.name)) return Response.json({ error: { message: 'test-review-key upstream detail' } }, { status: 502 });
+    await delay(40);
+    const excerpt = { author: 'Example Reviewer', text: 'The patio was quiet.', source: 'Yelp', rating: 4, date_label: 'November 2026', url: source };
+    return Response.json({ status: 'completed', output: [
+      { type: 'web_search_call', action: { sources: [{ url: source }] } },
+      { type: 'message', content: [{ type: 'output_text', text: JSON.stringify({
+        ratings: [{ source: 'Yelp', rating: 4.2, count: 52, url: source }],
+        highlights: [{ text: 'Customers mention a quiet patio.', url: source }],
+        reviews: [excerpt, excerpt, { ...excerpt, url: 'https://unverified.example/review' }],
+      }) }] },
+    ] });
+  });
+
+  await server.start({ worker: false });
+  const [first, parallel] = await Promise.all([server.request(venuePath + '/live-reviews'), server.request(venuePath + '/live-reviews')]);
+  assert.equal(first.place_id, place.id);
+  assert.equal(first.live, true);
+  assert.ok(Number.isFinite(Date.parse(first.fetched_at)));
+  assert.deepEqual(parallel, first);
+  assert.deepEqual(await server.request(venuePath + '/live-reviews'), first);
+  assert.equal(requests, 1);
+  assert.deepEqual(payload.tools, [{ type: 'web_search' }]);
+  assert.equal(payload.model, server.config.openaiLiveBackendModel);
+  assert.equal(payload.text.format.type, 'json_schema');
+  assert.equal(payload.text.format.strict, true);
+  assert.ok(payload.input.includes(place.details.address));
+  assert.deepEqual(first.ratings, [{ source: 'Yelp', rating: 4.2, count: 52, url: source }]);
+  assert.deepEqual(first.highlights, ['Customers mention a quiet patio.']);
+  assert.equal(first.reviews.length, 1);
+  assert.match(first.reviews[0].id, /^live-/);
+  assert.equal(first.reviews[0].url, source);
+  assert.equal(first.reviews[0].text, 'The patio was quiet.');
+  const failed = await server.request('/api/restaurants/kenmore-jefes-01/live-reviews');
+  assert.equal(failed.live, false);
+  assert.deepEqual(failed.reviews, []);
+  assert.ok(!JSON.stringify(failed).includes('test-review-key'));
+});
+
+test('gpt-live-1.1 broker preserves SDP and retries rejected optional standby and web search features', async (t) => {
   const unconfigured = await setup(t, { openaiKey: undefined });
   await unconfigured.start();
   const statusOff = await unconfigured.request('/api/live/status');
@@ -655,11 +716,13 @@ test('gpt-live-1.1 broker preserves SDP, forwards the app tools and ballad, and 
       assert.equal(body.session.delegation.type, 'responses');
       assert.equal(body.session.delegation.responses.model, 'gpt-6-luna');
       const { tools, instructions } = body.session.delegation.responses;
-      assert.deepEqual(tools.map(({ name }) => name), [
+      assert.deepEqual(tools.filter(({ type }) => type === 'function').map(({ name }) => name), [
         'list_places', 'set_filters', 'focus_stop', 'open_venue', 'open_dish', 'navigate_scene',
-        'get_next_trains', 'set_will_we_fit', 'get_place_details', 'compare_places', 'show_review_card', 'dismiss_review_card',
+        'get_next_trains', 'set_will_we_fit', 'get_place_details', 'get_live_reviews', 'compare_places', 'show_review_card', 'dismiss_review_card',
         'get_current_view',
       ]);
+      assert.ok(tools.some(({ type }) => type === 'web_search'));
+      assert.deepEqual(tools.find(({ name }) => name === 'get_live_reviews').parameters.required, ['placeId']);
       assert.deepEqual(tools.find(({ name }) => name === 'get_current_view').parameters, {
         type: 'object', properties: {}, required: [], additionalProperties: false,
       });
@@ -674,7 +737,16 @@ test('gpt-live-1.1 broker preserves SDP, forwards the app tools and ballad, and 
       }
       return Response.json({ error: { message: 'Unknown parameter: idle_timeout_s' } }, { status: 400 });
     }
-    if (requests.length === 2) assert.equal(body.session.idle_timeout_s, undefined);
+    if (requests.length === 2) {
+      assert.equal(body.session.idle_timeout_s, undefined);
+      assert.ok(body.session.delegation.responses.tools.some(({ type }) => type === 'web_search'));
+      return Response.json({ error: { message: 'Tool web_search is not supported' } }, { status: 400 });
+    }
+    if (requests.length === 3) {
+      assert.equal(body.session.idle_timeout_s, undefined);
+      assert.ok(body.session.delegation.responses.tools.every(({ type }) => type === 'function'));
+      assert.ok(body.session.delegation.responses.tools.some(({ name }) => name === 'get_live_reviews'));
+    }
     return Response.json({
       session: { id: 'live_test_123' },
       transport: { type: 'webrtc', sdp: answer },
@@ -698,12 +770,12 @@ test('gpt-live-1.1 broker preserves SDP, forwards the app tools and ballad, and 
     },
     status: 201,
   });
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 3);
   assert.equal(created.session_id, 'live_test_123');
   assert.equal(created.model, 'gpt-live-1.1');
   assert.equal(created.backend_model, 'gpt-6-luna');
   assert.equal(created.voice, 'ballad');
   assert.equal(created.sdp, answer);
   await server.request('/api/live/sessions', { body: { sdp: offer }, status: 201 });
-  assert.equal(requests.length, 3);
+  assert.equal(requests.length, 4);
 });

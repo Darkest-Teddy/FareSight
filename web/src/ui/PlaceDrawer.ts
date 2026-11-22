@@ -4,8 +4,9 @@ import {
 } from '@faresight/shared';
 import { api, type Alert, type Prediction, type Trip } from '../api/client';
 import { has3DDish, has3DRoom, hasDishPreview, isSplat } from '../data/preview3D';
-import { bostonHours, formatHours, week } from '../data/reviewBriefing';
+import { bostonHours, formatHours, liveBriefingReview, loadLiveReviews, week } from '../data/reviewBriefing';
 import { button, element, errorText, field, link, message, money, option, previewBadge, section } from './dom';
+import { renderBriefingReview } from './ReviewBriefingModal';
 import { oneWayCost, type Filters } from './state';
 
 export type Seating = 'seated' | 'standing';
@@ -319,7 +320,9 @@ export class PlaceDrawer {
       summary.append(this.venueComparison);
       this.reviewsNode = element('div');
       this.reviewsKey = '';
-      this.content.replaceChildren(summary, ...venueFacts(place), this.costDetails, this.tripDetails, this.modelDetails, this.pairingDetails, this.reviewsNode);
+      const live = element('div');
+      this.content.replaceChildren(summary, ...venueFacts(place), live, this.costDetails, this.tripDetails, this.modelDetails, this.pairingDetails, this.reviewsNode);
+      void this.updateLiveReviews(place, live);
       this.content.scrollTop = 0;
       this.modelKey = '';
     }
@@ -345,6 +348,35 @@ export class PlaceDrawer {
       this.title.tabIndex = -1;
       this.title.focus({ preventScroll: true });
     }
+  }
+
+  private async updateLiveReviews(place: Place, host: HTMLElement): Promise<void> {
+    const node = section('Live web reviews');
+    const status = message('Checking public reviews…');
+    node.append(status);
+    host.replaceChildren(node);
+    const result = await loadLiveReviews(place.id).catch(() => undefined);
+    if (!host.isConnected) return;
+    if (!result?.live) {
+      status.textContent = 'Live reviews unavailable. Catalog notes are still available below.';
+      node.append(button('Check again', () => { void this.updateLiveReviews(place, host); }, 'quiet'));
+      return;
+    }
+    status.remove();
+    for (const { source, rating, count, url } of result.ratings) {
+      const row = element('p');
+      row.append(url ? link(source, url) : source,
+        ` · ${rating.toFixed(1)} / 5${count ? ` · ${ratingCount.format(count)} reviews` : ''}`);
+      node.append(row);
+    }
+    if (result.highlights.length) {
+      const highlights = element('ul', 'review-highlights');
+      highlights.append(...result.highlights.map((text) => element('li', '', text)));
+      node.append(highlights);
+    }
+    if (result.reviews.length) {
+      node.append(...result.reviews.slice(0, 3).map((review) => renderBriefingReview(liveBriefingReview(review))));
+    } else node.append(element('p', 'muted', 'No attributed customer excerpts found.'));
   }
 
   private updateCost({ place, filters, trip, dish }: ViewData) {

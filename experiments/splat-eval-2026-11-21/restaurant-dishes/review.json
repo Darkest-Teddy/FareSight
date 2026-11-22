@@ -1,0 +1,314 @@
+{
+  "eljefes-tacos": {
+    "provider": "idol",
+    "portion": "Three tacos with grilled meat, slaw and cheese.",
+    "note": null
+  },
+  "eljefes-burrito": {
+    "provider": "sam",
+    "portion": "One carnitas burrito, shown as a cut half.",
+    "note": null
+  },
+  "eljefes-bowl": {
+    "provider": "idol",
+    "portion": "Burrito bowl with rice, beans, meat, slaw and guacamole.",
+    "note": null
+  },
+  "eljefes-quesadilla": {
+    "provider": "idol",
+    "portion": "Grilled quesadilla cut into wedges.",
+    "note": null
+  },
+  "eljefes-taco-salad": {
+    "provider": "idol",
+    "portion": "Taco salad in a fried tortilla bowl.",
+    "note": null
+  },
+  "eljefes-salsas": {
+    "provider": "idol",
+    "portion": "Six cups of salsas and sauces.",
+    "note": null
+  },
+  "shudaxia-hotpot": {
+    "provider": "idol",
+    "portion": "One serving: taiji shrimp paste2.0 (shu da xia special shrimp paste).",
+    "note": "Earlier export named this a dual-broth hot pot; the Chowbus menu identifies the yin-yang pot as Taiji shrimp paste 2.0.",
+    "source_url": "https://irp.cdn-website.com/ca5864e9/dms3rep/multi/b1cbcf_ca77acf3a9434ccb86bc2e7e0cd634cd-mv2.jpg"
+  },
+  "shudaxia-beef": {
+    "provider": "idol",
+    "portion": "Thin marbled beef slices piled around a dry-ice cup (plate not reconstructed).",
+    "note": "Listed on Chowbus as premium fatty beef slice; the photo is its dry-ice \"mountain\" presentation.",
+    "source_url": "https://irp.cdn-website.com/ca5864e9/dms3rep/multi/575e2b_93c110a7e8eb416e8822b39e58cfca57-mv2.png"
+  },
+  "shudaxia-pork-ribs": {
+    "provider": "idol",
+    "portion": "One serving: signature pork ribs w. warriors spicy sauce.",
+    "note": null
+  },
+  "shudaxia-beef-tripe": {
+    "provider": "idol",
+    "portion": "One serving: signature beef tripe.",
+    "note": null
+  },
+  "shudaxia-beef-skewers": {
+    "provider": "idol",
+    "portion": "Beef skewers in a spicy-sauce cup, served beside the Shu Daxia panda figure (part of the presentation).",
+    "note": null
+  },
+  "shudaxia-beef-tongue": {
+    "provider": "idol",
+    "portion": "One serving: beef tongue.",
+    "note": null
+  },
+  "shudaxia-ribeye": {
+    "provider": "idol",
+    "portion": "One serving: prime ribeye slice.",
+    "note": null
+  },
+  "shudaxia-lamb": {
+    "provider": "idol",
+    "portion": "One serving: lamb slice.",
+    "note": null
+  },
+  "shudaxia-beef-duo": {
+    "provider": "idol",
+    "portion": "One serving: beef duo(ribeye & bonless short rib).",
+    "note": null
+  },
+  "shudaxia-short-rib": {
+    "provider": "idol",
+    "portion": "One serving: boneless short rib.",
+    "note": null
+  },
+  "shudaxia-marinated-beef": {
+    "provider": "idol",
+    "portion": "One serving: prime marinated beef slices.",
+    "note": null
+  },
+  "shudaxia-shrimp": {
+    "provider": "idol",
+    "portion": "One serving: white shrimp w/ head.",
+    "note": null
+  },
+  "shudaxia-abalone": {
+    "provider": "idol",
+    "portion": "One serving: abalone.",
+    "note": null
+  },
+  "shudaxia-fish-fillets": {
+    "provider": "idol",
+    "portion": "One serving: kung fu snakehead fish fillets.",
+    "note": null
+  },
+  "shudaxia-shrimp-roll": {
+    "provider": "idol",
+    "portion": "One serving: tiger shrimp paste beancurd roll.",
+    "note": null
+  },
+  "shudaxia-mushroom-platter": {
+    "provider": "idol",
+    "portion": "One serving: assorted mushroom platter.",
+    "note": null
+  },
+  "shudaxia-crispy-pork": {
+    "provider": "idol",
+    "portion": "One serving: crispy fried pork.",
+    "note": null
+  },
+  "shudaxia-sticky-rice": {
+    "provider": "idol",
+    "portion": "One serving: fried sticky rice w. brown sugar.",
+    "note": null
+  },
+  "shudaxia-sichuan-fries": {
+    "provider": "idol",
+    "portion": "One serving: sichuan style french fries.",
+    "note": null
+  },
+  "shudaxia-dumplings": {
+    "provider": "idol",
+    "portion": "One serving: mini pork and cabbage dumplings (10pcs).",
+    "note": null
+  },
+  "shudaxia-beef-fried-rice": {
+    "provider": "idol",
+    "portion": "One serving: beef fried rice.",
+    "note": null
+  },
+  "shudaxia-noodles": {
+    "provider": "idol",
+    "portion": "One serving: hand-pulled noodles.",
+    "note": null
+  },
+  "shudaxia-malatang": {
+    "provider": "idol",
+    "portion": "One serving: malatang.",
+    "note": null
+  },
+  "shudaxia-ice-pudding": {
+    "provider": "idol",
+    "portion": "One serving: brown sugar ice pudding(seasonal fruits).",
+    "note": null
+  },
+  "shudaxia-tofu-pudding": {
+    "provider": "idol",
+    "portion": "One serving: tofu pudding (limited everyday).",
+    "note": null
+  },
+  "shudaxia-cheesecake": {
+    "provider": "idol",
+    "portion": "One serving: key lime cheesecake.",
+    "note": null
+  },
+  "shudaxia-strawberry-matcha": {
+    "provider": "idol",
+    "portion": "One serving: strawberry matcha latte.",
+    "note": null
+  },
+  "shudaxia-mango-tea": {
+    "provider": "idol",
+    "portion": "One serving: mango iced lemon tea.",
+    "note": null
+  },
+  "shudaxia-lime-tea": {
+    "provider": "idol",
+    "portion": "One serving: hand beaten iced lime tea.",
+    "note": null
+  },
+  "starbucks-drink": {
+    "provider": "sam",
+    "portion": "One serving: Iced Caramel Macchiato.",
+    "note": null
+  },
+  "starbucks-pastry": {
+    "provider": "sam",
+    "portion": "One serving: Butter Croissant.",
+    "note": null
+  },
+  "starbucks-caff-latte": {
+    "provider": "idol",
+    "portion": "One serving: Caffè Latte.",
+    "note": null
+  },
+  "starbucks-cappuccino": {
+    "provider": "idol",
+    "portion": "One serving: Cappuccino.",
+    "note": null
+  },
+  "starbucks-caramel-macchiato": {
+    "provider": "idol",
+    "portion": "One serving: Caramel Macchiato.",
+    "note": null
+  },
+  "starbucks-cold-brew": {
+    "provider": "sam",
+    "portion": "One serving: Cold Brew.",
+    "note": null
+  },
+  "starbucks-iced-matcha-latte": {
+    "provider": "idol",
+    "portion": "One serving: Iced Matcha Latte.",
+    "note": null
+  },
+  "starbucks-strawberry-a-a-refresher": {
+    "provider": "sam",
+    "portion": "One serving: Strawberry Açaí Refresher.",
+    "note": null
+  },
+  "starbucks-mango-dragonfruit-refresher": {
+    "provider": "sam",
+    "portion": "One serving: Mango Dragonfruit Refresher.",
+    "note": null
+  },
+  "starbucks-pink-drink": {
+    "provider": "idol",
+    "portion": "One serving: Pink Drink.",
+    "note": null
+  },
+  "starbucks-caramel-frappuccino-blended-beverage": {
+    "provider": "idol",
+    "portion": "One serving: Caramel Frappuccino Blended Beverage.",
+    "note": null
+  },
+  "starbucks-mocha-frappuccino-blended-beverage": {
+    "provider": "idol",
+    "portion": "One serving: Mocha Frappuccino Blended Beverage.",
+    "note": null
+  },
+  "starbucks-hot-chocolate": {
+    "provider": "idol",
+    "portion": "One serving: Hot Chocolate.",
+    "note": null
+  },
+  "starbucks-iced-brown-sugar-oatmilk-shaken-espresso": {
+    "provider": "sam",
+    "portion": "One serving: Iced Brown Sugar Oatmilk Shaken Espresso.",
+    "note": null
+  },
+  "starbucks-bacon-gouda-and-egg-sandwich": {
+    "provider": "idol",
+    "portion": "One serving: Bacon, Gouda & Egg Sandwich.",
+    "note": null
+  },
+  "starbucks-sausage-cheddar-and-egg-sandwich": {
+    "provider": "idol",
+    "portion": "One serving: Sausage, Cheddar & Egg Sandwich.",
+    "note": null
+  },
+  "starbucks-bacon-and-gruy-re-egg-bites": {
+    "provider": "idol",
+    "portion": "One serving: Bacon & Gruyère Egg Bites.",
+    "note": null
+  },
+  "starbucks-birthday-cake-pop": {
+    "provider": "sam",
+    "portion": "One serving: Birthday Cake Pop.",
+    "note": null
+  },
+  "starbucks-chocolate-croissant": {
+    "provider": "sam",
+    "portion": "One serving: Chocolate Croissant.",
+    "note": null
+  },
+  "starbucks-cheese-danish": {
+    "provider": "idol",
+    "portion": "One serving: Cheese Danish.",
+    "note": null
+  },
+  "starbucks-iced-lemon-loaf": {
+    "provider": "idol",
+    "portion": "One serving: Iced Lemon Loaf.",
+    "note": null
+  },
+  "starbucks-chocolate-chip-cookie": {
+    "provider": "sam",
+    "portion": "One serving: Chocolate Chip Cookie.",
+    "note": null
+  },
+  "starbucks-plain-bagel": {
+    "provider": "sam",
+    "portion": "One serving: Plain Bagel.",
+    "note": null
+  },
+  "starbucks-impossible-breakfast-sandwich": {
+    "provider": "sam",
+    "portion": "One serving: Impossible Breakfast Sandwich.",
+    "note": null
+  },
+  "starbucks-iced-chai-latte": {
+    "provider": "sam",
+    "portion": "One serving: Iced Chai Latte.",
+    "note": null
+  },
+  "starbucks-banana-walnut-and-pecan-loaf": {
+    "provider": "idol",
+    "portion": "One serving: Banana, Walnut & Pecan Loaf.",
+    "note": null
+  },
+  "starbucks-turkey-bacon-cheddar-and-egg-white-sandw": {
+    "provider": "idol",
+    "portion": "One serving: Turkey Bacon, Cheddar & Egg White Sandwich.",
+    "note": null
+  }
+}
