@@ -25,7 +25,7 @@ const BACKDROP = '#151922';
  * the blob sprawled across most of the frame but leaves a tight one almost invisible: once the
  * ground hugs the buildings, contrast is the only thing telling you it is there.
  */
-const GROUND = '#272f3e';
+const GROUND = '#38425a';
 
 /**
  * The ground is a morphological closing of the city: grown by GROW so the gaps between scattered
