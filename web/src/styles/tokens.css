@@ -41,6 +41,6 @@
 
   /* Layout */
   --gutter: 1rem;
-  --tap: 2.75rem;          /* the corner controls: back button height, menu button size */
+  --tap: 2.75rem;          /* the corner controls: back button height, bottom button size */
   --ease: cubic-bezier(.2, .8, .2, 1);
 }

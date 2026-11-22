@@ -12,8 +12,8 @@ import { LiveController, type AppControlSurface } from '../live/LiveController';
 import { RealtimeVoice } from '../voice/RealtimeVoice';
 import { AdminModal } from './AdminModal';
 import { attribution } from './AttributionModal';
-import { CornerMenu } from './CornerMenu';
-import { button, element, errorText, httpUrl, icon, link, message, modal, navItem, navTool, setNavItem } from './dom';
+import { Dock, type DockPanel } from './Dock';
+import { button, dockButton, element, errorText, httpUrl, icon, link, message, modal, setDockButton } from './dom';
 import { FilterControls } from './FilterControls';
 import { LiveVoiceDock } from './LiveVoiceDock';
 import { lineDots } from './lineDots';
@@ -36,7 +36,7 @@ export class AppShell {
   private readonly backButton: HTMLButtonElement;
   private readonly backLabel = element('span', 'back-label');
   private readonly stationBoard = element('section', 'station-board');
-  private readonly menu: CornerMenu;
+  private readonly dock: Dock;
   private readonly stationList = element('div', 'station-board-list');
   private readonly routeFeedback = element('div');
   private readonly filterControls: FilterControls;
@@ -50,7 +50,6 @@ export class AppShell {
   private readonly debug = modal('Debug');
   private readonly renderStats = element('p', 'readout');
   private readonly debugLogs = element('pre', 'log-view');
-  private readonly pairButton: HTMLButtonElement;
   private readonly audioButton: HTMLButtonElement;
   private readonly vrButton: HTMLButtonElement;
   private readonly xrExit: HTMLButtonElement;
@@ -81,8 +80,8 @@ export class AppShell {
   private rotation = 0;
   private virtualTable = true;
   private muted = true;
-  private filterOpen = false;
-  private stopsOpen = false;
+  /** The one card open above the bottom buttons, if any. */
+  private panel?: DockPanel;
   private chimeRequest = 0;
   private tripRequest = 0;
   private manifestRequest = 0;
@@ -102,7 +101,7 @@ export class AppShell {
   constructor(private readonly root: HTMLElement) {
     root.classList.add('app-shell');
     // The map is the hero. The chrome keeps to the corners: the brand, or a back button once you are
-    // deeper than the map, top-left; one menu bottom-right that opens on demand.
+    // deeper than the map, top-left; a row of icon buttons bottom-left; the budget bottom-right.
     const mark = element('span', 'brand-mark');
     mark.setAttribute('aria-hidden', 'true');
     this.brand.append(mark, 'FareSight');
@@ -110,20 +109,16 @@ export class AppShell {
     this.backButton = button('', () => this.stepBack(), 'scene-back');
     this.backButton.append(icon('back'), this.backLabel);
     this.backNav.append(this.backButton);
-    // The MBTA state is the last line of the menu. A problem also marks the closed menu button.
+    // The MBTA state is the last line under the stop list. A problem also marks the Stops button.
     this.statusText.setAttribute('role', 'status');
     this.status.append(element('span', 'status-dot'), this.statusText);
-    this.vrButton = navItem('vr', 'Enter VR', () => void this.launchVR());
-    // Shown once the viewer reports what this device supports, so the label never flips on screen.
+    this.vrButton = dockButton('vr', 'Enter VR', () => void this.launchVR());
+    // Shown once the viewer reports what this device supports, so the icon never flips on screen.
     this.vrButton.hidden = true;
-    this.xrExit = navItem('exit', 'Exit XR', () => this.engine?.exitXR(), 'accent');
+    this.xrExit = dockButton('exit', 'Exit XR', () => this.engine?.exitXR(), 'accent');
     this.xrExit.hidden = true;
-    this.pairButton = navTool('pair', 'Pair', () => this.pairing.open());
-    this.pairButton.title = 'Pair a Quest headset';
-    this.audioButton = navTool('mute', 'Sound', () => this.toggleAudio());
+    this.audioButton = dockButton('mute', 'Sound effects', () => this.toggleAudio());
     this.audioButton.setAttribute('aria-pressed', 'false');
-    // Toggling sound leaves the menu open, so the change can be seen.
-    this.audioButton.dataset.stay = 'true';
     const admin = new AdminModal(() => void this.loadCatalog());
     this.credits = attribution(() => admin.open());
     this.liveController = new LiveController(this.createControlSurface());
@@ -131,7 +126,6 @@ export class AppShell {
       onState: (state, detail) => {
         this.liveDock.setState(state, detail);
         this.engine?.setVoiceState(state);
-        this.renderMenuBadge();
       },
       onNotice: (detail) => this.liveDock.setNotice(detail),
       onMicrophone: (hasMic, muted, requesting) => this.liveDock.setMicrophone(hasMic, muted, requesting),
@@ -150,7 +144,6 @@ export class AppShell {
       toggleMute: () => this.liveClient.setMuted(!this.liveClient.isMuted),
       sendText: (text) => this.liveClient.sendText(text),
       opened: () => this.settleOverlays('voice'),
-      returnFocus: () => this.menu.focusTrigger(),
     });
     this.canvas.setAttribute('aria-label', 'FareSight interactive 3D view');
     this.canvas.tabIndex = 0;
@@ -164,32 +157,26 @@ export class AppShell {
     this.stationBoard.append(this.stationList, this.routeFeedback);
 
     this.filterControls = new FilterControls(this.filters, (patch) => this.updateFilters(patch), () => void this.locate());
-    this.pairing = new PairingModal((data) => void this.receivePair(data), (paired) => {
-      setNavItem(this.pairButton, paired ? 'Paired' : 'Pair');
-    });
+    this.pairing = new PairingModal((data) => void this.receivePair(data), () => {});
     this.uploader = new UploadPipelineModal({
       places: () => this.places,
       published: (job, open, current) => this.handlePublication(job, open, current),
     });
-    this.menu = new CornerMenu({
-      filters: this.filterControls.root,
+    // Credits, pairing, uploads and the debug log have no button; the voice assistant can still open them.
+    this.liveDock.trigger.classList.add('dock-button');
+    this.dock = new Dock({
       stops: this.stationBoard,
-      primary: [this.liveDock.trigger, this.vrButton, this.xrExit],
-      tools: [
-        this.pairButton,
-        navTool('upload', 'Upload', () => this.uploader.open(this.place?.id)),
-        this.audioButton,
-        navTool('info', 'Credits', this.credits.open),
-        navTool('bug', 'Debug', () => this.openDebug()),
-      ],
+      origin: this.filterControls.origin,
+      budget: this.filterControls.budget,
+      voice: this.liveDock.trigger,
+      actions: [this.vrButton, this.xrExit, this.audioButton],
       status: this.status,
-      setOpen: (open) => this.setFilterOpen(open, false),
-      showStops: (open) => (open ? this.setStopsOpen(true, true) : this.setFilterOpen(true, false)),
+      toggle: (panel) => this.setPanel(this.panel === panel ? undefined : panel, true),
+      close: () => this.setPanel(undefined),
     });
-    this.liveDock.trigger.classList.add('menu-item');
 
-    // The chrome comes first in the document, so Tab reaches Back and the menu before the map's labels.
-    root.replaceChildren(this.brand, this.backNav, this.menu.root, this.liveDock.root, this.canvas, this.canvasNotice, this.notice);
+    // The chrome comes first in the document, so Tab reaches Back and the buttons before the map's labels.
+    root.replaceChildren(this.brand, this.backNav, this.dock.root, this.dock.budget, this.liveDock.root, this.canvas, this.canvasNotice, this.notice);
     this.debug.body.append(this.renderStats, this.xrStatus, this.debugLogs,
       button('Reset camera', () => this.engine?.resetCamera()),
       button('Send debug logs', () => void this.sendDebugLogs(), 'quiet'));
@@ -258,7 +245,7 @@ export class AppShell {
           this.root.dataset.xr = this.xrMode;
           this.vrButton.hidden = this.xrMode !== 'none';
           this.xrExit.hidden = this.xrMode === 'none';
-          setNavItem(this.vrButton, state.vrSupported ? 'Enter VR' : 'Reset view', state.vrSupported ? 'vr' : 'reset');
+          setDockButton(this.vrButton, state.vrSupported ? 'Enter VR' : 'Reset view', state.vrSupported ? 'vr' : 'reset');
           this.vrButton.classList.toggle('accent', state.vrSupported);
           this.vrButton.dataset.supported = String(state.vrSupported);
           this.xrStatus.textContent = state.activeMode === 'ar' ? 'AR table active'
@@ -307,16 +294,10 @@ export class AppShell {
     const source = this.catalogState === 'offline' ? 'offline' : this.vehicleSource ?? 'pending';
     if (this.statusText.textContent !== text) this.statusText.textContent = text;
     this.status.dataset.source = source;
-    // A problem turns the dot red and ringed, and marks the closed menu button too.
-    this.status.dataset.alert = String(source === 'offline' || source === 'unavailable');
-    this.renderMenuBadge();
-  }
-
-  /** Red for an MBTA problem; sunflower while a voice session runs or the budget is narrowed. */
-  private renderMenuBadge() {
-    const voice = this.liveClient.state;
-    const active = filtersNarrowed(this.filters) || voice === 'listening' || voice === 'thinking' || voice === 'speaking' || voice === 'connecting';
-    this.menu.setBadge(this.status.dataset.alert === 'true' ? 'alert' : active ? 'active' : 'none');
+    // A problem turns the dot red and ringed, and marks the Stops button too.
+    const alert = source === 'offline' || source === 'unavailable';
+    this.status.dataset.alert = String(alert);
+    this.dock.setAlert(alert);
   }
 
   private async loadCatalog() {
@@ -393,13 +374,12 @@ export class AppShell {
     for (const stop of this.stops) {
       const previews = counts.get(stop.stop_id);
       const count = previews?.matching ?? 0;
-      // Picking a stop takes you into its scene, which closes the menu. Without the 3D viewer
+      // Picking a stop takes you into its scene, which closes the list. Without the 3D viewer
       // there is no scene to open, so the list stays up.
       const row = button('', () => {
         this.showStation(stop);
         if (!this.engineReady) this.setStopsOpen(true);
       }, 'station-row');
-      row.dataset.stay = 'true';
       const name = element('strong');
       name.append(element('span', 'station-name', stop.name));
       row.append(lineDots(stop), name, element('span', 'station-count', String(count)));
@@ -413,39 +393,37 @@ export class AppShell {
     }
   }
 
-  /** The menu is open while it shows the filters (its main level) or the stop list. */
   private renderPanels() {
     this.root.dataset.scene = this.mode;
-    this.menu.render(this.filterOpen || this.stopsOpen, this.stopsOpen);
+    this.dock.render(this.panel);
   }
 
-  /** Opens or closes the menu on its main level, where the filters are. */
-  private setFilterOpen(open: boolean, focus = true) {
-    const opening = open && !this.menu.isOpen;
-    this.filterOpen = open;
-    this.stopsOpen = false;
+  /** Opens one card above the bottom buttons, or closes whichever is open. */
+  private setPanel(panel: DockPanel | undefined, focus = false) {
+    this.panel = panel;
     this.renderPanels();
-    if (opening) this.settleOverlays('menu');
-    if (open && focus) this.filterControls.focusFirst();
+    if (panel) this.settleOverlays('panel');
+    if (!panel || !focus) return;
+    if (panel === 'stops') this.stationList.querySelector<HTMLElement>('.station-row')?.focus({ preventScroll: true });
+    else if (panel === 'origin') this.filterControls.focusOrigin();
+    else this.filterControls.focusBudget();
   }
 
-  /** The stop list is the menu's second level, so showing it opens the menu too. */
+  /** The voice assistant's "filter panel" is the budget card. */
+  private setFilterOpen(open: boolean) {
+    if (open) this.setPanel('budget', true);
+    else if (this.panel === 'budget' || this.panel === 'origin') this.setPanel(undefined);
+  }
+
   private setStopsOpen(open: boolean, focus = false) {
-    this.stopsOpen = open;
-    this.filterOpen = false;
-    this.renderPanels();
-    if (open) this.settleOverlays('menu');
-    if (open && focus) this.stationList.querySelector<HTMLElement>('.station-row')?.focus({ preventScroll: true });
+    if (open) this.setPanel('stops', focus);
+    else if (this.panel === 'stops') this.setPanel(undefined);
   }
 
-  /** A phone has room for one opened thing in the bottom corner: the menu or the voice transcript. */
-  private settleOverlays(opened: 'menu' | 'voice') {
-    if (!this.mobile.matches) return;
-    if (opened === 'menu') this.liveDock.setOpen(false);
-    else if (this.filterOpen || this.stopsOpen) {
-      this.filterOpen = this.stopsOpen = false;
-      this.renderPanels();
-    }
+  /** The cards and the voice transcript open over the same corner, so only one shows at a time. */
+  private settleOverlays(opened: 'panel' | 'voice') {
+    if (opened === 'panel') this.liveDock.setOpen(false);
+    else if (this.panel) this.setPanel(undefined);
   }
 
   private updateFilters(patch: Partial<Filters>) {
@@ -463,7 +441,7 @@ export class AppShell {
     this.filtered = matchingPlaces(this.places, this.filters);
     const matched = new Set(this.filtered.map((place) => place.id));
     this.filterControls.render(this.filters, this.filtered.length);
-    this.renderMenuBadge();
+    this.dock.setBudget(this.filters.maxBudget, filtersNarrowed(this.filters));
     this.renderStationBoard(matched);
     if (!this.engineReady) return;
     this.engine?.setFilters(this.filters);
@@ -537,9 +515,8 @@ export class AppShell {
     ++this.tripRequest;
     ++this.manifestRequest;
     ++this.chimeRequest;
-    this.filterOpen = false;
     // Without the 3D map the stop list is the only way in, so it is the one thing left open.
-    this.stopsOpen = this.root.dataset.viewer === 'failed';
+    this.panel = this.root.dataset.viewer === 'failed' ? 'stops' : undefined;
     this.renderBack();
     this.renderPanels();
     this.renderScene();
@@ -556,8 +533,7 @@ export class AppShell {
     this.highlightedDishId = undefined;
     this.inside = this.fit = false;
     this.mode = 'station';
-    this.filterOpen = false;
-    this.stopsOpen = false;
+    this.panel = undefined;
     this.renderBack();
     this.renderPanels();
     if (changed) {
@@ -606,8 +582,7 @@ export class AppShell {
     this.comparison = undefined;
     this.dishRequest++;
     this.mode = 'venue';
-    this.filterOpen = false;
-    this.stopsOpen = false;
+    this.panel = undefined;
     if (changed || cameFromDish) this.sound.playSelect();
     this.renderBack();
     this.renderPanels();
@@ -739,8 +714,7 @@ export class AppShell {
     this.dish = dish;
     this.comparison = comparison;
     if (previous !== dish.id) this.rotation = 0;
-    this.filterOpen = false;
-    this.stopsOpen = false;
+    this.panel = undefined;
     this.sound.playSelect();
     this.renderBack();
     this.renderPanels();
@@ -882,7 +856,7 @@ export class AppShell {
     // The entry keeps its label. Its icon and pressed state say whether sound is actually playing.
     const playing = !this.muted && this.sound.running;
     this.audioButton.setAttribute('aria-pressed', String(playing));
-    setNavItem(this.audioButton, 'Sound', playing ? 'sound' : 'mute');
+    setDockButton(this.audioButton, playing ? 'Sound effects on' : 'Sound effects off', playing ? 'sound' : 'mute');
   }
 
   private setDishRotation(degrees: number): void {
@@ -995,7 +969,7 @@ export class AppShell {
         rotation: this.rotation,
         virtualTable: this.virtualTable,
         muted: this.muted || !this.sound.running,
-        filterOpen: this.filterOpen,
+        filterOpen: this.panel === 'budget' || this.panel === 'origin',
         xrMode: this.xrMode,
         manifest: this.manifest.data,
         trip: this.trip.data,

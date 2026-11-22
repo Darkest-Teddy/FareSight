@@ -8,8 +8,6 @@ export interface LiveVoiceDockActions {
   toggleMute(): void;
   sendText(text: string): boolean;
   opened?(): void;
-  /** Takes the keyboard when the dock closes while its trigger is tucked inside the closed menu. */
-  returnFocus?(): void;
 }
 
 const stateLabels: Record<VoiceState, string> = {
@@ -109,7 +107,6 @@ export class LiveVoiceDock {
     });
 
     this.root.append(head, this.errorNote, controls, this.feed, this.form);
-    this.describeTrigger();
     this.renderEmptyFeed();
     this.renderControls();
   }
@@ -119,19 +116,8 @@ export class LiveVoiceDock {
     const restore = !open && this.root.contains(document.activeElement);
     this.root.hidden = !open;
     this.trigger.setAttribute('aria-expanded', String(open));
-    this.describeTrigger();
-    if (restore) this.focusTrigger();
+    if (restore) this.trigger.focus({ preventScroll: true });
     if (open) this.actions.opened?.();
-  }
-
-  private focusTrigger(): void {
-    if (this.trigger.offsetParent) this.trigger.focus({ preventScroll: true });
-    else this.actions.returnFocus?.();
-  }
-
-  private describeTrigger(): void {
-    // The menu row names the session's state; the tooltip says what pressing it does next.
-    this.trigger.title = this.root.hidden ? 'Open GPT Live' : 'Hide GPT Live';
   }
 
   setModel(model: string): void {

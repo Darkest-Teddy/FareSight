@@ -155,13 +155,13 @@ small { color: var(--muted); }
 .form-stack button { justify-self: start; }
 .button-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; min-width: 0; }
 
-/* ───────── Voice transcript: the bottom-left corner, clear of the menu in the bottom-right ───────── */
+/* ───────── Voice transcript: beside the column of buttons in the bottom-left corner ───────── */
 .voice-dock {
   position: absolute;
   z-index: 4;
-  left: max(var(--gutter), env(safe-area-inset-left));
+  left: calc(max(var(--gutter), env(safe-area-inset-left)) + var(--tap) + .5rem);
   bottom: max(var(--gutter), env(safe-area-inset-bottom));
-  width: min(21.5rem, calc(100% - 2 * var(--gutter) - var(--tap) - .75rem));
+  width: min(21.5rem, calc(100% - 2 * var(--gutter) - var(--tap) - .5rem));
   max-height: min(27rem, calc(100% - 3 * var(--gutter) - var(--tap) - env(safe-area-inset-top)));
   overflow-y: auto;
   display: flex;
@@ -301,13 +301,12 @@ small { color: var(--muted); }
 
   /* A message waits below the back button instead of covering it. */
   .app-shell:not([data-scene=map]) .notice { top: calc(max(var(--gutter), env(safe-area-inset-top)) + var(--tap) + .5rem); }
-  .menu-filters input[type=range] { min-height: 44px; }
 
   .map-label { min-height: 1.875rem; padding: .25rem .625rem .25rem .5rem; }
   .map-label strong { font-size: .75rem; }
   .map-label-count { display: none; }
 
-  /* Full width above the menu button, which stays reachable. */
+  /* Beside the column and above the budget button, so both stay reachable. */
   .voice-dock {
     right: max(var(--gutter), env(safe-area-inset-right));
     bottom: calc(max(var(--gutter), env(safe-area-inset-bottom)) + var(--tap) + .5rem);
@@ -318,7 +317,7 @@ small { color: var(--muted); }
   .modal { width: calc(100% - 1rem); max-height: calc(100dvh - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
   .modal-header { padding: .75rem .75rem .75rem 1rem; }
   .modal-body { padding: .875rem 1rem 1rem; }
-  .modal input, .modal textarea, .modal select, .voice-input-row input, .menu-filters select { font-size: 1rem; }
+  .modal input, .modal textarea, .modal select, .voice-input-row input, .filter-card select { font-size: 1rem; }
   .photo-card .check { min-height: 44px; }
 }
 

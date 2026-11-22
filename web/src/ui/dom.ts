@@ -14,10 +14,7 @@ export function button(label: string, action: () => void, className = '') {
 
 // Static line icons on a 24 px grid. Strokes take the text colour, so they follow every button state.
 const icons = {
-  close: '<path d="M6 6l12 12M18 6 6 18"/>',
-  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   back: '<path d="M19.5 12h-15M10.5 6l-6 6 6 6"/>',
-  chevron: '<path d="m9.5 6 6 6-6 6"/>',
   list: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.3" class="fill"/><circle cx="4.5" cy="12" r="1.3" class="fill"/><circle cx="4.5" cy="18" r="1.3" class="fill"/>',
   mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>',
   alert: '<path d="M12 7v6.5M12 17v.2"/>',
@@ -28,12 +25,8 @@ const icons = {
   vr: '<path d="M4 8h16a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 20 17h-3.4a1.5 1.5 0 0 1-1.2-.6l-1.2-1.6a2.7 2.7 0 0 0-4.4 0l-1.2 1.6a1.5 1.5 0 0 1-1.2.6H4a1.5 1.5 0 0 1-1.5-1.5v-6A1.5 1.5 0 0 1 4 8z"/>',
   reset: '<path d="M5 12a7 7 0 1 0 2.2-5.1L5 9M5 4.5V9h4.5"/>',
   exit: '<path d="M14 4.5h4.5v15H14M10.5 8l-4 4 4 4M6.5 12H15"/>',
-  upload: '<path d="M12 16V4.5M7.5 9 12 4.5 16.5 9M4.5 19.5h15"/>',
-  pair: '<path d="M10 14a4 4 0 0 0 5.7 0l3.2-3.2a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3.2 3.2a4 4 0 0 0 5.7 5.7l1-1"/>',
   sound: '<path d="M4 9.5v5h3.5L12 18V6L7.5 9.5zM15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.7 7.7 0 0 1 0 11"/>',
   mute: '<path d="M4 9.5v5h3.5L12 18V6L7.5 9.5zM16 9.7l4.5 4.6M20.5 9.7 16 14.3"/>',
-  info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.6v.2"/>',
-  bug: '<rect x="8" y="7.5" width="8" height="11.5" rx="4"/><path d="M9.5 7.5a2.5 2.5 0 0 1 5 0M8 11.5H4.5M8 15.5H5M16 11.5h3.5M16 15.5h3M12 12v7"/>',
 } as const;
 export type IconName = keyof typeof icons;
 
@@ -55,23 +48,18 @@ export function iconButton(name: IconName, label: string, action: () => void, cl
   return node;
 }
 
-/** A menu row: icon first, then its label, which is also its accessible name. */
-export function navItem(name: IconName, label: string, action: () => void, className = '') {
-  const node = button('', action, `menu-item ${className}`.trim());
-  node.append(icon(name), element('span', 'menu-label', label));
+/** An icon button for the bottom corners. Its label slides out of the button on hover or focus. */
+export function dockButton(name: IconName, label: string, action: () => void, className = '') {
+  const node = button('', action, `dock-button ${className}`.trim());
+  node.append(icon(name), element('span', 'dock-label'));
+  setDockButton(node, label);
   return node;
 }
 
-/** A quiet utility entry in the menu: an icon over a one-word caption. */
-export function navTool(name: IconName, label: string, action: () => void) {
-  const node = button('', action, 'menu-tool');
-  node.append(icon(name), element('span', 'menu-label', label));
-  return node;
-}
-
-/** Renames a menu entry, and swaps its icon when one is given. */
-export function setNavItem(node: HTMLElement, label: string, name?: IconName) {
-  const text = node.querySelector('.menu-label');
+/** Renames a dock button, and swaps its icon when one is given. */
+export function setDockButton(node: HTMLElement, label: string, name?: IconName) {
+  node.setAttribute('aria-label', label);
+  const text = node.querySelector('.dock-label');
   if (text) text.textContent = label;
   const glyph = name && node.querySelector('.icon');
   if (glyph) glyph.innerHTML = icons[name];
