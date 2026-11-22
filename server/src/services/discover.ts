@@ -1,9 +1,11 @@
 import type {
-  Category, DiscoverPlace, DiscoverQuery, DiscoverResponse, DiscoverWindow, EngagementKind, GoogleRating, Place,
+  AggregateRating, Category, DiscoverPlace, DiscoverQuery, DiscoverResponse, DiscoverWindow,
+  EngagementKind, Place,
 } from '@faresight/shared';
 import { ENGAGEMENT_WEIGHTS, NEW_FOR_DAYS, STOPS, WINDOW_HOURS, chipCategories } from '@faresight/shared';
 import type { Store } from '../db/database.ts';
 import type { Accounts } from './accounts.ts';
+import { combinedScore, type CleanRating } from './reviewSources.ts';
 
 /** How long a station may be from a place and still be used as its label. */
 const STATION_LABEL_METRES = 800;
@@ -70,7 +72,7 @@ function isNew(createdAt: Date): boolean {
 }
 
 /** Best available rating for a seeded place, taken from the researched facts already in the catalogue. */
-function catalogRating(place: Place): GoogleRating | null {
+function catalogRating(place: Place): AggregateRating | null {
   const ratings = place.details?.ratings ?? [];
   const google = ratings.find(({ source }) => /google/i.test(source)) ?? ratings[0];
   if (!google || google.count === null || google.count === undefined) return null;
@@ -79,6 +81,30 @@ function catalogRating(place: Place): GoogleRating | null {
     rating_count: google.count,
     attribution: [google.source],
     url: google.url,
+  };
+}
+
+/**
+ * Turns the rows gathered by the review backfill into one figure for the card.
+ *
+ * Several sites are combined and weighted by review count, so a venue rated 4.4 across two
+ * thousand Google reviews is not pulled around by a single three-star entry somewhere else.
+ */
+function gatheredRating(rows: RatingRow[] | undefined): AggregateRating | null {
+  if (!rows?.length) return null;
+  const cleaned: CleanRating[] = rows.map((row) => ({
+    source: row.source, rating: row.rating, count: row.rating_count,
+    url: row.url, selfReported: row.self_reported,
+  }));
+  const combined = combinedScore(cleaned);
+  if (!combined) return null;
+  const contributing = cleaned.filter((entry) => !entry.selfReported);
+  return {
+    rating: combined.score,
+    rating_count: combined.count,
+    attribution: contributing.map((entry) => entry.source),
+    // Link to whichever contributing source published the most reviews.
+    url: contributing.slice().sort((a, b) => (b.count ?? 0) - (a.count ?? 0))[0]?.url ?? null,
   };
 }
 
@@ -139,6 +165,15 @@ function fromContributed(row: ContributedRow): DiscoverPlace {
   };
 }
 
+export interface RatingRow {
+  place_id: string;
+  source: string;
+  rating: number;
+  rating_count: number | null;
+  url: string | null;
+  self_reported: boolean;
+}
+
 export function createDiscover(accounts: Accounts, store: Store) {
   // Seeded places have no creation date, so they share one: the catalogue's own epoch. It only has
   // to sort below anything a person adds, which it does.
@@ -184,6 +219,25 @@ export function createDiscover(accounts: Accounts, store: Store) {
     return scores;
   }
 
+  /**
+   * Every rating gathered by the review backfill, grouped by place.
+   *
+   * Loaded in one query rather than per place: the table holds a handful of rows per venue and a
+   * few hundred venues, so one read is cheaper than a join repeated across the merged list.
+   */
+  async function gatheredRatings(): Promise<Map<string, RatingRow[]>> {
+    const { rows } = await accounts.pool.query<RatingRow>(
+      'select place_id, source, rating, rating_count, url, self_reported from place_ratings',
+    );
+    const byPlace = new Map<string, RatingRow[]>();
+    for (const row of rows) {
+      const group = byPlace.get(row.place_id) ?? [];
+      group.push(row);
+      byPlace.set(row.place_id, group);
+    }
+    return byPlace;
+  }
+
   async function contributed(): Promise<DiscoverPlace[]> {
     const { rows } = await accounts.pool.query<ContributedRow>(
       `select p.*, u.display_name, u.avatar_url,
@@ -217,10 +271,17 @@ export function createDiscover(accounts: Accounts, store: Store) {
     const limit = Math.min(60, Math.max(1, query.limit ?? 24));
     const offset = Math.max(0, Number(query.cursor ?? 0) || 0);
 
+    const [contributedPlaces, ratings] = await Promise.all([contributed(), gatheredRatings()]);
     const places = [
       ...store.all('places').map((place: Place) => fromCatalog(place, catalogEpoch)),
-      ...await contributed(),
-    ];
+      ...contributedPlaces,
+    ].map((place) => {
+      // What the backfill found from several sites beats a single hand-researched figure, because
+      // it is both more current and weighted across more reviews. The hand-researched entry stays
+      // as the fallback for anything never looked up.
+      const gathered = gatheredRating(ratings.get(place.id));
+      return gathered ? { ...place, rating: gathered } : place;
+    });
 
     const categories = new Set(chipCategories(query.chip));
     const needle = query.q?.trim().toLowerCase();

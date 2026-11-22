@@ -274,8 +274,10 @@ export class DiscoverView {
       ring.classList.add(score >= 8.5 ? 'is-high' : score >= 7 ? 'is-mid' : 'is-low');
       ring.append(element('span', 'discover-score-value', score.toFixed(1)));
       const wrap = element('div', 'discover-score-wrap');
-      wrap.append(ring, element('span', 'discover-score-count', `${place.rating.rating_count.toLocaleString()} ratings`));
-      wrap.title = `Rating from ${place.rating.attribution.join(', ')}`;
+      const count = place.rating.rating_count;
+      wrap.append(ring, element('span', 'discover-score-count',
+        count > 0 ? `${count.toLocaleString()} ratings` : `${place.rating.attribution.length} sources`));
+      wrap.title = `${place.rating.rating_count.toLocaleString()} reviews from ${place.rating.attribution.join(', ')}`;
       body.append(wrap);
     } else if (this.sort === 'popular' && place.score !== null) {
       const wrap = element('div', 'discover-score-wrap');

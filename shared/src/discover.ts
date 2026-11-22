@@ -19,13 +19,24 @@ export interface AuthStatus {
   enabled: boolean;
 }
 
-/** Ratings shown on a card come from Google. They are displayed, never ranked on (spec D13/D14). */
-export interface GoogleRating {
+/**
+ * The rating shown on a card: several review sites combined, weighted by how many reviews each
+ * carries. Displayed only, never ranked on (spec D13).
+ *
+ * `attribution` names every site that contributed, which is both a licensing obligation and the
+ * honest thing to show -- "4.4 from Google, Tripadvisor" means something that a bare 4.4 does not.
+ */
+export interface AggregateRating {
+  /** Zero to five, as every source reports. The card converts to ten for display. */
   rating: number;
+  /** Total reviews across contributing sites. Zero when no site published a count. */
   rating_count: number;
   attribution: string[];
   url: string | null;
 }
+
+/** @deprecated Kept so older imports still resolve. Use AggregateRating. */
+export type GoogleRating = AggregateRating;
 
 export interface DiscoverPlace {
   id: string;
@@ -45,7 +56,7 @@ export interface DiscoverPlace {
   /** Pipeline stage while a splat is still building, else null. */
   build_stage: string | null;
   /** Absent when the place has no Google match: the card shows no score at all (spec D17). */
-  rating: GoogleRating | null;
+  rating: AggregateRating | null;
   /** True for the first seven days after creation. */
   is_new: boolean;
   /** Where the row came from: the seeded catalogue or a contributor's upload. */
