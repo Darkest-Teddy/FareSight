@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { crc32, deflateSync } from 'node:zlib';
 
 const defaultOrigin = 'http://localhost:3001';
-const defaultPlace = 'bu-ramen-01';
+const defaultPlace = 'harvard-cafe-01';
 const geminiModel = 'gemini-4-hydrogen';
 const draftTier = 'atlas-draft';
 const spzPrefixes = [Buffer.from('NG'), Buffer.from('1f8b', 'hex')];
@@ -16,15 +16,15 @@ const mimeTypes = new Map([
   ['.jpg', 'image/jpeg'], ['.jpeg', 'image/jpeg'], ['.png', 'image/png'], ['.webp', 'image/webp'],
 ]);
 const usage = `Usage: node scripts/first_milestone_test.mjs [--base-url ${defaultOrigin}]
-  [--place ${defaultPlace}] [--dish-name "First Milestone Ramen"] [--plate-cm 24]
+  [--place ${defaultPlace}] [--dish-name "First Milestone Ramen"] [--dish-price 14.50] [--plate-cm 24]
   [--passcode <ADMIN_PASSCODE>] [--room-tier atlas-draft|atlas-refined]
   --room <path1> <path2> [path3 ... path32] --dish <path>
   or use --demo in place of the photo flags.`;
 
 function parseOptions(args) {
-  const options = { origin: defaultOrigin, place: defaultPlace, dishName: 'First Milestone Ramen', roomPaths: [] };
+  const options = { origin: defaultOrigin, place: defaultPlace, dishName: 'First Milestone Ramen', dishPrice: '14.50', roomPaths: [] };
   const keys = new Map([
-    ['--base-url', 'origin'], ['--place', 'place'], ['--dish-name', 'dishName'],
+    ['--base-url', 'origin'], ['--place', 'place'], ['--dish-name', 'dishName'], ['--dish-price', 'dishPrice'],
     ['--plate-cm', 'plateCm'], ['--dish', 'dishPath'], ['--passcode', 'passcode'],
     ['--room-tier', 'roomTier'],
   ]);
@@ -52,6 +52,10 @@ function parseOptions(args) {
   if (options.roomTier !== undefined) assert([draftTier, 'atlas-refined'].includes(options.roomTier), 'Use atlas-draft or atlas-refined with --room-tier');
   options.dishName = options.dishName.trim();
   assert(options.dishName.length > 0 && options.dishName.length <= 120, '--dish-name must contain 1–120 characters');
+  // A dish job carries the menu price the contributor read off the menu, so the server accepts it.
+  const dishPriceValue = Number(options.dishPrice);
+  assert(Number.isFinite(dishPriceValue) && dishPriceValue > 0 && dishPriceValue <= 500, '--dish-price must be greater than 0 and at most 500');
+  options.dishPrice = Math.round(dishPriceValue * 100) / 100;
   if (options.plateCm !== undefined) {
     const cm = Number(options.plateCm);
     assert(Number.isFinite(cm) && cm > 0 && cm <= 200, '--plate-cm must be greater than 0 and at most 200');
@@ -91,7 +95,7 @@ export function demoPhotos() {
     roomPhotos: ['front', 'side'].map((angle, index) => ({
       filename: `dining-room-a-${angle}.png`, mimeType: 'image/png', bytes: png([100, 80, 100 + index]),
     })),
-    dishPhoto: { filename: 'dish-ramen.png', mimeType: 'image/png', bytes: png([210, 110, 40]) },
+    dishPhoto: { filename: 'dish-preview.png', mimeType: 'image/png', bytes: png([210, 110, 40]) },
   };
 }
 
@@ -214,7 +218,7 @@ async function waitForReview(request, jobs, demo) {
   return observations.map(({ job }) => job);
 }
 
-export async function runMilestone({ origin, passcode, place = defaultPlace, dishName = 'First Milestone Ramen',
+export async function runMilestone({ origin, passcode, place = defaultPlace, dishName = 'First Milestone Ramen', dishPrice = 14.5,
   plateDiameter, demo, roomTier = draftTier, roomPhotos, dishPhoto }) {
   const request = apiClient(origin, passcode);
   const apiPlace = `/api/restaurants/${encodeURIComponent(place)}`;
@@ -274,7 +278,7 @@ export async function runMilestone({ origin, passcode, place = defaultPlace, dis
   }
   const roomJob = await submit('room', selectedRooms, { model_tier: roomTier }, 'atlas-v2');
   assert.equal(roomJob.model_tier, roomTier);
-  const dishJob = await submit('dish', [dish.id], { dish_name: dishName, plate_diameter_m: plateDiameter }, 'trellis-replicate');
+  const dishJob = await submit('dish', [dish.id], { dish_name: dishName, dish_price: dishPrice, plate_diameter_m: plateDiameter }, 'trellis-replicate');
   assert.notEqual(roomJob.id, dishJob.id, 'Room and dish must have independent jobs');
 
   console.log('4. Wait for review and verify generated files');

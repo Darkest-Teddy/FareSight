@@ -381,7 +381,7 @@ export class JarvisReveal {
   }
 
   seek(root: pc.Entity, progress: number, limit: number = jarvisPoints.hero): void {
-    if (!this.enabled || progress <= 0 || progress >= 1) {
+    if (!this.device.isWebGL2 || progress <= 0 || progress >= 1) {
       this.finish(root, progress > 0);
       return;
     }
@@ -490,6 +490,7 @@ export class JarvisReveal {
     if (!this.active.size) return;
     for (const [root, reveal] of this.active) {
       if (!this.enabled) {
+        if (reveal.manual) { this.releaseResources(reveal); continue; }
         this.finish(root, reveal.goal === 1);
         reveal.onFinish?.();
         continue;

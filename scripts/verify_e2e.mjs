@@ -9,7 +9,7 @@ import {
 
 const require = createRequire(new URL('../server/package.json', import.meta.url));
 const { WebSocket } = require('ws');
-const place = 'bu-ramen-01';
+const place = 'harvard-cafe-01';
 const placePath = `/api/restaurants/${place}`;
 const stopIds = ['place-brico', 'place-bucen', 'place-chncl', 'place-harsq', 'place-kencl'];
 const passcode = randomUUID();
@@ -24,8 +24,6 @@ async function verifyCatalog(request, origin) {
   assert.equal(new Set(places.map(({ id }) => id)).size, 28, 'Curated place IDs must be unique');
   assert(places.every(({ stop_id }) => stopIds.includes(stop_id)), 'Each place must use a focal stop');
   const flagshipManifests = [
-    ['bu-ramen-01', 'room-ramen-house.ply', ['dish-tonkotsu-ramen.ply', 'dish-katsu-curry.ply']],
-    ['allston-karaoke-01', 'room-karaoke-suite.ply', []],
     ['harvard-cafe-01', 'room-study-cafe.ply', ['dish-matcha-tiramisu.ply']],
   ];
   for (const [id, room, dishes] of flagshipManifests) {
@@ -43,7 +41,7 @@ async function verifyCatalog(request, origin) {
       await servedFileSize(origin, asset.url, Buffer.from('ply'));
     }
   }
-  console.log('PASS health, 5 focal stops, 28 curated places, and 3 flagship manifests');
+  console.log('PASS health, 5 focal stops, 28 curated places, and the study café manifest');
 }
 
 async function verifyMbta(request) {
@@ -52,7 +50,7 @@ async function verifyMbta(request) {
   ];
   const [feeds, trip] = await Promise.all([
     Promise.all(endpoints.map(([name, query]) => request(`/api/mbta/${name}${query}`))),
-    request('/api/mbta/trip?from=place-kencl&to=place-bucen&walkToVenueM=80&venueLat=42.35015&venueLon=-71.10665'),
+    request('/api/mbta/trip?from=place-kencl&to=place-bucen&walkToVenueM=290&venueLat=42.34908&venueLon=-71.10358'),
   ]);
   const sources = feeds.map((feed, index) => {
     const [name] = endpoints[index];
@@ -64,12 +62,12 @@ async function verifyMbta(request) {
   assert(feeds[0].vehicles.every(({ lat, lon }) => Number.isFinite(lat) && Number.isFinite(lon)), 'MBTA vehicle coordinates');
   assert.equal(feeds[3].stop_id, 'place-bucen');
   assert(feeds[3].schedules.every(({ last_trip }) => last_trip === true), 'MBTA schedules must report last trains');
-  assert.equal(trip.walk_to_venue_min, 1.3);
+  assert.equal(trip.walk_to_venue_min, 290 * 1.3 / 80);
   assert.equal(trip.fare, 2.4);
   assert(Number.isFinite(trip.total_min) && trip.total_min > 0, 'MBTA trip total');
   const planner = new URL(trip.planner_url);
   assert.equal(planner.searchParams.get('plan[from_stop_id]'), 'place-kencl');
-  assert.equal(planner.searchParams.get('plan[to_latitude]'), '42.35015');
+  assert.equal(planner.searchParams.get('plan[to_latitude]'), '42.34908');
   console.log(`PASS MBTA trip and feeds · ${sources.join(', ')}`);
   return trip;
 }
@@ -109,7 +107,7 @@ async function verifyCommunity(request) {
 
 async function verifyPairing(request, origin, trip) {
   const { code } = await request('/api/pairing/create', { method: 'POST', status: 201 });
-  assert.match(code, /^\d{4}$/, 'Pairing code format');
+  assert.match(code, /^[A-HJ-NP-Z2-9]{6}$/, 'Pairing code format');
   const url = new URL(`/ws/pair/${code}`, origin);
   url.protocol = 'ws:';
   const sockets = [];
@@ -133,7 +131,7 @@ async function verifyPairing(request, origin, trip) {
 
     const exchanges = [
       [phone, headset, { type: 'open_place', place_id: place }],
-      [headset, phone, { type: 'open_dish', place_id: place, dish_id: 'bu-ramen-tonkotsu' }],
+      [headset, phone, { type: 'open_dish', place_id: place, dish_id: 'harvard-matcha-tiramisu' }],
       [phone, headset, { type: 'send_trip', trip }],
       [headset, phone, { type: 'sync_filters', filters: { family_friendly: true } }],
     ];
@@ -160,7 +158,7 @@ async function verifyPairing(request, origin, trip) {
 async function verifyPipeline(request, origin) {
   const photos = demoPhotos();
   const { jobs, uploads } = await runMilestone({
-    origin, passcode, place, dishName: 'E2E Ramen', plateDiameter: 0.24, demo: true, ...photos,
+    origin, passcode, place, dishName: 'E2E Dessert', dishPrice: 11.5, plateDiameter: 0.18, demo: true, ...photos,
   });
   for (const upload of uploads) {
     const saved = await fetch(origin + upload.url, { signal: AbortSignal.timeout(5000) });
@@ -184,7 +182,7 @@ async function verifyWebBuild() {
     });
     assert(file.isFile() && file.size > 0, `web/dist/${path} is not a nonempty file`);
   }
-  await Promise.all(['index.html', 'sw.js', 'assets-demo/cache-list.json'].map(nonempty));
+  await Promise.all(['index.html', 'intro.html', 'sw.js'].map(nonempty));
   const html = await readFile(new URL('index.html', dist), 'utf8');
   assert.match(html, /<main\b[^>]*\bid="app"/, 'Built HTML is missing the app mount');
   const bundles = [...html.matchAll(/(?:src|href)="\/(assets\/[^"?#]+\.(?:js|css))"/g)].map(([, path]) => path);
@@ -193,17 +191,13 @@ async function verifyWebBuild() {
   await Promise.all(bundles.map(nonempty));
 
   const expected = [
-    'boston-map-sculpture.glb', 'mbta-train-capsule.glb', 'table-pedestal.glb',
+    'boston-map-sculpture.glb', 'table-pedestal.glb',
     ...stopIds.map((id) => `segment-${id}.glb`),
-    'dish-katsu-curry.ply', 'dish-matcha-tiramisu.ply', 'dish-tonkotsu-ramen.ply',
-    'room-karaoke-suite.ply', 'room-ramen-house.ply', 'room-study-cafe.ply',
+    'dish-matcha-tiramisu.ply', 'room-study-cafe.ply',
     'mbta-3d-paths.json', 'segment-anchors.json', 'station-anchors.json',
   ].map((file) => `/assets-demo/${file}`).sort();
-  const cache = JSON.parse(await readFile(new URL('assets-demo/cache-list.json', dist), 'utf8'));
-  assert(Array.isArray(cache), 'Demo cache-list.json must contain a list of asset URLs');
-  assert.deepEqual([...cache].sort(), expected, 'Demo cache does not list each of the 17 expected assets exactly once');
-  await Promise.all(cache.map((entry) => nonempty(entry.slice(1))));
-  console.log(`PASS web/dist HTML, service worker, ${bundles.length} JS/CSS bundles, and all ${cache.length} demo cache assets`);
+  await Promise.all(expected.map((entry) => nonempty(entry.slice(1))));
+  console.log(`PASS web/dist HTML, service worker, ${bundles.length} JS/CSS bundles, and ${expected.length} demo assets`);
 }
 
 try {

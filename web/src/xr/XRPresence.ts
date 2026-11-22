@@ -4,8 +4,9 @@ import { DishGrabMotion } from './DishPhysics';
 import type { VRReviewCard } from './VRReviewCard';
 import type { PhysicalMenuBook } from './PhysicalMenuBook';
 import type { SurfaceMatch } from './PhysicalSurfaces';
-import { brass, calloutAmber, child, clamp, coastTurntable, damp, handReleaseDelay, material, shape, TurnVelocity, wrapAngle,
-  type HitTarget, type PickBounds, type ScenePicker } from './sceneSupport';
+import type { ForearmPose } from './forearmMount';
+import { assetBase, brass, calloutAmber, child, clamp, coastTurntable, damp, handReleaseDelay, material, shape, TurnVelocity, wrapAngle,
+  type HitTarget, type ModelLibrary, type PickBounds, type ScenePicker } from './sceneSupport';
 
 const pointerRange = 4.5;
 const pokeDebounce = 400;
@@ -20,16 +21,6 @@ const trackingGraceMs = 120;
 const inspectionDistance = 0.18;
 const inspectionOffset = new pc.Vec3(0, 0.035, -0.135);
 const reachSeconds = 0.22;
-const controllerForearmOffset = new pc.Vec3(0, 0.042, 0.12);
-const controllerDeckRotation = new pc.Quat().setFromMat4(new pc.Mat4().setLookAt(pc.Vec3.UP, pc.Vec3.ZERO, pc.Vec3.LEFT))
-  .mul(new pc.Quat().setFromAxisAngle(pc.Vec3.RIGHT, 22));
-
-export interface ForearmPose {
-  position: pc.Vec3;
-  rotation: pc.Quat;
-  kind: 'hand' | 'controller';
-}
-
 interface HandModel {
   root: pc.Entity;
   joints: Map<pc.XrJoint, pc.Entity>;
@@ -49,6 +40,8 @@ interface Pointer {
   lastPokeTarget: HitTarget | null;
   flashUntil: number;
   selectConsumed: boolean;
+  selectConfirmed?: boolean;
+  selectEndedAt?: number;
   selectTarget: HitTarget | null;
   scenePinch?: { turntable: pc.Entity; start: pc.Vec3; lostSince?: number };
   snapHeld: boolean;
@@ -141,8 +134,7 @@ export class XRPresence {
   private meshes: { sphere: pc.Mesh; cylinder: pc.Mesh } | undefined;
   private glove = material('#bab2a5', 0.10, 0.84);
   private grip = material('#292b30', 0.12);
-  private ring = material('#514b43', 0.19);
-  private trim = material(brass, 0.22);
+  private trim = material('#15171a', 0.22);
   private idle = signalMaterial('#e8dfd0', 0.80);
   private hovered = signalMaterial(calloutAmber, 1);
   private flash = signalMaterial(calloutAmber, 1.65);
@@ -155,11 +147,9 @@ export class XRPresence {
   private right = new pc.Vec3();
   private head = new pc.Vec3();
   private displacement = new pc.Vec3();
-  private forearmPose: ForearmPose = { position: new pc.Vec3(), rotation: new pc.Quat(), kind: 'hand' };
-  private forearmDirection = new pc.Vec3();
-  private forearmNormal = new pc.Vec3();
-  private forearmUp = new pc.Vec3();
-  private forearmBasis = new pc.Mat4();
+  private forearmPose: ForearmPose = {
+    kind: 'hand', wrist: new pc.Vec3(), direction: new pc.Vec3(), handCenter: new pc.Vec3(),
+  };
   private grab: Grab | null = null;
   private handhelds = new Map<pc.XrInputSource, HandheldGrab>();
   private handOrientation = new pc.Quat();
@@ -175,7 +165,7 @@ export class XRPresence {
 
   constructor(
     private xr: pc.XrManager, private root: pc.Entity, private rig: pc.Entity,
-    private camera: pc.Entity, private picker: ScenePicker, private actions: PresenceActions,
+    private camera: pc.Entity, private picker: ScenePicker, private models: ModelLibrary, private actions: PresenceActions,
   ) {
     const input = xr.input;
     this.events = [
@@ -247,14 +237,17 @@ export class XRPresence {
 
   private makeController(source: pc.XrInputSource): pc.Entity {
     const root = child(this.rig, `XR ${source.handedness} controller`);
-    const side = source.handedness === pc.XRHAND_LEFT ? -1 : 1;
-    shape(root, 'Controller grip', 'sphere', this.grip, [0, -0.028, 0.024], [0.042, 0.049, 0.113])
-      .setLocalEulerAngles(25, 0, side * 9);
-    shape(root, 'Controller face', 'sphere', this.grip, [0, 0.002, -0.022], [0.055, 0.031, 0.058]);
-    shape(root, 'Tracking ring', 'torus', this.ring, [0, 0.021, -0.035], [0.069, 0.029, 0.069])
-      .setLocalEulerAngles(26, 0, 0);
-    shape(root, 'Thumbstick cap', 'cylinder', this.trim, [side * 0.010, 0.020, -0.016], [0.012, 0.008, 0.012]);
-    shape(root, 'Trigger', 'sphere', this.trim, [0, -0.022, -0.038], [0.016, 0.013, 0.023]);
+    const handedness = source.handedness === pc.XRHAND_LEFT ? 'left' : 'right';
+    const fallback = child(root, 'Touch Plus fallback');
+    shape(fallback, 'Angled grip', 'cylinder', this.grip, [0, -0.023, 0.022], [0.036, 0.079, 0.037])
+      .setLocalEulerAngles(-54, 0, handedness === 'left' ? -8 : 8);
+    shape(fallback, 'Oval face', 'cylinder', this.grip, [0, 0.004, -0.025], [0.055, 0.016, 0.048]);
+    shape(fallback, 'Thumbstick', 'cylinder', this.trim, [0, 0.016, -0.025], [0.013, 0.009, 0.013]);
+    void this.models.load(`${assetBase}vr-controller-${handedness}.glb`).then((resource) => {
+      if (!resource || this.pointers.get(source)?.controller !== root) return;
+      root.addChild(resource.instantiateRenderEntity());
+      fallback.destroy();
+    });
     return root;
   }
 
@@ -301,17 +294,18 @@ export class XRPresence {
     const reviews = this.actions.reviews();
     const menu = this.actions.menu();
     const dishes = this.actions.dishes();
-    const prop = this.picker.raycast(this.ray, [...reviews.flatMap(({ gripBounds }) => gripBounds), ...(menu?.gripBounds ?? []),
-      ...dishes.map(({ bounds }) => bounds)], pointerRange);
+    const clipboardAndDishBounds = [...reviews.flatMap(({ gripBounds }) => gripBounds), ...dishes.map(({ bounds }) => bounds)];
+    const prop = this.picker.raycast(this.ray, [...clipboardAndDishBounds, ...(menu?.gripBounds ?? [])], pointerRange);
     const usesDeck = source.handedness === pc.XRHAND_RIGHT;
     const deck = usesDeck ? this.picker.raycast(this.ray, [this.actions.deck], pointerRange) : null;
     const eligible = grip && menu ? targets.filter((target) => !menu.targets.includes(target)) : targets;
     const hit = this.picker.raycast(this.ray, usesDeck ? [...this.actions.buttons, ...eligible] : eligible, pointerRange);
     const review = hit && reviews.find(({ targets }) => targets.includes(hit.target));
-    const control = hit && (this.actions.buttons.includes(hit.target) || review
-      ? !prop || prop.target.entity === review?.entity || hit.distance <= prop.distance
-      : this.isHardwareControl(hit.target) || ((!deck || hit.distance < deck.distance) && (!prop || hit.distance < prop.distance))) ? hit : null;
-    const handheld = prop && this.handheldTarget(prop.target, menu, dishes);
+    const menuRow = hit && menu?.targets.includes(hit.target);
+    const blocker = menuRow ? this.picker.raycast(this.ray, clipboardAndDishBounds, pointerRange) : prop;
+    const control = hit && (this.actions.buttons.includes(hit.target) || !deck || hit.distance < deck.distance) &&
+      (!blocker || hit.distance <= blocker.distance || (review && blocker.target.entity === review.entity)) ? hit : null;
+    const handheld = prop && (!deck || prop.distance < deck.distance) ? this.handheldTarget(prop.target, menu, dishes) : null;
     return { control, deck, prop, handheld };
   }
 
@@ -354,6 +348,8 @@ export class XRPresence {
   private selectStart(source: pc.XrInputSource): void {
     const pointer = this.pointers.get(source);
     if (!this.interactive || !pointer) return;
+    if (pointer.selectEndedAt !== undefined) this.finishSelect(source, pointer, false);
+    pointer.selectConfirmed = false;
     pointer.selectConsumed = this.isHolding(source);
     pointer.selectTarget = null;
     pointer.scenePinch = undefined;
@@ -366,7 +362,11 @@ export class XRPresence {
     pointer.selectTarget = direct ?? control?.target ?? null;
     if (!pointer.selectTarget) {
       const prop = (hasPosition ? this.nearHandheld(source, this.anchor) : null) ?? handheld;
-      if (prop && this.beginHandheld(source, 'select', prop)) return;
+      if (prop) {
+        pointer.selectConsumed = true;
+        this.beginHandheld(source, 'select', prop);
+        return;
+      }
       if (deck || (hasPosition && source.handedness === pc.XRHAND_RIGHT && this.picker.nearPanel(this.anchor, [this.actions.deck], 0.025))) {
         pointer.selectConsumed = true;
         return;
@@ -398,7 +398,8 @@ export class XRPresence {
 
   private select(source: pc.XrInputSource): void {
     const pointer = this.pointers.get(source);
-    if (this.interactive && pointer?.scenePinch) {
+    if (pointer) pointer.selectConfirmed = true;
+    if (this.interactive && pointer?.scenePinch && (!source.hand || source.hand.tracking)) {
       this.updateScenePinch(source, pointer, performance.now());
       const picked = pointer.scenePinch && pointer.selectTarget;
       this.clearScenePinch(pointer);
@@ -423,9 +424,20 @@ export class XRPresence {
 
   private selectEnd(source: pc.XrInputSource): void {
     const pointer = this.pointers.get(source);
-    if (pointer?.scenePinch) this.clearScenePinch(pointer);
-    if (this.handhelds.get(source)?.kind === 'select') this.releaseHandheld(source, true);
-    if (this.grab?.inputs.some((input) => input.source === source && input.kind === 'select')) this.releaseGrab(source, true);
+    if (!pointer) return;
+    if (source.hand && !source.hand.tracking) {
+      pointer.selectEndedAt ??= performance.now();
+      return;
+    }
+    this.finishSelect(source, pointer, !!pointer.selectConfirmed);
+  }
+
+  private finishSelect(source: pc.XrInputSource, pointer: Pointer, deliberate: boolean): void {
+    pointer.selectEndedAt = undefined;
+    pointer.selectConfirmed = false;
+    this.clearScenePinch(pointer);
+    if (this.handhelds.get(source)?.kind === 'select') this.releaseHandheld(source, deliberate);
+    if (this.grab?.inputs.some((input) => input.source === source && input.kind === 'select')) this.releaseGrab(source, deliberate);
   }
 
   private clearScenePinch(pointer: Pointer): void {
@@ -472,7 +484,7 @@ export class XRPresence {
     if (this.nearControl(source, this.anchor, true) || control) return;
     const near = this.nearHandheld(source, this.anchor);
     const prop = handheld?.menu && near?.entity !== handheld.entity ? handheld : near ?? handheld;
-    if (prop && this.beginHandheld(source, 'grip', prop)) return;
+    if (prop) { this.beginHandheld(source, 'grip', prop); return; }
     if (deck || (source.handedness === pc.XRHAND_RIGHT && this.picker.nearPanel(this.anchor, [this.actions.deck], 0.025))) return;
     const turntable = this.actions.turntable();
     if (turntable) {
@@ -504,18 +516,16 @@ export class XRPresence {
       !this.handRotation(source, this.handOrientation)) return false;
 
     const { entity } = target;
+    for (const held of this.handhelds.values()) if (held.entity === entity) return false;
     const inverse = this.handOrientation.invert();
     const offset = entity.getPosition().clone().sub(this.anchor);
     const rotation = new pc.Quat().mul2(inverse, entity.getRotation());
     const reach = !target.direct && offset.length() > inspectionDistance ? { from: offset.clone(), elapsed: 0 } : undefined;
     if (reach) offset.copy(inspectionOffset);
     else inverse.transformVector(offset, offset);
-    for (const [owner, held] of this.handhelds) {
-      if (held.entity === entity) this.handhelds.delete(owner);
-    }
     target.dish?.setHeld(true);
     target.menu?.markMoved();
-    const motion = target.dish ? new DishGrabMotion() : undefined;
+    const motion = target.dish ? new DishGrabMotion(target.dish.centerOffset) : undefined;
     motion?.reset(entity.getPosition(), entity.getRotation());
     this.handhelds.set(source, { ...target, kind, offset, rotation, reach, menuVenue: target.menu?.venueId,
       position: entity.getPosition().clone(), orientation: entity.getRotation().clone(), motion });
@@ -594,7 +604,7 @@ export class XRPresence {
     const surface = (dish || menu) && this.actions.snapSurface(entity, at);
     motion?.release();
     const settling = menu ? menu.release(this.actions.menuTabletop(menu, at), surface?.y)
-      : dish?.onRelease(surface?.y, motion?.velocity, motion?.angularVelocity);
+      : dish?.onRelease(surface ? surface.surface : undefined, motion?.velocity, motion?.angularVelocity);
     this.pulse(source, settling ? 0.28 : 0.18, 18);
   }
 
@@ -846,7 +856,13 @@ export class XRPresence {
       return false;
     }
     const now = performance.now();
-    for (const [source, pointer] of this.pointers) this.updateScenePinch(source, pointer, now);
+    for (const [source, pointer] of this.pointers) {
+      if (pointer.selectEndedAt !== undefined) {
+        const expired = now - pointer.selectEndedAt >= trackingGraceMs;
+        if (expired || source.hand?.tracking) this.finishSelect(source, pointer, !expired && !!pointer.selectConfirmed);
+      }
+      this.updateScenePinch(source, pointer, now);
+    }
     if (this.grab) this.updateGrab(now, dt);
     let turned = false;
     let movedRig = false;
@@ -923,22 +939,17 @@ export class XRPresence {
         continue;
       }
 
-      const wristPosition = wrist.getPosition();
-      const wristRotation = wrist.getRotation();
-      const middle = hand?.getJointById('middle-finger-phalanx-proximal');
-      const direction = this.forearmDirection;
-      const normal = wristRotation.transformVector(pc.Vec3.UP, this.forearmNormal);
-      if (middle) direction.sub2(wristPosition, middle.getPosition()).normalize();
-      if (!middle || direction.lengthSq() < 0.5 || Math.abs(direction.dot(normal)) > 0.95) {
-        wristRotation.transformVector(pc.Vec3.BACK, direction);
-      }
-      // Project the back-of-wrist normal perpendicular to the forearm so the keys stay level across it.
-      normal.addScaled(direction, -normal.dot(direction)).normalize();
-      const up = this.forearmUp.cross(direction, normal);
       const pose = this.forearmPose;
       pose.kind = 'hand';
-      pose.position.copy(wristPosition).addScaled(direction, 0.105).addScaled(normal, 0.038);
-      pose.rotation.setFromMat4(this.forearmBasis.setLookAt(normal, pc.Vec3.ZERO, up));
+      pose.wrist.copy(wrist.getPosition());
+      const middle = hand?.getJointById('middle-finger-phalanx-proximal') ??
+        hand?.getJointById('middle-finger-metacarpal');
+      if (middle) pose.direction.sub2(pose.wrist, middle.getPosition());
+      if (!middle || pose.direction.lengthSq() < 1e-8) {
+        wrist.getRotation().transformVector(pc.Vec3.BACK, pose.direction);
+      }
+      pose.direction.normalize();
+      pose.handCenter.copy(pose.wrist).addScaled(pose.direction, -0.060);
       return pose;
     }
     const position = controller?.getPosition();
@@ -946,8 +957,10 @@ export class XRPresence {
     if (!position || !rotation) return null;
     const pose = this.forearmPose;
     pose.kind = 'controller';
-    rotation.transformVector(controllerForearmOffset, pose.position).add(position);
-    pose.rotation.mul2(rotation, controllerDeckRotation);
+    rotation.transformVector(pc.Vec3.BACK, pose.direction).normalize();
+    // The grip drives placement while the estimated wrist starts the forearm capsule.
+    pose.wrist.copy(position).addScaled(pose.direction, 0.045);
+    pose.handCenter.copy(position);
     return pose;
   }
 
@@ -1039,6 +1052,6 @@ export class XRPresence {
         mesh.destroy();
       }
     }
-    for (const surface of [this.glove, this.grip, this.ring, this.trim, this.idle, this.hovered, this.flash]) surface.destroy();
+    for (const surface of [this.glove, this.grip, this.trim, this.idle, this.hovered, this.flash]) surface.destroy();
   }
 }

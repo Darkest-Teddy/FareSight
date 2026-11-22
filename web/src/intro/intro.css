@@ -116,7 +116,8 @@ h2 { font-size: clamp(2.1rem, 4.5vw, 4.1rem); }
   color: var(--ink); background: rgb(255 253 248 / 82%); font-size: .76rem;
 }
 
-.beat-hero { align-items: end; justify-items: start; }
+.beat-hero { align-items: end; justify-items: start; visibility: visible; }
+.beat-hero .copy { opacity: 1; }
 .beat-stops { align-items: end; justify-items: center; text-align: center; }
 .beat-stops .lead { margin-inline: auto; max-width: 44ch; }
 .beat-station { align-items: center; justify-items: start; }
@@ -133,10 +134,16 @@ h2 { font-size: clamp(2.1rem, 4.5vw, 4.1rem); }
 .beat-inside .pill.solid:hover { background: #fff; border-color: #fff; }
 .beat-inside .lead { margin-inline: auto; max-width: 38ch; }
 .beat-inside .pill { margin-top: 1.25rem; }
+.look-hint { display: none; margin-top: .9rem; font-size: .8rem; color: var(--dim); }
+body[data-room=ready] .look-hint { display: block; }
+/* Inside the room a drag turns the visitor's head. Vertical swipes still scroll the page. */
+:root[data-look] { cursor: grab; touch-action: pan-y pinch-zoom; user-select: none; -webkit-user-select: none; }
+:root[data-look=held] { cursor: grabbing; }
+:root[data-look] a { cursor: pointer; }
 
 .status {
-  position: fixed; inset: auto 0 clamp(2.5rem, 9vh, 6rem); z-index: 5;
-  text-align: center; font-size: .82rem; color: var(--faint); pointer-events: none;
+  position: fixed; inset: calc(var(--bar) + .8rem) var(--gutter) auto auto; z-index: 5;
+  text-align: right; font-size: .82rem; color: var(--faint); pointer-events: none;
 }
 body[data-state=loading] .status::after {
   content: ''; display: block; width: 7rem; height: 1px; margin: .9rem auto 0;

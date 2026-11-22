@@ -4,6 +4,8 @@ import { STOPS } from './transit.js';
 import type { Asset, Category, CategoryGroup, Dish, Place, Vector3 } from './types.js';
 
 const demoDate = '2026-11-21';
+/** When the price agent last filled the prices these venues do not publish themselves. */
+const priceLookupDate = '2026-11-22';
 const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 const group: Record<Category, CategoryGroup> = {
   restaurant: 'A', study: 'B', shop: 'B', market: 'B', music: 'C', activity: 'C',
@@ -18,7 +20,6 @@ type Listing = [
 
 const listings: Listing[][] = [
   [
-    ['bu-ramen-01', 'Tsuru Tonkotsu Ramen', 'restaurant', 42.35015, -71.10665, 85, 14.5, '11:30', '22:00', ['ramen', 'katsu', 'noodles'], 'Small ramen counter with table seating along the wall.', true, true],
     ['bu-pavement-01', 'Pavement Coffeehouse', 'study', 42.34985, -71.10721, 50, 9, '07:00', '19:00', ['coffee', 'bagels', 'study'], 'Bagels between lectures and a library nook for reading.', true],
     ['bu-nudpob-01', 'Nud Pob Thai Cuisine', 'restaurant', 42.34986, -71.10731, 60, 17, '11:30', '21:30', ['thai', 'noodles', 'curry'], 'Campus standby for pad see ew and Thai curries.', true, true],
     ['bu-halal-01', 'The Halal Shack at the GSU', 'restaurant', 42.35100, -71.10917, 225, 13, '11:00', '20:00', ['halal', 'rice bowls', 'shawarma'], 'Halal rice bowls and wraps in the George Sherman Union food hall.', true],
@@ -27,7 +28,6 @@ const listings: Listing[][] = [
     ['bu-starbucks-01', 'Starbucks (Warren Towers)', 'study', 42.34908, -71.10358, 290, 7.5, '07:00', '20:00', ['coffee', 'study', 'espresso'], 'Campus coffeehouse at Warren Towers on Commonwealth Ave with espresso bar and study seating.', true],
   ],
   [
-    ['allston-karaoke-01', 'Echo Box Karaoke Lounge', 'event_space', 42.35183, -71.12428, 60, 48, '16:00', '01:00', ['karaoke', 'private room', 'groups'], 'Private karaoke suite with a sofa wall and an open floor.', true, true],
     ['allston-brownsugar-01', 'Brown Sugar Cafe', 'restaurant', 42.35215, -71.12196, 280, 20, '11:30', '22:00', ['thai', 'curry', 'fried rice'], 'Shared Thai plates in a lively dining room.', true, true],
     ['allston-groovythrifty-01', 'Groovy Thrifty', 'shop', 42.35237, -71.12829, 290, 14, '12:00', '18:00', ['thrift', 'vintage', 'clothing'], 'Secondhand and vintage racks on Brighton Avenue.', true],
     ['allston-super88-01', 'Super 88 Market & Food Court', 'market', 42.35254, -71.12539, 100, 13, '09:00', '21:00', ['dumplings', 'boba', 'groceries'], 'Grocery aisles and a food court for groups with different cravings.', true],
@@ -40,7 +40,7 @@ const listings: Listing[][] = [
     ['kenmore-jefes-01', "El Jefe's Taqueria", 'restaurant', 42.34926, -71.09680, 160, 12, '10:00', '04:00', ['tacos', 'burritos', 'late night'], 'Build-your-own tacos and burritos before or after a game.', true, true],
     ['kenmore-eastern-01', 'Eastern Standard Kitchen and Drinks', 'restaurant', 42.34722, -71.10131, 660, 34, '16:00', '23:00', ['brasserie', 'burgers', 'dinner'], 'Brasserie booths and a long bar near Fenway.', true, true],
     ['kenmore-esplanade-01', 'Charles River Esplanade', 'outdoor', 42.35096, -71.09561, 610, 0, '06:00', '22:00', ['river walk', 'picnic', 'sunset'], 'Riverside paths with a view across the Charles toward Cambridge.', true],
-    ['kenmore-shudaxia-01', 'Shu Daxia Hot Pot', 'restaurant', 42.34969, -71.10026, 420, 36, '12:00', '22:30', ['hot pot', 'sichuan', 'groups'], 'Sichuan hot pot dining room on Commonwealth Ave with ornate woodwork and group tables.', true, true],
+    ['kenmore-shudaxia-01', 'Shu Daxia Hot Pot', 'restaurant', 42.34880, -71.09952, 370, 36, '12:00', '22:30', ['hot pot', 'sichuan', 'groups'], 'Sichuan hot pot dining room on Commonwealth Ave with ornate woodwork and group tables.', true, true],
   ],
   [
     ['harvard-cafe-01', 'Charles & Folio Study Café', 'study', 42.37364, -71.11832, 120, 9.25, '08:00', '20:00', ['matcha', 'tiramisu', 'study'], 'Window seats and long tables for a study break.', true],
@@ -56,6 +56,46 @@ const listings: Listing[][] = [
     ['chinatown-hoyuen-01', 'Ho Yuen Bakery', 'restaurant', 42.35148, -71.06060, 250, 5, '08:00', '18:00', ['bakery', 'egg tarts', 'buns'], 'Takeaway buns and egg tarts on Beach Street.', true],
     ['chinatown-q-01', 'The Q', 'restaurant', 42.35171, -71.06261, 95, 38, '12:00', '00:00', ['hot pot', 'late night', 'groups'], 'Tabletop hot pot near the theater district.', true, true],
     ['chinatown-taiwan-01', 'Taiwan Café', 'restaurant', 42.35147, -71.06026, 270, 19, '11:30', '22:00', ['taiwanese', 'soup dumplings', 'rice'], 'Taiwanese comfort food and shareable plates on Oxford Street.', true, true],
+  ],
+  [
+    ["haymarket-neptune-01", "Neptune Oyster", "restaurant", 42.3632431, -71.0560033, 270, 45, "11:00", "23:00", ["oysters", "lobster roll", "raw bar"], "Oysters on ice and hot buttered lobster rolls at a narrow Salem Street counter.", true, true],
+    ["haymarket-union-oyster-01", "Union Oyster House", "restaurant", 42.3612749, -71.0569532, 320, 35, "11:00", "22:00", ["clam chowder", "oysters", "seafood"], "A curved oyster bar and wooden booths on Union Street.", true, true],
+    ["haymarket-public-market-01", "Boston Public Market", "market", 42.3621228, -71.0575399, 235, 15, "08:00", "20:00", ["food stalls", "local produce", "lunch"], "Indoor stalls sell New England produce and prepared food beside Haymarket station.", true, false],
+    ["haymarket-regina-01", "Pizzeria Regina", "restaurant", 42.3654041, -71.0568572, 415, 18, "11:00", "00:30", ["pizza", "brick oven", "family meal"], "Brick-oven pies and booth seating at the Thacher Street pizzeria.", true, true],
+    ["haymarket-mikes-pastry-01", "Mike's Pastry", "shop", 42.3641884, -71.0542414, 490, 7, "08:00", "22:00", ["cannoli", "ricotta", "pastry"], "A Hanover Street pastry counter with trays of cannoli and boxes to take home.", true, true],
+    ["haymarket-city-winery-01", "City Winery", "music", 42.3640637, -71.0586667, 150, 30, "10:00", "23:00", ["wine", "live music", "small plates"], "Wine and dinner on Beverly Street, with concerts in the adjoining venue.", false, true],
+  ],
+  [
+    ["copley-levain-01", "Levain Bakery", "shop", 42.3502953, -71.0791906, 225, 6, "08:00", "22:00", ["cookies", "bakery", "chocolate"], "A Newbury Street bakery selling thick chocolate chip walnut cookies by the piece.", true, true],
+    ["copley-thai-basil-01", "Thai Basil Restaurant", "restaurant", 42.3509847, -71.076712, 210, 19, "11:00", "21:00", ["thai", "noodles", "curry"], "Noodles and curry at a downstairs storefront on Newbury Street.", true, true],
+    ["copley-lolita-01", "Lolita Back Bay", "restaurant", 42.3506853, -71.0774037, 95, 34, "11:30", "01:00", ["tacos", "mexican", "tequila"], "A Dartmouth Street dining room for shared tacos and late-night drinks.", false, true],
+    ["copley-newsfeed-01", "Newsfeed Café", "study", 42.34924, -71.0790061, 205, 10, "09:00", "17:00", ["coffee", "chowder", "library"], "Coffee and chowder beside the GBH broadcast studio in the public library.", true, false],
+    ["copley-oak-01", "OAK Long Bar + Kitchen", "restaurant", 42.3491772, -71.0766081, 135, 44, "07:00", "00:00", ["american", "cocktails", "chowder"], "An 83-foot copper bar stretches across the Fairmont Copley Plaza dining room.", true, true],
+    ["copley-thinking-cup-01", "Thinking Cup", "study", 42.3518284, -71.0749192, 375, 9, "07:00", "19:00", ["coffee", "espresso", "sandwiches"], "A Newbury Street coffeehouse serving espresso and pressed sandwiches.", true, false],
+  ],
+  [
+    ["aquarium-legal-01", "Legal Sea Foods – Long Wharf", "restaurant", 42.3593913, -71.0510643, 115, 35, "11:00", "22:00", ["clam chowder", "seafood", "lobster"], "Seafood dining room at the foot of Long Wharf, across from the aquarium.", true, true],
+    ["aquarium-charthouse-01", "Chart House", "restaurant", 42.3601392, -71.0493925, 235, 44, "11:00", "22:00", ["seafood", "steak", "harbor views"], "Seafood and steaks in an eighteenth-century warehouse on Long Wharf.", true, true],
+    ["aquarium-blackrose-01", "The Black Rose", "restaurant", 42.3594126, -71.0536973, 185, 26, "11:00", "00:00", ["irish", "beef stew", "live music"], "Irish pub on State Street with Guinness beef stew and evening music.", true, true],
+    ["aquarium-saltydog-01", "Salty Dog Seafood Grille & Bar", "restaurant", 42.3602616, -71.0554773, 410, 30, "11:30", "20:00", ["oysters", "raw bar", "seafood"], "A downstairs raw bar and seasonal outdoor tables on the Quincy Market bricks.", true, true],
+    ["aquarium-granary-01", "Granary Tavern", "restaurant", 42.3587066, -71.0524027, 195, 25, "11:00", "22:00", ["pub food", "burgers", "patio"], "Tavern on Milk Street with a patio facing the Greenway.", true, true],
+    ["aquarium-sailloft-01", "Boston Sail Loft", "restaurant", 42.3624578, -71.0504909, 380, 32, "11:30", "22:00", ["clam chowder", "seafood", "harbor views"], "Waterfront seafood restaurant on Atlantic Avenue known for its clam chowder.", true, true],
+  ],
+  [
+    ["central-asmara-01", "Asmara Restaurant", "restaurant", 42.3664123, -71.1050773, 105, 29, "17:00", "21:00", ["eritrean", "injera", "stews"], "An Eritrean dinner of stews scooped up with injera.", true, true],
+    ["central-cicada-01", "Cicada Coffee Bar", "study", 42.3676769, -71.1019944, 300, 9, "09:00", "15:00", ["vietnamese coffee", "coffee", "brunch"], "A Prospect Street café for Vietnamese coffee and brunch.", true, false],
+    ["central-andala-01", "Andala Coffee House", "study", 42.364771, -71.1057705, 205, 13, "08:00", "23:00", ["palestinian", "coffee", "hummus"], "Palestinian coffee and café plates on Franklin Street.", true, true],
+    ["central-paikinkao-01", "Pai Kin Kao", "restaurant", 42.3642092, -71.1074792, 355, 20, "11:30", "21:00", ["thai", "noodles", "curry"], "Thai curry and noodle dishes on River Street.", true, true],
+    ["central-lanner-01", "Lanner Noodles & Bar", "restaurant", 42.3641739, -71.1030009, 110, 23, "11:30", "22:00", ["chinese", "hand-pulled noodles", "beef noodle soup"], "Hand-pulled noodles and beef broth on Pearl Street.", true, true],
+    ["central-veggiegalaxy-01", "Veggie Galaxy", "restaurant", 42.3636635, -71.1011293, 205, 18, "09:00", "22:00", ["vegetarian", "diner", "vegan bakery"], "Vegetarian diner fare and a vegan bakery near Lafayette Square.", true, true],
+  ],
+  [
+    ["coolidge-zaftigs-01", "Zaftigs Delicatessen", "restaurant", 42.3438261, -71.1237819, 315, 22, "08:00", "21:00", ["deli", "latkes", "breakfast"], "Harvard Street deli with griddled potato pancakes and breakfast served all day.", true, true],
+    ["coolidge-theatre-01", "Coolidge Corner Theatre", "activity", 42.3424412, -71.1227002, 185, 17, "12:00", "22:00", ["cinema", "independent film", "matinee"], "Independent cinema with an Art Deco moviehouse. The box office opens 30 minutes before the first show, so check the day’s listings.", true, true],
+    ["coolidge-maruichi-01", "Maruichi Select", "study", 42.3430554, -71.1224304, 175, 13, "09:00", "21:00", ["japanese", "matcha", "cafe"], "Japanese café and specialty food shop on the odd-numbered side of Harvard Street.", true, false],
+    ["coolidge-prairie-fire-01", "Prairie Fire", "restaurant", 42.3412838, -71.1212104, 120, 25, "12:00", "22:00", ["wood-fired pizza", "dinner", "pizza"], "A wood-fired pizza stop south of the Beacon Street intersection.", true, true],
+    ["coolidge-los-amigos-01", "Los Amigos Taqueria", "restaurant", 42.3426942, -71.1203333, 135, 14, "11:00", "21:30", ["burritos", "fish tacos", "takeout"], "Build-your-own burritos and Baja-style fish tacos on the east side of the junction.", true, true],
+    ["coolidge-bab-01", "Bab Korean Bistro", "restaurant", 42.34177, -71.1236026, 225, 20, "11:30", "21:00", ["korean", "bibimbap", "bulgogi"], "Korean bistro on Beacon Street west of the theatre.", true, true],
   ],
 ];
 
@@ -76,43 +116,38 @@ const byId = (id: string) => demoPlaces.find((place) => place.id === id)!;
 export const demoAssets: Asset[] = [];
 
 type DemoAssetInput = Pick<Asset, 'id' | 'kind' | 'scale_status' | 'scale_label'> &
-  Partial<Pick<Asset, 'gaussian_count' | 'provenance' | 'provenance_label' | 'spawn_point' | 'plate_diameter_m'>> &
+  Partial<Pick<Asset, 'gaussian_count' | 'provenance' | 'provenance_label' | 'spawn_point' | 'plate_diameter_m' | 'source_photos'>> &
   { file: string };
 
 function addDemoAsset(input: DemoAssetInput): Asset {
   const { file, gaussian_count = 0, provenance = 'demo_splat',
-    provenance_label = 'Procedural demo room splat', ...fields } = input;
+    provenance_label = 'Procedural demo room splat', source_photos = [], ...fields } = input;
   const extension = file.split('.').at(-1);
   if (extension !== 'ply' && extension !== 'sog' && extension !== 'spz') throw new Error(`Unsupported demo asset: ${file}`);
   const url = `/assets-demo/${file}`;
   const asset: Asset = {
     ...fields, format: extension, url, captured_on: demoDate, gaussian_count, provenance, provenance_label,
-    scale_factor: 1, status: 'ready', source_photos: [], backend: 'prebuilt-demo',
+    scale_factor: 1, status: 'ready', source_photos, backend: 'prebuilt-demo',
     ...(extension === 'ply' ? { original_ply_url: url } : {}),
   };
   demoAssets.push(asset);
   return asset;
 }
 
-function markDemo(place: Place): void {
-  place.seed_status = 'demo_venue';
-  place.price_checked_on = demoDate;
-}
-
-function flagship(id: string, roomFile: string, spawn_point: Vector3, measured = false): Place {
+function flagship(id: string, roomFile: string, spawn_point: Vector3): Place {
   const place = byId(id);
-  markDemo(place);
+  place.seed_status = 'demo_venue';
   place.room_asset_id = addDemoAsset({
     id: `${id}-room`, kind: 'room', file: roomFile, spawn_point,
-    scale_status: measured ? 'measured' : 'approximate',
-    scale_label: measured ? 'Actual size (4.2 m × 3.4 m)' : 'Approximate size',
+    scale_status: 'approximate',
+    scale_label: 'Approximate size',
   }).id;
   return place;
 }
 
 function atlasRoom(id: string, file: string, gaussian_count: number): void {
   const place = byId(id);
-  markDemo(place);
+  place.seed_status = 'demo_venue';
   place.room_asset_id = addDemoAsset({
     id: `${id}-room`, kind: 'room', file, gaussian_count, spawn_point: [0, 1.55, 2],
     scale_status: 'approximate', scale_label: 'Approximate room size',
@@ -120,16 +155,7 @@ function atlasRoom(id: string, file: string, gaussian_count: number): void {
   }).id;
 }
 
-const ramen = flagship('bu-ramen-01', 'room-ramen-house.ply', [0, 1.55, 2]);
 const cafe = flagship('harvard-cafe-01', 'room-study-cafe.ply', [0, 1.55, 2.1]);
-const karaoke = flagship('allston-karaoke-01', 'room-karaoke-suite.ply', [0, 1.55, 2], true);
-karaoke.stated_capacity = 14;
-karaoke.rooms = (['seated', 'standing'] as const).map((seating) => ({
-  id: `echo-box-${seating}`, place_id: karaoke.id, name: `Private suite (${seating})`,
-  room_type: 'karaoke', stated_capacity: 14, floor_width_m: 4.2, floor_depth_m: 3.4,
-  seating, price: 48, price_unit: 'hour', asset_id: karaoke.room_asset_id,
-}));
-
 atlasRoom('kenmore-jefes-01', 'room-eljefes-atlas.sog', 344_961);
 atlasRoom('kenmore-shudaxia-01', 'room-shudaxia-atlas.sog', 349_370);
 atlasRoom('bu-starbucks-01', 'room-starbucks-atlas.sog', 349_990);
@@ -137,13 +163,14 @@ atlasRoom('bu-starbucks-01', 'room-starbucks-atlas.sog', 349_990);
 function addDish(
   place: Place, id: string, name: string, price: Dish['price'], diameter: number,
   file: string, portion_note: string,
-  preview: { vessel: string } | { splats: number },
+  preview: { vessel: string } | { splats: number; photoUrl: string },
 ): void {
   const size = `${Number((diameter * 100).toFixed(1))} cm`;
   const photo = 'splats' in preview;
   const asset = addDemoAsset({
     id: `${id}-splat`, kind: 'dish', file, plate_diameter_m: diameter,
     gaussian_count: photo ? preview.splats : undefined,
+    source_photos: photo ? [preview.photoUrl] : [],
     scale_status: photo ? 'approximate' : 'measured',
     scale_label: photo ? `Approximate size (~${size} wide)` : `Actual size (${size} ${preview.vessel})`,
     provenance: photo ? 'ai_spatial_preview' : 'demo_splat',
@@ -152,17 +179,16 @@ function addDish(
   place.dishes.push({ id, place_id: place.id, name, price, plate_diameter_m: diameter, portion_note, asset_id: asset.id });
 }
 
-addDish(ramen, 'bu-ramen-tonkotsu', 'Signature Tonkotsu Ramen', 14.5, 0.24, 'dish-tonkotsu-ramen.ply',
-  'One 24 cm bowl with pork, noodles and egg.', { vessel: 'bowl' });
-addDish(ramen, 'bu-ramen-katsu', 'Crispy Pork Katsu Curry', 15.75, 0.26, 'dish-katsu-curry.ply',
-  'One cutlet with rice and curry on a 26 cm plate.', { vessel: 'plate' });
 addDish(cafe, 'harvard-matcha-tiramisu', 'Ceremonial Matcha Tiramisu + Latte', 9.25, 0.18,
   'dish-matcha-tiramisu.ply', 'One slice of matcha tiramisu and a latte.', { vessel: 'plate' });
 
-for (const { venueId, dishes } of restaurantDishMenus) {
+for (const { venueId, pricingUrl, dishes } of restaurantDishMenus) {
   const place = byId(venueId);
-  for (const { id, name, price, diameter, file, portion, splats } of dishes) {
-    addDish(place, id, name, price, diameter, file, portion, { splats });
+  // Prices come either from the venue's own ordering page or from a cited lookup, each with its own date.
+  if (pricingUrl && dishes.some(({ price }) => price !== null)) place.price_checked_on = demoDate;
+  else if (dishes.some(({ price, priceUrl }) => price !== null && priceUrl)) place.price_checked_on = priceLookupDate;
+  for (const { id, name, price, diameter, file, portion, splats, photoUrl } of dishes) {
+    addDish(place, id, name, price, diameter, file, portion, { splats, photoUrl });
   }
 }
 
@@ -171,6 +197,13 @@ export const demoDishPhotoSources = restaurantDishMenus.map(({ venueId, pricingU
   pricingUrl,
   items: dishes.map(({ name, photoUrl }) => ({ name, url: photoUrl })),
 }));
+
+/** Dishes whose price the price agent found, with the page it read the amount from. */
+export const demoDishPriceSources = restaurantDishMenus.map(({ venueId, dishes }) => ({
+  venue: byId(venueId).name,
+  items: dishes.flatMap(({ name, price, priceSource, priceUrl }) => price !== null && priceUrl
+    ? [{ name, price, source: priceSource ?? 'Menu listing', url: priceUrl }] : []),
+})).filter(({ items }) => items.length);
 
 byId('kenmore-fenway-01').seat_views = [{
   id: 'fenway-seat-demo', place_id: 'kenmore-fenway-01', section: 'Grandstand 18',

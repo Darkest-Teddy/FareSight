@@ -13,7 +13,7 @@ const maxUploads = MAX_ROOM_PHOTOS + 1;
 
 interface UploadActions {
   places(): Place[];
-  published(job: GenerationJob, open: boolean): Promise<void>;
+  published(job: GenerationJob, open: boolean, current: () => boolean): Promise<void>;
 }
 
 export class UploadPipelineModal {
@@ -28,6 +28,7 @@ export class UploadPipelineModal {
   private readonly dish = element('select');
   private readonly dishName = element('input');
   private readonly newDishField = field('New dish name', this.dishName);
+  private readonly dishPrice = element('input');
   private readonly diameter = element('input');
   private readonly history = element('select');
   private readonly monitor = element('div', 'job-monitor');
@@ -45,6 +46,8 @@ export class UploadPipelineModal {
   private selectedAsset?: Asset;
   private intake?: IntakeSelectionResult;
   private busy = false;
+  private generation = 0;
+  private jobSelection = 0;
   private pollTimer?: number;
 
   constructor(private readonly actions: UploadActions) {
@@ -63,50 +66,71 @@ export class UploadPipelineModal {
     this.file.addEventListener('change', () => {
       const files = Array.from(this.file.files ?? []);
       this.file.value = '';
-      void this.run(() => this.upload(files));
+      void this.run((current) => this.upload(files, current));
     });
     drop.addEventListener('dragover', (event) => { event.preventDefault(); drop.classList.add('dragging'); });
     drop.addEventListener('dragleave', () => drop.classList.remove('dragging'));
     drop.addEventListener('drop', (event) => {
       event.preventDefault();
       drop.classList.remove('dragging');
-      void this.run(() => this.upload(Array.from(event.dataTransfer?.files ?? [])));
+      void this.run((current) => this.upload(Array.from(event.dataTransfer?.files ?? []), current));
     });
-    this.sample = button('Load sample demo photo set', () => void this.run(async () => {
+    this.sample = button('Load sample demo photo set', () => void this.run(async (current) => {
       this.note('Preparing illustrated demo references…');
-      await this.upload(await sampleDemoPhotos());
+      const photos = await sampleDemoPhotos();
+      if (current()) await this.upload(photos, current);
     }));
     photos.append(drop, this.sample, element('p', 'muted', 'Sample illustrations depict fictional scenes for pipeline testing.'), this.feedback);
 
     const select = section('2. Choose generation inputs');
-    this.auto = button('Auto-select with Gemini (gemini-4-hydrogen)', () => void this.run(() => this.autoSelect()));
+    this.auto = button('Auto-select with Gemini (gemini-4-hydrogen)', () => void this.run((current) => this.autoSelect(current)));
     select.append(this.auto, this.intakeDetails, this.photoList);
 
     const generate = section('3. Generate a 3D preview');
-    this.dish.addEventListener('change', () => this.refreshControls());
+    this.dish.addEventListener('change', () => {
+      // Start from the catalog price when there is one; the operator still confirms or corrects it.
+      const known = this.actions.places().find((entry) => entry.id === this.place.value)
+        ?.dishes.find((entry) => entry.id === this.dish.value)?.price;
+      if (known != null) this.dishPrice.value = known.toFixed(2);
+      this.refreshControls();
+    });
     this.dishName.maxLength = 120;
     this.dishName.addEventListener('input', () => this.refreshControls());
+    this.dishPrice.type = 'number';
+    this.dishPrice.min = '0.25';
+    this.dishPrice.max = '500';
+    this.dishPrice.step = '0.01';
+    this.dishPrice.placeholder = 'Required, for example 12.95';
+    this.dishPrice.addEventListener('input', () => this.refreshControls());
     this.diameter.type = 'number';
     this.diameter.min = '0.1';
     this.diameter.max = '200';
     this.diameter.step = 'any';
     this.diameter.placeholder = 'Optional';
     this.roomTier.append(option('atlas-draft', 'Atlas Draft (~30s, 2-32 photos)'), option('atlas-refined', 'Atlas Refined (~18m, high-res)'));
-    this.roomButton = button('Generate room (Atlas)', () => void this.run(() => this.generate('room')), 'accent');
-    this.dishButton = button('Generate dish (TRELLIS)', () => void this.run(() => this.generate('dish')), 'accent');
+    this.roomButton = button('Generate room (Atlas)', () => void this.run((current) => this.generate('room', current), true), 'accent');
+    this.dishButton = button('Generate dish (TRELLIS)', () => void this.run((current) => this.generate('dish', current), true), 'accent');
     const generateActions = element('div', 'button-row');
     generateActions.append(this.roomButton, this.dishButton);
     generate.append(field('Room quality', this.roomTier), element('p', 'muted', ROOM_PHOTO_REQUIREMENT),
-      field('Dish to publish', this.dish), this.newDishField, field('Known plate diameter (cm)', this.diameter), generateActions);
+      field('Dish to publish', this.dish), this.newDishField, field('Menu price (USD)', this.dishPrice),
+      field('Known plate diameter (cm)', this.diameter), generateActions);
 
     const monitor = section('4. Monitor and review');
-    this.history.addEventListener('change', () => { void this.selectJob(this.history.value); });
+    this.history.addEventListener('change', () => { ++this.jobSelection; void this.selectJob(this.history.value); });
     monitor.append(field('Generation job', this.history), this.monitor);
     body.append(photos, select, generate, monitor);
-    dialog.addEventListener('close', () => window.clearTimeout(this.pollTimer));
+    dialog.addEventListener('close', () => {
+      if (!dialog.open) window.clearTimeout(this.pollTimer);
+    });
   }
 
   open(placeId?: string) {
+    if (!this.surface.dialog.open) {
+      ++this.generation;
+      ++this.jobRequest;
+      this.busy = false;
+    }
     if (!this.busy) this.reconcilePlaces(placeId);
     this.surface.open();
     void this.loadJobs();
@@ -129,6 +153,7 @@ export class UploadPipelineModal {
     this.roomIds.clear();
     this.dishId = '';
     this.dishName.value = '';
+    this.dishPrice.value = '';
     this.diameter.value = '';
     const place = this.actions.places().find((entry) => entry.id === this.place.value);
     this.dish.replaceChildren(...(place?.dishes.map((entry) => option(entry.id, entry.name)) ?? []), option('', 'New dish'));
@@ -143,10 +168,13 @@ export class UploadPipelineModal {
     this.place.disabled = this.busy || !this.place.options.length;
     this.file.disabled = this.sample.disabled = this.busy || !this.place.value || this.uploads.length >= maxUploads;
     this.auto.disabled = this.busy || !this.uploads.length;
-    this.roomTier.disabled = this.dish.disabled = this.dishName.disabled = this.diameter.disabled = this.busy;
+    this.roomTier.disabled = this.dish.disabled = this.dishName.disabled = this.busy;
+    this.dishPrice.disabled = this.diameter.disabled = this.busy;
     this.newDishField.hidden = this.dish.value !== '';
     this.roomButton.disabled = this.busy || this.roomIds.size < 2 || this.roomIds.size > MAX_ROOM_PHOTOS;
-    this.dishButton.disabled = this.busy || !this.dishId || (!this.dish.value && !this.dishName.value.trim());
+    this.dishButton.disabled = this.busy || !this.dishId || (!this.dish.value && !this.dishName.value.trim())
+      || !this.dishPrice.value.trim() || !this.dishPrice.checkValidity();
+    this.photoList.querySelectorAll('input').forEach((input) => { input.disabled = this.busy; });
     this.monitor.querySelectorAll<HTMLButtonElement>('[data-mutation]').forEach((control) => {
       control.disabled = this.busy;
     });
@@ -157,21 +185,29 @@ export class UploadPipelineModal {
     this.feedback.classList.toggle('error', problem);
   }
 
-  private async run(action: () => Promise<void>) {
-    if (this.busy || !this.place.value) return;
+  private async run(action: (current: () => boolean) => Promise<void>, trackJob = false) {
+    if (this.busy || !this.place.value || !this.surface.dialog.open) return;
+    const generation = this.generation;
+    const place = this.place.value;
+    const selection = this.jobSelection;
+    const current = () => this.surface.dialog.open && generation === this.generation && place === this.place.value &&
+      (!trackJob || selection === this.jobSelection);
     this.busy = true;
     this.refreshControls();
-    try { await action(); }
+    try { await action(current); }
     catch (error) {
+      if (!current()) return;
       this.note(errorText(error), true);
       this.feedback.scrollIntoView({ block: 'nearest' });
     } finally {
-      this.busy = false;
-      this.refreshControls();
+      if (generation === this.generation) {
+        this.busy = false;
+        this.refreshControls();
+      }
     }
   }
 
-  private async upload(files: File[]) {
+  private async upload(files: File[], current: () => boolean) {
     if (!files.length) return;
     const place = this.place.value;
     const uploads = this.uploadSets.get(place) ?? [];
@@ -179,6 +215,7 @@ export class UploadPipelineModal {
     const errors: string[] = [];
     let received = 0;
     for (const file of files) {
+      if (!current()) break;
       if (uploads.length >= maxUploads) { errors.push(`The photo set is limited to ${maxUploads} uploads.`); break; }
       if (file.size > 8 * 1024 * 1024 || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
         errors.push(file.name + ' must be a JPEG, PNG or WebP under 8 MiB.');
@@ -191,14 +228,17 @@ export class UploadPipelineModal {
         received++;
       } catch (error) { errors.push(file.name + '. ' + errorText(error)); }
     }
+    if (!current()) return;
     if (received) this.intake = undefined;
     this.renderPhotos();
     this.note(errors.length ? errors.slice(0, 3).join(' ') : `${uploads.length} photos in this set. Choose inputs manually or run auto-selection.`, errors.length > 0);
   }
 
-  private async autoSelect() {
+  private async autoSelect(current: () => boolean) {
     this.note('Checking photos for distinct rooms and dishes…');
-    this.intake = await api.intake(this.place.value, this.uploads.map((upload) => upload.id), this.passcode.value);
+    const intake = await api.intake(this.place.value, this.uploads.map((upload) => upload.id), this.passcode.value);
+    if (!current()) return;
+    this.intake = intake;
     this.roomIds.clear();
     for (const id of this.intake.recommended_room_upload_ids) this.roomIds.add(id);
     this.dishId = this.intake.recommended_dish_upload_id ?? '';
@@ -247,39 +287,51 @@ export class UploadPipelineModal {
     }
   }
 
-  private async generate(kind: 'room' | 'dish') {
+  private async generate(kind: 'room' | 'dish', current: () => boolean) {
     const ids = kind === 'room' ? [...this.roomIds] : [this.dishId];
     const dish = kind === 'dish';
     if (!dish && (ids.length < 2 || ids.length > MAX_ROOM_PHOTOS)) throw new Error(ROOM_PHOTO_REQUIREMENT);
     const diameter = this.diameter.valueAsNumber;
+    const price = this.dishPrice.valueAsNumber;
+    // Every uploaded food photo states its menu price, so no dish is published unpriced.
+    if (dish && (!this.dishPrice.value.trim() || !this.dishPrice.checkValidity())) {
+      throw new Error('Enter the menu price, between $0.25 and $500.');
+    }
     if (dish && this.diameter.validity.badInput) throw new Error('Enter a valid diameter in centimeters.');
     if (dish && this.diameter.value && !this.diameter.checkValidity()) throw new Error('Enter a plate diameter between 0.1 and 200 cm.');
     this.note(`Queuing ${kind} generation…`);
+    const sourceUrls = this.uploads.filter((upload) => ids.includes(upload.id)).map((upload) => upload.url);
     const job = await api.generate({
       kind, place_id: this.place.value, upload_ids: ids,
       dish_id: dish && this.dish.value ? this.dish.value : undefined,
       dish_name: dish && !this.dish.value ? this.dishName.value.trim() : undefined,
+      dish_price: dish ? Math.round(price * 100) / 100 : undefined,
       plate_diameter_m: dish && Number.isFinite(diameter) ? diameter / 100 : undefined,
       model_tier: dish ? undefined : this.roomTier.value as RoomModelTier,
     }, this.passcode.value);
-    this.sourceUrls.set(job.id, this.uploads.filter((upload) => ids.includes(upload.id)).map((upload) => upload.url));
+    this.sourceUrls.set(job.id, sourceUrls);
     this.jobs.set(job.id, job);
+    if (!current()) return;
     this.renderHistory(job.id);
     this.note('Job queued. Follow its progress in the monitor.');
     await this.selectJob(job.id, job);
-    this.monitor.scrollIntoView({ block: 'nearest' });
+    if (current()) this.monitor.scrollIntoView({ block: 'nearest' });
   }
 
   private async loadJobs() {
+    const generation = this.generation;
     const current = this.selectedJob;
+    const previous = new Map(this.jobs);
     if (!current) this.monitor.replaceChildren(message('Loading generation jobs…'));
     try {
-      for (const job of await api.jobs()) this.jobs.set(job.id, job);
-      if (!this.surface.dialog.open) return;
+      const jobs = await api.jobs();
+      if (generation !== this.generation || !this.surface.dialog.open) return;
+      for (const job of jobs) if (this.jobs.get(job.id) === previous.get(job.id)) this.jobs.set(job.id, job);
       const selected = this.selectedJob || this.jobs.keys().next().value || '';
       this.renderHistory(selected);
       await this.selectJob(selected);
     } catch (error) {
+      if (generation !== this.generation || !this.surface.dialog.open || current !== this.selectedJob) return;
       if (!current) this.monitor.replaceChildren(message('Could not list jobs. ' + errorText(error), true), button('Reload jobs', () => void this.loadJobs()));
       else this.schedulePoll();
     }
@@ -316,6 +368,7 @@ export class UploadPipelineModal {
           this.selectedAsset = asset;
         } catch { /* The job remains inspectable while its asset metadata is unavailable. */ }
       }
+      if (request !== this.jobRequest || !this.surface.dialog.open) return;
       this.renderJob(job);
       this.schedulePoll();
     } catch (error) {
@@ -354,9 +407,11 @@ export class UploadPipelineModal {
     );
     if (job.error) overlay.append(message(job.error, true));
     if (job.status === 'failed') {
-      const retry = button('Retry from saved stage', () => void this.run(async () => {
-        await this.selectJob(job.id, await api.retry(job.id, this.passcode.value));
-      }));
+      const retry = button('Retry from saved stage', () => void this.run(async (current) => {
+        const retried = await api.retry(job.id, this.passcode.value);
+        this.jobs.set(job.id, retried);
+        if (current() && job.id === this.selectedJob) await this.selectJob(job.id, retried);
+      }, true));
       retry.dataset.mutation = '';
       overlay.append(retry);
     }
@@ -373,21 +428,24 @@ export class UploadPipelineModal {
     const publish = section('5. Publish');
     if (asset?.status === 'rejected') publish.append(message('This asset was rejected during review.', true));
     else if (job.status === 'needs_review' && job.asset_id) {
-      const action = button('Publish to restaurant manifest', () => void this.run(async () => {
+      const action = button('Publish to restaurant manifest', () => void this.run(async (current) => {
         this.note('Publishing reviewed asset…');
         await api.publish(job.asset_id!, { approve: true }, this.passcode.value);
+        if (!current() || job.id !== this.selectedJob) return;
         this.selectedAsset = undefined;
         await this.selectJob(job.id);
-        await this.actions.published(this.jobs.get(job.id) ?? job, false);
-        this.note('Asset published to the restaurant manifest.');
-      }), 'accent');
+        if (!current()) return;
+        await this.actions.published(this.jobs.get(job.id) ?? job, false, current);
+        if (current()) this.note('Asset published to the restaurant manifest.');
+      }, true), 'accent');
       action.dataset.mutation = '';
       publish.append(element('p', 'muted', 'Review the source and preview before publishing.'), action);
     } else if (job.status === 'ready') {
-      publish.append(message('Published to the restaurant manifest.'), button('Open in 3D viewer', () => void this.run(async () => {
-        await this.actions.published(job, true);
-        this.surface.dialog.close();
-      }), 'accent'));
+      publish.append(message('Published to the restaurant manifest.'), button('Open in 3D viewer', () => void this.run(async (current) => {
+        if (job.id !== this.selectedJob) return;
+        await this.actions.published(job, true, current);
+        if (current()) this.surface.dialog.close();
+      }, true), 'accent'));
     } else publish.append(message('The asset becomes publishable after conversion and review.'));
     this.monitor.replaceChildren(steps, progress, status, overlay, images, publish);
     this.refreshControls();

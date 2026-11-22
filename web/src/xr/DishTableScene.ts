@@ -3,9 +3,10 @@ import { formatDishPrice } from '@faresight/shared';
 import type { XRAssetData, XRDishData, XRManifestData, XRPlaceData } from './bridgeTypes';
 import { hasDishPreview, menuDishes } from '../data/preview3D';
 import { CanvasSurface, facePlane } from './CanvasPanel3D';
-import { collideDishes, DishBody, dishStep, tableRadius } from './DishPhysics';
+import { collideDishes, DishBody, DishGrabMotion, dishStep, tableRadius } from './DishPhysics';
 import { jarvisPoints, type JarvisReveal } from './JarvisReveal';
 import { PhysicalMenuBook } from './PhysicalMenuBook';
+import type { SurfaceMatch } from './PhysicalSurfaces';
 import type { SplatLoader } from './SplatLoader';
 import { assetBase, child, damp, levelYaw, material, pickBounds, shape, sunflower, type HitTarget, type ModelLibrary, type PickBounds, type XYZ } from './sceneSupport';
 
@@ -14,7 +15,8 @@ export interface GrabbableDish {
   entity: pc.Entity;
   bounds: PickBounds;
   setHeld(held: boolean): void;
-  onRelease(surfaceY?: number, velocity?: pc.Vec3, angularVelocity?: pc.Vec3): boolean;
+  readonly centerOffset: number;
+  onRelease(surface?: SurfaceMatch, velocity?: pc.Vec3, angularVelocity?: pc.Vec3): boolean;
 }
 
 interface DishSetting {
@@ -27,6 +29,7 @@ interface DishSetting {
   center: number;
   grab?: GrabbableDish;
   body: DishBody;
+  heldMotion: DishGrabMotion;
   restPosition: pc.Vec3;
   restRotation: pc.Quat;
   preview?: string;
@@ -56,7 +59,6 @@ export class DishTableScene {
   private turntableRotation = new pc.Quat();
   private dishRotation = new pc.Quat();
   private dishPosition = new pc.Vec3();
-  private previousPosition = new pc.Vec3();
   private inverse = new pc.Mat4();
   private accumulated = 0;
 
@@ -128,7 +130,7 @@ export class DishTableScene {
     facePlane(placard, 'Printed dish caption', caption, [0, 0, 0.0045], 0.254, 0.076);
     placard.enabled = false;
     root.enabled = false;
-    return { root, pivot, plate, ring, placard, caption, center: 0, body: new DishBody(),
+    return { root, pivot, plate, ring, placard, caption, center: 0, body: new DishBody(), heldMotion: new DishGrabMotion(),
       restPosition: new pc.Vec3(), restRotation: new pc.Quat(), dropPending: false };
   }
 
@@ -235,15 +237,18 @@ export class DishTableScene {
         if (setting.grab !== grab || (!held && body.state !== 'held')) return;
         setting.dropPending = false;
         body.setFromPivot(pivot.getPosition(), pivot.getRotation());
-        if (held) body.reset('held');
-        else body.toss();
+        if (held) {
+          body.reset('held');
+          setting.heldMotion.reset(body.position, body.rotation);
+        } else body.toss();
       },
-      onRelease: (surfaceY, velocity, angularVelocity) => {
+      get centerOffset() { return body.halfHeight; },
+      onRelease: (surface, velocity, angularVelocity) => {
         if (setting.grab !== grab) return false;
         const position = pivot.getPosition();
         body.setFromPivot(position, pivot.getRotation());
-        body.toss(velocity, angularVelocity, surfaceY);
-        const support = surfaceY ?? this.tabletopY(position);
+        body.toss(velocity, angularVelocity, surface);
+        const support = (surface?.contains(position) ? surface.topY : undefined) ?? this.tabletopY(position);
         if (support !== undefined) body.keepAbove(support);
         return support !== undefined;
       },
@@ -349,18 +354,17 @@ export class DishTableScene {
           }
         }
       } else if (body.state === 'held') {
-        this.previousPosition.copy(body.position);
         body.setFromPivot(pivot.getPosition(), pivot.getRotation());
-        if (dt > 0) {
-          body.velocity.sub2(body.position, this.previousPosition).mulScalar(1 / dt);
-          body.clampMotion();
-        }
+        setting.heldMotion.sample(body.position, body.rotation);
+        body.velocity.copy(setting.heldMotion.velocity);
+        body.angularVelocity.copy(setting.heldMotion.angularVelocity);
       }
     }
     this.accumulated += Math.min(Math.max(0, dt), 0.05);
     while (this.accumulated >= dishStep) {
       this.accumulated -= dishStep;
       for (const { body } of settings) {
+        body.checkSupport(surfaceAt);
         if (body.state === 'dynamic') body.step(dishStep, table, floor, surfaceAt);
       }
       if (this.comparing) collideDishes(this.primary.body, this.secondary.body);
@@ -423,7 +427,6 @@ export class DishTableScene {
     this.root.destroy();
     this.primary.caption.destroy();
     this.secondary.caption.destroy();
-    this.ringMesh.destroy();
     this.destroyFallbackMaterials();
     for (const surface of this.surfaceMaterials) surface.destroy();
   }

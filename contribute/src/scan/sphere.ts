@@ -43,17 +43,25 @@ export function poseFromOrientation(alpha: number, beta: number, gamma: number):
   };
 }
 
-/** Camera axes for an upright camera turned to a yaw and pitch. */
-export function poseFromYawPitch(yaw: number, pitch: number): Pose {
+/** Camera axes for a camera turned to a yaw and pitch, and tilted sideways by `roll` degrees. */
+export function poseFromYawPitch(yaw: number, pitch: number, roll = 0): Pose {
   const forward = direction(yaw, pitch);
-  const right: Vec3 = [Math.cos(yaw * RAD), -Math.sin(yaw * RAD), 0];
-  const up: Vec3 = [
-    right[1] * forward[2] - right[2] * forward[1],
-    right[2] * forward[0] - right[0] * forward[2],
-    right[0] * forward[1] - right[1] * forward[0],
+  const level: Vec3 = [Math.cos(yaw * RAD), -Math.sin(yaw * RAD), 0];
+  const upright: Vec3 = [
+    level[1] * forward[2] - level[2] * forward[1],
+    level[2] * forward[0] - level[0] * forward[2],
+    level[0] * forward[1] - level[1] * forward[0],
   ];
-  return { right, up, forward };
+  const cos = Math.cos(roll * RAD), sin = Math.sin(roll * RAD);
+  return {
+    right: level.map((value, index) => value * cos + upright[index] * sin) as Vec3,
+    up: upright.map((value, index) => value * cos - level[index] * sin) as Vec3,
+    forward,
+  };
 }
+
+/** How far a camera is tilted sideways, in degrees: 0 when the horizon runs straight across the picture. */
+export const rollOf = (pose: Pose) => Math.atan2(pose.right[2], pose.up[2]) / RAD;
 
 export function blend(from: Pose, to: Pose, amount: number): Pose {
   const mix = (a: Vec3, b: Vec3): Vec3 => {
@@ -64,9 +72,10 @@ export function blend(from: Pose, to: Pose, amount: number): Pose {
   return { right: mix(from.right, to.right), up: mix(from.up, to.up), forward: mix(from.forward, to.forward) };
 }
 
-// Pitch, count and yaw offset of each ring. A phone in portrait sees about 40° across and 64° top to bottom,
-// so 16 shots on the horizon overlap by roughly half and the two tilted rings cover the ceiling and the floor.
-const rings: [pitch: number, count: number, offset: number][] = [[0, 16, 0], [40, 8, 22.5], [-35, 8, 22.5]];
+// Reserve two photos for the poles so the tilted rings can overlap them and the horizon.
+const rings: [pitch: number, count: number, offset: number][] = [
+  [0, MAX_ROOM_PHOTOS - 20, 0], [45, 9, 10], [90, 1, 0], [-45, 9, 10], [-90, 1, 0],
+];
 
 /** The spots to capture, most important ring first, relative to the heading the scan started at. */
 export function createTargets(startYaw: number): Target[] {
@@ -77,7 +86,7 @@ export function createTargets(startYaw: number): Target[] {
       targets.push({ yaw, pitch, ring, direction: direction(startYaw + yaw, pitch) });
     }
   }
-  return targets.slice(0, MAX_ROOM_PHOTOS);
+  return targets;
 }
 
 /** Screen position of a world direction. `side` is its offset from the view axis, for pointing at targets off screen. */

@@ -132,11 +132,11 @@ export const FARESIGHT_LIVE_TOOLS: LiveFunctionTool[] = [
     type: 'function',
     name: 'open_station',
     description:
-      'Dive smoothly from the Boston map into a specific MBTA station neighborhood diorama (BU Central, Packards Corner, Kenmore, Harvard Square, or Chinatown). Optionally highlight specific venue pins in that station.',
+      'Dive smoothly from the Boston map into a specific MBTA station neighborhood diorama. Optionally highlight specific venue pins in that station.',
     parameters: {
       type: 'object',
       properties: {
-        stop: { type: 'string', description: 'Stop ID (e.g. place-bucen, place-brico, place-kencl, place-harsq, place-chncl) or stop name.' },
+        stop: { type: 'string', description: 'Focal stop ID (e.g. place-bucen or place-haecl) or stop name. The map state includes the full list.' },
         highlight_place_ids: {
           type: 'array',
           items: { type: 'string' },
@@ -174,7 +174,7 @@ export const FARESIGHT_LIVE_TOOLS: LiveFunctionTool[] = [
     parameters: {
       type: 'object',
       properties: {
-        place: { type: 'string', description: 'Place ID (e.g. bu-ramen-01, allston-karaoke-01, harvard-cafe-01) or place name.' },
+        place: { type: 'string', description: 'Place ID (e.g. bu-starbucks-01, kenmore-jefes-01, kenmore-shudaxia-01, harvard-cafe-01) or place name.' },
         step_inside: { type: 'boolean', description: 'Whether to enter the 3D room splat immediately when available. Default true.' },
         highlight_dish: { type: 'string', description: 'Optional dish ID or name to highlight on the 3D menu book and drawer.' },
       },
@@ -204,7 +204,7 @@ export const FARESIGHT_LIVE_TOOLS: LiveFunctionTool[] = [
     parameters: {
       type: 'object',
       properties: {
-        dish: { type: 'string', description: 'Dish ID (e.g. bu-ramen-tonkotsu, bu-ramen-katsu, harvard-matcha-tiramisu) or dish name.' },
+        dish: { type: 'string', description: 'Dish ID (e.g. bu-starbucks-macchiato, kenmore-jefes-burrito, harvard-matcha-tiramisu) or dish name.' },
         place: { type: 'string', description: 'Optional place ID or name if disambiguation is needed.' },
         compare_dish: { type: 'string', description: 'Optional second published 3D dish ID or name from any venue.' },
         compare_place: { type: 'string', description: 'Optional exact venue ID for the comparison dish.' },
@@ -270,7 +270,7 @@ export const FARESIGHT_LIVE_TOOLS: LiveFunctionTool[] = [
     type: 'function',
     name: 'set_will_we_fit',
     description:
-      'Toggle and configure the 3D "Will we fit?" floor-space capacity visualizer inside a venue room (such as Echo Box Karaoke Lounge), updating group size and seated/standing layout.',
+      'Toggle and configure the 3D "Will we fit?" floor-space capacity visualizer inside a venue room with measured floor dimensions, updating group size and seated/standing layout.',
     parameters: {
       type: 'object',
       properties: {
@@ -345,7 +345,7 @@ export const FARESIGHT_LIVE_TOOLS: LiveFunctionTool[] = [
 
 export const CRAVING_FILTERS = [
   ['all', 'All'], ['ramen', 'Ramen & Noodles'], ['cheap', 'Cheap Eats'], ['study', 'Study Cafes'],
-  ['groups', 'Karaoke & Groups'], ['music', 'Live Music'], ['shops', 'Shops & Markets'], ['parks', 'Parks & Views'],
+  ['groups', 'Group Dining'], ['music', 'Live Music'], ['shops', 'Shops & Markets'], ['parks', 'Parks & Views'],
 ] as const;
 
 const stop = { type: 'string', enum: STOPS.map(({ stop_id }) => stop_id) };
@@ -362,7 +362,9 @@ const block = (type: string, properties: Record<string, object>, required: strin
   object({ type: { type: 'string', enum: [type] }, heading: text, ...properties }, ['type', required]);
 
 function tool<Name extends string>(name: Name, description: string, properties: Record<string, object>, required: string[] = []) {
-  return { type: 'function', name, description, parameters: { type: 'object', properties, required, additionalProperties: false } };
+  const hasOptionalProperties = Object.keys(properties).length > required.length;
+  return { type: 'function', name, description, ...(hasOptionalProperties ? { strict: false } : {}),
+    parameters: object(properties, required) };
 }
 
 export const LIVE_APP_TOOLS = [
@@ -375,7 +377,8 @@ export const LIVE_APP_TOOLS = [
   tool('focus_stop', 'Open a subway stop and show its neighborhood diorama.', { stopId: stop }, ['stopId']),
   tool('open_venue', 'Open a venue from the catalog and step into its room preview.', { placeId: id }, ['placeId']),
   tool('open_dish', 'Show a dish or compare two published 3D dishes from any venues on the bistro table.', {
-    placeId: id, dishId: id, compareDishId: id, comparePlaceId: id,
+    placeId: id, dishId: id, compareDishId: id,
+    comparePlaceId: { ...id, description: 'Exact venue ID for the second dish. Requires compareDishId.' },
   }, ['placeId']),
   tool('navigate_scene', 'Switch to a scene with an existing selection. Use focus_stop, open_venue, or open_dish to select a new subject.', {
     scene: { type: 'string', enum: ['map', 'station', 'venue', 'dish'] },

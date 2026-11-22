@@ -18,7 +18,7 @@ interface Screen { root: HTMLElement; destroy?(): void }
 
 const depth: Record<Route['name'], number> = { map: 0, scans: 0, stop: 1, place: 2 };
 const codeLabels = {
-  unknown: 'Invite code', open: 'No invite code needed', saved: 'Invite code saved', needed: 'Enter your invite code',
+  unknown: 'Upload code', open: 'No upload code needed', saved: 'Upload code saved', needed: 'Enter your upload code',
 };
 
 function parse(hash: string): Route {
@@ -57,7 +57,7 @@ export class App {
     const brand = button('', () => this.go('#/'), 'wordmark');
     const mark = el('span', 'brand-mark');
     mark.setAttribute('aria-hidden', 'true');
-    brand.append(mark, el('span', '', 'FareSight'), el('span', 'brand-tag', 'Contribute'));
+    brand.append(mark);
     brand.setAttribute('aria-label', 'FareSight Contribute, back to the map');
     this.codeButton = iconButton('key', codeLabels.unknown, () => void codeSheet.ask(), 'code-button');
     bar.append(brand, this.codeButton);
@@ -89,6 +89,7 @@ export class App {
     this.renderCode();
     this.renderBadge();
     void catalog.load();
+    catalog.watch();
     void inviteCode.refresh();
     scans.start();
     window.addEventListener('online', () => {

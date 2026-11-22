@@ -4,6 +4,9 @@ interface RestaurantDishPreview {
   id: string;
   name: string;
   price: Dish['price'];
+  /** Publisher and page the price was read from, when it came from a price lookup rather than the venue's own menu. */
+  priceSource?: string;
+  priceUrl?: string;
   diameter: number;
   portion: string;
   file: `dish-${string}.sog`;
@@ -23,31 +26,31 @@ export const restaurantDishMenus: readonly RestaurantDishMenu[] = [
     dishes: [
       {
         id: 'kenmore-jefes-tacos', name: 'Tacos (Three)',
-        price: null, diameter: 0.22, portion: 'Three tacos with grilled meat, slaw and cheese.',
+        price: 12.45, priceSource: 'El Jefe\'s Taqueria on order.online', priceUrl: 'https://order.online/store/el-jefe-s-taqueria-of-kenmore-square-32753647', diameter: 0.22, portion: 'Three tacos with grilled meat, slaw and cheese.',
         file: 'dish-eljefes-tacos.sog', splats: 60_000,
         photoUrl: 'https://eljefestaqueria.com/wp-content/uploads/2026/09/Menu-Banner-Image-scaled-e1788788307495.jpg',
       },
       {
         id: 'kenmore-jefes-burrito', name: 'Carnitas Burrito',
-        price: null, diameter: 0.22, portion: 'One carnitas burrito, shown as a cut half.',
+        price: 12.45, priceSource: 'El Jefe\'s Taqueria on order.online', priceUrl: 'https://order.online/store/el-jefe-s-taqueria-of-kenmore-square-32753647', diameter: 0.22, portion: 'One carnitas burrito, shown as a cut half.',
         file: 'dish-eljefes-burrito.sog', splats: 60_000,
         photoUrl: 'https://eljefestaqueria.com/wp-content/uploads/2026/08/Carnitas-burrito-1-1-e1788790684747.png',
       },
       {
         id: 'kenmore-jefes-bowl', name: 'Burrito Bowl',
-        price: null, diameter: 0.24, portion: 'Burrito bowl with rice, beans, meat, slaw and guacamole.',
+        price: 12.95, priceSource: 'El Jefe\'s Taqueria on order.online', priceUrl: 'https://order.online/store/el-jefe-s-taqueria-of-kenmore-square-32753647', diameter: 0.24, portion: 'Burrito bowl with rice, beans, meat, slaw and guacamole.',
         file: 'dish-eljefes-bowl.sog', splats: 60_000,
         photoUrl: 'https://eljefestaqueria.com/wp-content/uploads/2026/08/bowls-1.webp',
       },
       {
         id: 'kenmore-jefes-quesadilla', name: 'Quesadilla',
-        price: null, diameter: 0.26, portion: 'Grilled quesadilla cut into wedges.',
+        price: 12.45, priceSource: 'El Jefe\'s Taqueria on order.online', priceUrl: 'https://order.online/store/el-jefe-s-taqueria-of-kenmore-square-32753647', diameter: 0.26, portion: 'Grilled quesadilla cut into wedges.',
         file: 'dish-eljefes-quesadilla.sog', splats: 60_000,
         photoUrl: 'https://eljefestaqueria.com/wp-content/uploads/2026/08/quesadillas-e1788505222181.webp',
       },
       {
         id: 'kenmore-jefes-taco-salad', name: 'Taco Salad Bowl',
-        price: null, diameter: 0.24, portion: 'Taco salad in a fried tortilla bowl.',
+        price: 12.59, priceSource: 'Uber Eats', priceUrl: 'https://www.ubereats.com/brand-city/boston-ma/el-jefes', diameter: 0.24, portion: 'Taco salad in a fried tortilla bowl.',
         file: 'dish-eljefes-taco-salad.sog', splats: 60_000,
         photoUrl: 'https://eljefestaqueria.com/wp-content/uploads/2026/08/soups-salads-1.webp',
       },
@@ -256,13 +259,13 @@ export const restaurantDishMenus: readonly RestaurantDishMenu[] = [
       },
       {
         id: 'bu-starbucks-caffe-latte', name: 'Caffè Latte',
-        price: null, diameter: 0.09, portion: 'One serving.',
+        price: 5.55, priceSource: 'Menu With Price', priceUrl: 'https://www.menuwithprice.com/menu/starbucks/massachusetts/boston/132956/', diameter: 0.09, portion: 'One serving.',
         file: 'dish-starbucks-caff-latte.sog', splats: 60_000,
         photoUrl: 'https://cloudassets.starbucks.com/is/image/sbuxcorp/CaffeLatte',
       },
       {
         id: 'bu-starbucks-cappuccino', name: 'Cappuccino',
-        price: null, diameter: 0.09, portion: 'One serving.',
+        price: 5.55, priceSource: 'Menu With Price', priceUrl: 'https://www.menuwithprice.com/menu/starbucks/massachusetts/boston/132956/', diameter: 0.09, portion: 'One serving.',
         file: 'dish-starbucks-cappuccino.sog', splats: 60_000,
         photoUrl: 'https://cloudassets.starbucks.com/is/image/sbuxcorp/SBX20190617_Cappuccino',
       },
@@ -304,13 +307,13 @@ export const restaurantDishMenus: readonly RestaurantDishMenu[] = [
       },
       {
         id: 'bu-starbucks-caramel-frappuccino-blended-beverage', name: 'Caramel Frappuccino Blended Beverage',
-        price: null, diameter: 0.095, portion: 'One serving.',
+        price: 6.95, priceSource: 'MenuWithPrice', priceUrl: 'https://www.menuwithprice.com/menu/starbucks/massachusetts/boston/132956/', diameter: 0.095, portion: 'One serving.',
         file: 'dish-starbucks-caramel-frappuccino-blended-beverage.sog', splats: 60_000,
         photoUrl: 'https://cloudassets.starbucks.com/is/image/sbuxcorp/SBX20220323_CaramelFrapp',
       },
       {
         id: 'bu-starbucks-mocha-frappuccino-blended-beverage', name: 'Mocha Frappuccino Blended Beverage',
-        price: null, diameter: 0.095, portion: 'One serving.',
+        price: 6.95, priceSource: 'MenuWithPrice', priceUrl: 'https://www.menuwithprice.com/menu/starbucks/massachusetts/boston/132956/', diameter: 0.095, portion: 'One serving.',
         file: 'dish-starbucks-mocha-frappuccino-blended-beverage.sog', splats: 60_000,
         photoUrl: 'https://cloudassets.starbucks.com/is/image/sbuxcorp/MochaFrappuccino',
       },
@@ -322,7 +325,7 @@ export const restaurantDishMenus: readonly RestaurantDishMenu[] = [
       },
       {
         id: 'bu-starbucks-iced-brown-sugar-oatmilk-shaken-espresso', name: 'Iced Brown Sugar Oatmilk Shaken Espresso',
-        price: null, diameter: 0.095, portion: 'One serving.',
+        price: 6.55, priceSource: 'MenuPix', priceUrl: 'https://www.menupix.com/boston/restaurants/31639969/Starbucks-Boston-MA', diameter: 0.095, portion: 'One serving.',
         file: 'dish-starbucks-iced-brown-sugar-oatmilk-shaken-espresso.sog', splats: 60_000,
         photoUrl: 'https://cloudassets.starbucks.com/is/image/sbuxcorp/IcedBrownSugarOatmilkShakenEspresso',
       },

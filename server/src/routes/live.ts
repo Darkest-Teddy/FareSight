@@ -5,13 +5,14 @@ import {
 import type { FastifyInstance } from 'fastify';
 import type { Config } from '../config.ts';
 import type { Store } from '../db/database.ts';
+import { sessionLimits } from '../services/requestLimits.ts';
 
 interface OpenAILiveSessionPayload {
   session?: { id?: string };
   transport?: { type?: string; sdp?: string };
   id?: string;
   sdp?: string;
-  error?: { message?: string };
+  error?: { code?: unknown; param?: unknown; message?: unknown };
 }
 
 function normalizeVoice(requested: string | undefined, fallback: string): string {
@@ -66,6 +67,7 @@ function buildBackendInstructions(places: Place[], initialContext?: string): str
 async function requestOpenAISession(
   config: Config,
   payload: Record<string, unknown>,
+  signal: AbortSignal,
 ): Promise<{ status: number; data: OpenAILiveSessionPayload | null; rawText: string }> {
   const response = await fetch(`${config.openaiBaseUrl}/live/sessions`, {
     method: 'POST',
@@ -74,7 +76,7 @@ async function requestOpenAISession(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(25_000),
+    signal,
     redirect: 'error',
   });
   const rawText = await response.text();
@@ -88,6 +90,7 @@ async function requestOpenAISession(
 }
 
 export function registerLive(app: FastifyInstance, store: Store, config: Config) {
+  const limits = sessionLimits();
   app.get('/api/live/status', async (): Promise<LiveStatusResponse> => ({
     configured: Boolean(config.openaiKey),
     model: config.openaiLiveModel,
@@ -96,7 +99,7 @@ export function registerLive(app: FastifyInstance, store: Store, config: Config)
     voices: LIVE_VOICES,
   }));
 
-  app.post<{ Body: LiveSessionRequest }>('/api/live/sessions', async ({ body }, reply) => {
+  app.post<{ Body: LiveSessionRequest }>('/api/live/sessions', { bodyLimit: 64 * 1024 }, async ({ body, ip }, reply) => {
     reply.header('Cache-Control', 'no-store');
     if (!config.openaiKey) {
       return reply.code(503).send({
@@ -104,8 +107,11 @@ export function registerLive(app: FastifyInstance, store: Store, config: Config)
       });
     }
     const normalized = typeof body?.sdp === 'string' ? body.sdp.replace(/\r\n?|\n/g, '\r\n') : '';
-    if (!normalized.startsWith('v=0\r\n')) {
+    if (!normalized.startsWith('v=0\r\n') || !/^m=audio[ \t]/m.test(normalized)) {
       return reply.code(400).send({ error: 'A valid WebRTC SDP offer is required to start a live session.' });
+    }
+    if (body.voice !== undefined && typeof body.voice !== 'string') {
+      return reply.code(400).send({ error: 'voice must be a string' });
     }
     const sdp = normalized.endsWith('\r\n') ? normalized : `${normalized}\r\n`;
     const voice = normalizeVoice(body.voice, config.openaiLiveVoice);
@@ -129,7 +135,11 @@ export function registerLive(app: FastifyInstance, store: Store, config: Config)
       },
     };
 
+    const slot = limits.reserve(ip);
+    if (!slot) return reply.code(429).send({ error: 'Too many Live sessions' });
+    let started = false;
     try {
+      const signal = AbortSignal.timeout(25_000);
       let standby = true;
       let webSearch = true;
       let result: Awaited<ReturnType<typeof requestOpenAISession>>;
@@ -147,28 +157,29 @@ export function registerLive(app: FastifyInstance, store: Store, config: Config)
             },
           },
           transport: { type: 'webrtc', sdp },
-        });
+        }, signal);
         if (result.status !== 400) break;
-        if (webSearch && /web_search|web search/i.test(result.rawText)) webSearch = false;
-        else if (standby && /idle_timeout|wake_policy|standby/i.test(result.rawText)) standby = false;
+        const error = result.data?.error;
+        const message = typeof error?.message === 'string' ? error.message : '';
+        const unsupported = ['unsupported_value', 'unsupported_tool', 'unsupported_parameter', 'unknown_parameter'].includes(String(error?.code));
+        const toolError = /\b(?:unsupported|unknown)\s+(?:(?:tool|value)\s*:?\s*)?['"]?(?:web_search|web search)\b/i.test(message)
+          || /\b(?:web_search|web search)['"]?\s+(?:tool\s+)?(?:is\s+)?(?:not supported|unsupported|not available|not enabled)\b/i.test(message);
+        const standbyError = /(?:idle_timeout_s|wake_policy)/i.test(message) && /(?:unknown|unsupported|not supported)/i.test(message);
+        if (webSearch && (toolError || (unsupported && /(?:^|[.])web_search$/.test(String(error?.param))))) webSearch = false;
+        else if (standby && (standbyError || (unsupported && /(?:^|[.])(?:idle_timeout_s|wake_policy)$/.test(String(error?.param))))) standby = false;
         else break;
       }
 
       if (result.status < 200 || result.status >= 300) {
-        const detail = (result.data?.error?.message || result.rawText || `OpenAI returned HTTP ${result.status}`)
-          .replaceAll(config.openaiKey, '[redacted]').slice(0, 300);
-        return reply.code(result.status >= 400 && result.status < 600 ? result.status : 502).send({
-          error: `Could not start gpt-live-1.1 session: ${detail}`,
-        });
+        return reply.code(502).send({ error: 'Could not start OpenAI Live session.' });
       }
 
-      const answerSdp = result.data?.transport?.sdp
-        ?? result.data?.sdp
-        ?? (result.rawText.startsWith('v=0') ? result.rawText : '');
-      if (!answerSdp) {
-        return reply.code(502).send({ error: 'OpenAI Live API returned no WebRTC SDP answer.' });
+      const answerSdp = result.data?.transport?.sdp ?? result.data?.sdp ?? result.rawText;
+      if (typeof answerSdp !== 'string' || !/^v=0(?:\r\n|\n|\r)\S/.test(answerSdp)) {
+        return reply.code(502).send({ error: 'OpenAI Live API returned an invalid WebRTC SDP answer.' });
       }
-      const sessionId = result.data?.session?.id ?? result.data?.id ?? `live-${Date.now()}`;
+      const suppliedId = result.data?.session?.id ?? result.data?.id;
+      const sessionId = typeof suppliedId === 'string' && suppliedId ? suppliedId : `live-${Date.now()}`;
       const payload: LiveSessionResponse = {
         session_id: sessionId,
         sdp: answerSdp,
@@ -176,9 +187,13 @@ export function registerLive(app: FastifyInstance, store: Store, config: Config)
         backend_model: config.openaiLiveBackendModel,
         voice,
       };
+      slot.hold(60 * 60_000);
+      started = true;
       return reply.code(201).send(payload);
     } catch {
-      return reply.code(502).send({ error: 'Failed to reach OpenAI Live API.' });
+      return reply.code(502).send({ error: 'Could not start OpenAI Live session.' });
+    } finally {
+      if (!started) slot.release();
     }
   });
 }

@@ -36,10 +36,23 @@ export function createObjectStorage(config: Pick<CaptureConfig, 'endpoint' | 're
       return objects;
     },
 
-    async get(bucket: string, key: string) {
-      const { Body } = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    async get(bucket: string, key: string, maxBytes: number) {
+      const { Body, ContentLength } = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
       if (!Body) throw new Error(`Object ${key} has no body`);
-      return Buffer.from(await Body.transformToByteArray());
+      const stream = Body.transformToWebStream();
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      const tooLarge = () => new TypeError(`Object exceeds the ${maxBytes}-byte limit`);
+      if (ContentLength !== undefined && ContentLength > maxBytes) {
+        await stream.cancel();
+        throw tooLarge();
+      }
+      for await (const chunk of stream) {
+        size += chunk.byteLength;
+        if (size > maxBytes) throw tooLarge();
+        chunks.push(chunk);
+      }
+      return Buffer.concat(chunks, size);
     },
 
     async put(bucket: string, key: string, body: Buffer, contentType: string, options: { public?: boolean; cacheControl?: string } = {}) {

@@ -1,25 +1,29 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { gzipSync } from 'node:zlib';
+import { crc32, gunzipSync, gzipSync } from 'node:zlib';
 import { WebSocket } from 'ws';
-import { computeTotalCost, computeTripEstimate, demoAssets, demoPlaces, formatDishPrice, latLonToSculpture, STOPS } from '@faresight/shared';
+import { computeTotalCost, computeTripEstimate, demoAssets, demoDishPriceSources, demoPlaces, formatDishPrice, latLonToSculpture, STOPS } from '@faresight/shared';
 import { createApp } from '../dist/app.js';
 import { getConfig } from '../dist/config.js';
+import { Store, WorkerLeaseLost } from '../dist/db/database.js';
+import { demoSchedules } from '../dist/routes/mbtaDemo.js';
+import { downloadFile } from '../dist/services/providerHttp.js';
 import { pollAtlasSplats, submitAtlasSplats } from '../dist/services/atlasClient.js';
 import { findDemoAsset } from '../dist/services/demoAssets.js';
 import { inspectSplat } from '../dist/services/splatProcessor.js';
+import { fetchLiveReviews } from '../dist/services/liveReviews.js';
 
-const room = 'room-ramen-house.ply';
-const dish = 'dish-tonkotsu-ramen.ply';
-const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aNrcAAAAASUVORK5CYII=', 'base64');
+const room = 'room-study-cafe.ply';
+const dish = 'dish-matcha-tiramisu.ply';
+const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64');
 const secondImage = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
-const placeId = 'bu-ramen-01';
+const placeId = 'harvard-cafe-01';
 
 function fixturePly() {
   const fields = ['x', 'y', 'z', 'f_dc_0', 'f_dc_1', 'f_dc_2', 'opacity', 'scale_0', 'scale_1', 'scale_2', 'rot_0', 'rot_1', 'rot_2', 'rot_3'];
@@ -52,12 +56,11 @@ async function setup(t, overrides = {}) {
     app = undefined;
   };
   t.after(async () => {
-    await stop();
-    await rm(dir, { recursive: true, force: true });
+    try { await stop(); } finally { await rm(dir, { recursive: true, force: true }); }
   });
 
-  async function request(path, { body, method = body === undefined ? 'GET' : 'POST', status = 200, passcode = true } = {}) {
-    const headers = passcode ? { 'x-admin-passcode': config.adminPasscode } : {};
+  async function request(path, { body, method = body === undefined ? 'GET' : 'POST', status = 200, passcode = true, headers: extraHeaders = {} } = {}) {
+    const headers = passcode ? { 'x-admin-passcode': config.adminPasscode, ...extraHeaders } : { ...extraHeaders };
     const isForm = body instanceof FormData;
     if (body !== undefined && !isForm) headers['content-type'] = 'application/json';
     const response = await fetch(origin + path, {
@@ -84,7 +87,7 @@ async function setup(t, overrides = {}) {
   return { config, dir, start, stop, request, stage, origin: () => origin };
 }
 
-test('shared projection, all 25 rides, and fares', () => {
+test('shared projection, all 100 ordered stop combinations, and fares', () => {
   assert.deepEqual(latLonToSculpture(42.354, -71.095), [0, 0]);
   const [east, north] = latLonToSculpture(42.364, -71.085);
   assert(east > 0 && north < 0);
@@ -101,6 +104,18 @@ test('shared projection, all 25 rides, and fares', () => {
 });
 
 test('HTTP catalog and live MBTA proxy plus two-way WebSocket pairing', { timeout: 20_000 }, async (t) => {
+  const originalFetch = globalThis.fetch;
+  if (process.env.FARESIGHT_TEST_LIVE_MBTA !== '1') {
+    t.mock.method(globalThis, 'fetch', (input, init) => {
+      const url = new URL(input);
+      if (url.hostname !== 'api-v3.mbta.com') return originalFetch(input, init);
+      return Promise.resolve(Response.json({ data: url.pathname === '/vehicles' ? [{
+        id: 'vehicle-1', type: 'vehicle',
+        attributes: { latitude: 42.35, longitude: -71.1, direction_id: 1, updated_at: '2026-11-21T14:00:00Z' },
+        relationships: { route: { data: { id: 'Green-B' } } },
+      }] : [] }));
+    });
+  }
   const server = await setup(t);
   await server.start();
   const health = await server.request('/api/health');
@@ -108,18 +123,18 @@ test('HTTP catalog and live MBTA proxy plus two-way WebSocket pairing', { timeou
   const [places, stops, manifest] = await Promise.all([
     server.request('/api/restaurants'), server.request('/api/stops'), server.request(`/api/restaurants/${placeId}/manifest`),
   ]);
-  assert.equal(places.length, 30);
-  assert.equal(stops.length, 5);
+  assert.equal(places.length, 58);
+  assert.equal(stops.length, 10);
   for (const stop of stops) {
     const pins = places.filter((place) => place.stop_id === stop.stop_id).map((place) => place.pin_index);
     assert([5, 6, 7].includes(pins.length));
     assert.equal(new Set(pins).size, pins.length);
     assert(pins.every((pin) => pin >= 0 && pin <= 7));
   }
-  assert.equal(manifest.room_asset.url, '/assets-demo/room-ramen-house.ply');
+  assert.equal(manifest.room_asset.url, '/assets-demo/room-study-cafe.ply');
   assert.equal(manifest.room_asset.provenance, 'demo_splat');
-  assert.deepEqual(manifest.spawn_point, [0, 1.55, 2]);
-  assert.deepEqual(manifest.menu_items.map(({ dish, dish_asset }) => [dish.price, dish_asset.plate_diameter_m]), [[14.5, 0.24], [15.75, 0.26]]);
+  assert.deepEqual(manifest.spawn_point, [0, 1.55, 2.1]);
+  assert.deepEqual(manifest.menu_items.map(({ dish, dish_asset }) => [dish.price, dish_asset.plate_diameter_m]), [[9.25, 0.18]]);
   for (const asset of [manifest.room_asset, ...manifest.menu_items.map(({ dish_asset }) => dish_asset)]) {
     if (!findDemoAsset(server.config, asset.url.split('/').at(-1))) continue;
     const file = await fetch(server.origin() + asset.url);
@@ -130,21 +145,22 @@ test('HTTP catalog and live MBTA proxy plus two-way WebSocket pairing', { timeou
   const [vehicles, predictions, alerts, schedules, trip] = await Promise.all([
     server.request('/api/mbta/vehicles'), server.request('/api/mbta/predictions?stop=place-bucen'),
     server.request('/api/mbta/alerts'), server.request('/api/mbta/schedules?stop=place-bucen'),
-    server.request('/api/mbta/trip?from=place-kencl&to=place-bucen&walkToVenueM=80&venueLat=42.35015&venueLon=-71.10665'),
+    server.request('/api/mbta/trip?from=place-kencl&to=place-bucen&walkToVenueM=290&venueLat=42.34908&venueLon=-71.10358'),
   ]);
   assert(vehicles.vehicles.length > 0);
+  if (process.env.FARESIGHT_TEST_LIVE_MBTA !== '1') assert.equal(vehicles.source, 'live');
   assert(Array.isArray(predictions.predictions));
   assert(Array.isArray(alerts.alerts));
   assert(schedules.schedules.every((item) => item.last_trip));
-  assert.equal(trip.walk_to_venue_min, 1.3);
+  assert.equal(trip.walk_to_venue_min, 290 * 1.3 / 80);
   assert.equal(trip.fare, 2.4);
   const plannerParams = new URL(trip.planner_url).searchParams;
   assert.equal(plannerParams.get('plan[from_stop_id]'), 'place-kencl');
-  assert.equal(plannerParams.get('plan[to_latitude]'), '42.35015');
+  assert.equal(plannerParams.get('plan[to_latitude]'), '42.34908');
   t.diagnostic(`MBTA vehicles=${vehicles.source} (${vehicles.vehicles.length}), predictions=${predictions.source} (${predictions.predictions.length}), alerts=${alerts.source}, schedules=${schedules.source}`);
 
   const { code } = await server.request('/api/pairing/create', { method: 'POST', status: 201 });
-  assert.match(code, /^\d{4}$/);
+  assert.match(code, /^[A-HJ-NP-Z2-9]{6}$/);
   const connect = () => {
     const socket = new WebSocket(server.origin().replace('http', 'ws') + '/ws/pair/' + code);
     return { socket, message: () => once(socket, 'message', { signal: AbortSignal.timeout(2500) }).then(([data]) => JSON.parse(data.toString())) };
@@ -158,18 +174,26 @@ test('HTTP catalog and live MBTA proxy plus two-way WebSocket pairing', { timeou
     assert.deepEqual(await headset.message(), { type: 'peer_joined', peers: 2 });
     assert.deepEqual(await paired, { type: 'peer_joined', peers: 2 });
 
-    for (const payload of [{ type: 'open_place', place_id: placeId }, { type: 'open_dish', place_id: placeId, dish_id: 'bu-ramen-tonkotsu' }, { type: 'send_trip', trip }, { type: 'sync_filters', filters: { family_friendly: true } }]) {
+    for (const payload of [{ type: 'open_place', place_id: placeId }, { type: 'open_dish', place_id: placeId, dish_id: 'harvard-matcha-tiramisu' }, { type: 'send_trip', trip }, { type: 'sync_filters', filters: { family_friendly: true } }]) {
       const source = payload.type === 'open_place' ? headset : phone;
       const destination = source === phone ? headset : phone;
       const incoming = destination.message();
       source.socket.send(JSON.stringify(payload));
       assert.deepEqual(JSON.parse(JSON.stringify(payload)), await incoming);
     }
+    const destination = headset.message();
+    phone.socket.send(JSON.stringify({ type: 'sync_filters', filters: { max_price: 'invalid' } }));
+    phone.socket.send(JSON.stringify({ type: 'send_trip', trip: { ...trip, planner_url: 'https://mbta.com.example/planner' } }));
+    const { planner_url, ...safeTrip } = trip;
+    assert.deepEqual(await destination, { type: 'send_trip', trip: safeTrip });
   } finally {
     await Promise.all([phone, headset].filter(Boolean).map(({ socket }) => {
-      const closed = once(socket, 'close');
-      socket.close();
-      return closed;
+      if (socket.readyState === WebSocket.CLOSED) return;
+      return new Promise((resolve) => {
+        socket.on('error', () => {});
+        socket.once('close', resolve);
+        socket.terminate();
+      });
     }));
   }
 });
@@ -185,45 +209,70 @@ test('catalog startup refreshes bundled SOG previews and preserves uploaded asse
     const jefes = getPlace('kenmore-jefes-01');
     const [tacos, burrito] = jefes.dishes;
     putPlace({ ...jefes, room_asset_id: null, dishes: [{ ...tacos, name: "El Jefe's Tacos (Three)", price: 15.5 }, burrito],
-      seed_status: 'planning_estimate', price_checked_on: '' });
+      seed_status: 'planning_estimate', price_checked_on: '1990-01-01' });
     const shu = getPlace('kenmore-shudaxia-01');
     const [shrimp, beef] = shu.dishes;
     putPlace({ ...shu, dishes: [{ ...shrimp, name: 'Dual-Broth (Yin-Yang) Hot Pot', price: null },
       { ...beef, name: 'Marbled Beef Mountain', price: null }] });
     const starbucks = getPlace('bu-starbucks-01');
     putPlace({ ...starbucks, dishes: starbucks.dishes.slice(0, 2) });
-    const ramen = getPlace(placeId);
-    const [tonkotsu, katsu] = ramen.dishes;
-    putPlace({ ...ramen, room_asset_id: 'uploaded-room', dishes: [
-      { ...tonkotsu, price: 13 }, { ...katsu, name: 'Custom curry' },
-      { ...tonkotsu, id: 'obsolete-demo-dish', asset_id: 'obsolete-demo-preview' },
-      { ...tonkotsu, id: 'uploaded-dish', name: 'Uploaded appetizer', asset_id: 'uploaded-discrete-preview' },
+    const cafe = getPlace(placeId);
+    const [tiramisu] = cafe.dishes;
+    putPlace({ ...cafe, room_asset_id: 'uploaded-room', dishes: [
+      { ...tiramisu, price: 13 },
+      { ...tiramisu, id: 'obsolete-demo-dish', asset_id: 'obsolete-demo-preview' },
+      { ...tiramisu, id: 'uploaded-dish', name: 'Uploaded appetizer', asset_id: 'uploaded-discrete-preview' },
     ] });
+    const retired = { ...cafe, id: 'bu-ramen-01' };
+    const insertRetired = db.prepare('INSERT INTO places VALUES (?, ?)');
+    insertRetired.run(retired.id, JSON.stringify(retired));
+    const retiredKaraoke = { ...retired, id: 'allston-karaoke-01' };
+    insertRetired.run(retiredKaraoke.id, JSON.stringify(retiredKaraoke));
+    db.prepare('INSERT INTO uploads (id, data) VALUES (?, ?)').run('retired-image', JSON.stringify({ id: 'retired-image', sha256: 'retired-hash' }));
+    db.prepare('INSERT INTO upload_places VALUES (?, ?)').run('retired-image', retired.id);
+    db.prepare('INSERT INTO reviews VALUES (?, ?)').run('retired-review', JSON.stringify({ id: 'retired-review', place_id: retired.id }));
+    putPlace({ ...getPlace(placeId), stop_id: 'old-stop', pin_index: 99, rooms: [], seat_views: [], typical_price: 999,
+      cravings: ['stale'], family_friendly: !cafe.family_friendly, evening_venue: !cafe.evening_venue,
+      reviews: [{ id: 'runtime-review', author: 'Diner', rating: 3, text: 'Good', created_at: '' }] });
     const putAsset = (asset) => db.prepare('INSERT OR REPLACE INTO assets VALUES (?, ?)').run(asset.id, JSON.stringify(asset));
     const asset = (id) => demoAssets.find((asset) => asset.id === id);
-    putAsset({ ...asset('kenmore-jefes-01-room'), format: 'ply', url: '/assets-demo/room-ramen-house.ply', gaussian_count: 0 });
+    putAsset({ ...asset('kenmore-jefes-01-room'), format: 'ply', url: '/assets-demo/room-study-cafe.ply', gaussian_count: 0 });
     putAsset({ ...asset('kenmore-shudaxia-01-room'), gaussian_count: 349_369 });
     putAsset({ ...asset('bu-starbucks-macchiato-splat'), gaussian_count: 0 });
-    putAsset({ ...asset(tonkotsu.asset_id), id: 'obsolete-demo-preview' });
-    putAsset({ ...asset(katsu.asset_id), backend: 'trellis', format: 'sog', url: '/storage/outputs/custom-curry.sog' });
-    putAsset({ ...asset(katsu.asset_id), id: 'uploaded-discrete-preview', backend: 'trellis', format: 'sog', url: '/storage/outputs/appetizer.sog' });
-    putAsset({ ...asset(ramen.room_asset_id), id: 'uploaded-room', backend: 'atlas', format: 'sog', url: '/storage/outputs/uploaded-room.sog' });
+    putAsset({ ...asset(tiramisu.asset_id), id: 'obsolete-demo-preview' });
+    putAsset({ ...asset(tiramisu.asset_id), id: 'uploaded-discrete-preview', backend: 'trellis', format: 'sog', url: '/storage/outputs/appetizer.sog' });
+    putAsset({ ...asset(cafe.room_asset_id), id: 'uploaded-room', backend: 'atlas', format: 'sog', url: '/storage/outputs/uploaded-room.sog' });
   } finally {
     db.close();
   }
   await server.start({ worker: false });
   const results = await Promise.all([placeId, 'kenmore-jefes-01', 'kenmore-shudaxia-01', 'bu-starbucks-01']
     .map((id) => server.request(`/api/restaurants/${id}/manifest`)));
-  const [ramen, jefes, shu, starbucks] = results;
-  assert.equal(ramen.room_asset.id, 'uploaded-room');
-  assert.equal(ramen.menu_items.length, 3);
-  assert.equal(ramen.menu_items[0].dish_asset.url, '/assets-demo/dish-tonkotsu-ramen.ply');
-  assert.equal(ramen.menu_items[0].dish.price, 14.5);
-  assert.equal(ramen.menu_items[1].dish.name, 'Custom curry');
-  assert.equal(ramen.menu_items[1].dish_asset.url, '/storage/outputs/custom-curry.sog');
-  assert.equal(ramen.menu_items[2].dish.name, 'Uploaded appetizer');
-  assert.equal(ramen.menu_items[2].dish_asset.url, '/storage/outputs/appetizer.sog');
-  assert.equal(jefes.restaurant.price_checked_on, '2026-11-21');
+  const [cafe, jefes, shu, starbucks] = results;
+  await server.request('/api/restaurants/bu-ramen-01', { status: 404 });
+  await server.request('/api/restaurants/allston-karaoke-01', { status: 404 });
+  const restartedDb = new DatabaseSync(server.config.database);
+  try {
+    assert.equal(restartedDb.prepare('SELECT * FROM upload_places WHERE place_id = ?').get('bu-ramen-01'), undefined);
+    assert.equal(restartedDb.prepare('SELECT * FROM reviews WHERE id = ?').get('retired-review'), undefined);
+    assert.ok(restartedDb.prepare('SELECT * FROM uploads WHERE id = ?').get('retired-image'));
+  } finally {
+    restartedDb.close();
+  }
+  const refreshed = await server.request(`/api/restaurants/${placeId}`);
+  const seed = demoPlaces.find(({ id }) => id === placeId);
+  for (const field of ['stop_id', 'pin_index', 'typical_price', 'cravings', 'family_friendly', 'evening_venue', 'seat_views']) {
+    assert.deepEqual(refreshed[field], seed[field]);
+  }
+  assert.equal(refreshed.reviews.find(({ id }) => id === 'runtime-review').rating, 3);
+  assert.deepEqual(refreshed.rooms.map(({ id }) => id), seed.rooms.map(({ id }) => id));
+  assert.equal(cafe.room_asset.id, 'uploaded-room');
+  assert.equal(cafe.menu_items.length, 2);
+  assert.equal(cafe.menu_items[0].dish_asset.url, '/assets-demo/dish-matcha-tiramisu.ply');
+  assert.equal(cafe.menu_items[0].dish.price, 9.25);
+  assert.equal(cafe.menu_items[1].dish.name, 'Uploaded appetizer');
+  assert.equal(cafe.menu_items[1].dish_asset.url, '/storage/outputs/appetizer.sog');
+  assert.equal(jefes.restaurant.price_checked_on, demoPlaces.find(({ id }) => id === 'kenmore-jefes-01').price_checked_on);
   for (const [manifest, name, count] of [[jefes, 'eljefes', 344_961], [shu, 'shudaxia', 349_370], [starbucks, 'starbucks', 349_990]]) {
     assert.equal(manifest.room_asset.url, `/assets-demo/room-${name}-atlas.sog`);
     assert.equal(manifest.room_asset.format, 'sog');
@@ -237,7 +286,11 @@ test('catalog startup refreshes bundled SOG previews and preserves uploaded asse
   assert.ok(bundled.every(({ dish_asset }) =>
     dish_asset.format === 'sog' && dish_asset.scale_status === 'approximate' &&
     dish_asset.gaussian_count >= 59_000 && dish_asset.gaussian_count <= 60_000));
-  assert.ok([...jefes.menu_items, ...starbucks.menu_items].every(({ dish }) => dish.price === null));
+  // These two publish no price of their own; the price agent filled what it could cite and left the rest null.
+  assert.deepEqual([jefes, starbucks].map(({ menu_items }) => menu_items.filter(({ dish }) => dish.price === null).length), [1, 22]);
+  assert.ok(demoDishPriceSources.length > 0);
+  assert.ok(demoDishPriceSources.every(({ items }) => items.length > 0
+    && items.every(({ price, source, url }) => price > 0 && source && url.startsWith('https://'))));
   assert.deepEqual(shu.menu_items.map(({ dish }) => dish.price), [
     15, 12.5, 15, 18, 13, 16, 17, 13, 24, 21, 12, 9, 15, 13, 10, 14, 9.5, 8, 7, 5, 14.5, 4.5, 15.5, 4, 6.5, 12, 7, 6, 6.5,
   ]);
@@ -245,8 +298,8 @@ test('catalog startup refreshes bundled SOG previews and preserves uploaded asse
     const { dish, dish_asset } = bundled.find(({ dish }) => dish.id === id);
     return [dish.name, dish.price, dish_asset.gaussian_count, dish_asset.plate_diameter_m];
   };
-  assert.deepEqual(preview('kenmore-jefes-tacos'), ['Tacos (Three)', null, 60_000, 0.22]);
-  assert.deepEqual(preview('kenmore-jefes-burrito'), ['Carnitas Burrito', null, 60_000, 0.22]);
+  assert.deepEqual(preview('kenmore-jefes-tacos'), ['Tacos (Three)', 12.45, 60_000, 0.22]);
+  assert.deepEqual(preview('kenmore-jefes-burrito'), ['Carnitas Burrito', 12.45, 60_000, 0.22]);
   assert.deepEqual(preview('kenmore-shudaxia-hotpot'), ['Taiji Shrimp Paste 2.0', 15, 59_998, 0.32]);
   assert.deepEqual(preview('kenmore-shudaxia-beef'), ['Premium Fatty Beef Slice', 12.5, 59_938, 0.26]);
   assert.deepEqual(preview('bu-starbucks-macchiato'), ['Iced Caramel Macchiato', null, 60_000, 0.095]);
@@ -275,10 +328,11 @@ test('upload, intake, failed download with restart and retry, room and dish publ
   const duplicate = await server.request('/api/uploads', { body: form });
   assert.equal(duplicate.id, roomUpload.id);
   assert.equal(duplicate.deduplicated, true);
-  const storedImage = await fetch(server.origin() + roomUpload.url);
+  assert.equal((await fetch(server.origin() + roomUpload.url)).status, 401);
+  const storedImage = await fetch(server.origin() + roomUpload.url, { headers: { 'X-Admin-Passcode': server.config.adminPasscode } });
   assert.equal(storedImage.status, 200);
   assert.deepEqual(Buffer.from(await storedImage.arrayBuffer()), image);
-  const dishUpload = await server.request('/api/uploads', { body: { ...postImage, filename: 'ramen-dish.png', dataBase64: secondImage.toString('base64') }, status: 201 });
+  const dishUpload = await server.request('/api/uploads', { body: { ...postImage, filename: 'cafe-dish.png', dataBase64: secondImage.toString('base64') }, status: 201 });
   const selection = await server.request('/api/intake', { body: { place_id: placeId, upload_ids: [roomUpload.id, dishUpload.id] } });
   assert.equal(selection.used_model, 'manual-heuristic-fallback');
   assert.equal(selection.manual_override_allowed, true);
@@ -292,7 +346,7 @@ test('upload, intake, failed download with restart and retry, room and dish publ
   assert(failed.provider_task_id);
   await server.stop();
 
-  for (const name of [room, dish, 'dish-katsu-curry.ply']) {
+  for (const name of [room, dish]) {
     const source = findDemoAsset({ ...server.config, demoAssets: actual }, name);
     t.diagnostic(`${name} input: ${source ? 'modeling asset' : 'binary PLY test fixture'}`);
     if (source) await copyFile(source, join(tempDemo, name));
@@ -317,16 +371,20 @@ test('upload, intake, failed download with restart and retry, room and dish publ
   assert(asset.gaussian_count > 0);
   assert.equal(asset.metadata.target_gaussians, 400000);
   assert(asset.metadata.splat_transform_command.includes('.sog'));
-  assert.equal((await fetch(server.origin() + asset.url)).status, 200);
+  assert.equal((await fetch(server.origin() + asset.url)).status, 401);
+  assert.equal((await fetch(server.origin() + asset.url, { headers: { 'X-Admin-Passcode': server.config.adminPasscode } })).status, 200);
+  await server.request(`/api/jobs/${asset.id}/publish`, { body: {}, passcode: false, status: 401 });
+  await server.request(`/api/assets/${asset.id}/publish`, { body: {}, passcode: false, status: 401 });
   const published = await server.request(`/api/assets/${asset.id}/publish`, {
     body: { approve: true, spawn_point: [0.1, 1.55, 2], rotation_y: 30 },
   });
   assert.equal(published.status, 'ready');
+  assert.equal((await fetch(server.origin() + asset.url)).status, 200);
   assert.equal(published.transform.rotation[1], 30);
   await server.stage(queued.id, 'ready');
 
   const dishJob = await server.request('/api/jobs', { body: {
-    kind: 'dish', place_id: placeId, upload_ids: [dishUpload.id], dish_id: 'bu-ramen-tonkotsu',
+    kind: 'dish', place_id: placeId, upload_ids: [dishUpload.id], dish_id: 'harvard-matcha-tiramisu', dish_price: 9.25,
   }, status: 202 });
   const dishReview = await server.stage(dishJob.id, 'needs_review');
   const dishAsset = await server.request(`/api/assets/${dishReview.asset_id}/publish`, { body: { plate_diameter_m: 0.25 } });
@@ -338,7 +396,6 @@ test('upload, intake, failed download with restart and retry, room and dish publ
   assert.deepEqual(updated.spawn_point, [0.1, 1.55, 2]);
   assert.equal(updated.room_asset.id, asset.id);
   assert.equal(updated.menu_items[0].dish_asset.id, dishAsset.id);
-  assert.equal(updated.menu_items[1].dish_asset.url, '/assets-demo/dish-katsu-curry.ply');
   assert.equal((await server.request('/api/jobs')).length, 2);
 });
 
@@ -382,10 +439,10 @@ test('provider request contracts and TRELLIS retry preserve the paid prediction'
       assert.equal(url.pathname, '/v1/predictions/prediction-01');
       return json({
         id: 'prediction-01', status: 'succeeded',
-        output: { gaussian_ply: 'https://files.example/trellis.ply', no_background_images: ['https://files.example/preview.png'] },
+        output: { gaussian_ply: 'https://replicate.delivery/trellis.ply', no_background_images: ['https://replicate.delivery/preview.png'] },
       });
     }
-    if (url.hostname === 'files.example') {
+    if (url.hostname === 'replicate.delivery') {
       switch (url.pathname) {
         case '/trellis.ply':
           plyDownloads++;
@@ -408,7 +465,7 @@ test('provider request contracts and TRELLIS retry preserve the paid prediction'
   const intake = await server.request('/api/intake', { body: { place_id: placeId, upload_ids: [imageId] } });
   assert.equal(intake.used_model, 'gemini-4-hydrogen');
   const dishJob = await server.request('/api/jobs', { body: {
-    kind: 'dish', place_id: placeId, upload_ids: [imageId], dish_name: 'Other dish',
+    kind: 'dish', place_id: placeId, upload_ids: [imageId], dish_name: 'Other dish', dish_price: 11,
   }, status: 202 });
   const dishFailed = await server.stage(dishJob.id, 'failed');
   assert.equal(dishFailed.provider_task_id, 'prediction-01');
@@ -424,6 +481,20 @@ test('provider request contracts and TRELLIS retry preserve the paid prediction'
   assert.equal(trellisSubmissions, 1);
   assert.equal(plyDownloads, 1);
   assert.equal(previewDownloads, 2);
+  const moderation = (action) => server.request('/api/admin/moderation', {
+    body: { type: 'upload', action, id: dishReview.asset_id },
+  });
+  const approved = await moderation('approve');
+  const manifestUrl = `/api/restaurants/${placeId}/manifest`;
+  const published = await server.request(manifestUrl);
+  assert.equal(published.menu_items.find(({ dish }) => dish.name === 'Other dish').dish_asset.id, approved.id);
+  assert.equal((await moderation('reject')).status, 'rejected');
+  const rejected = await server.request(`/api/jobs/${dishJob.id}`);
+  assert.equal(rejected.status, 'failed');
+  assert.equal(rejected.status_message, 'Asset rejected');
+  assert.equal((await server.request(manifestUrl)).menu_items.find(({ dish }) => dish.name === 'Other dish').dish_asset, null);
+  assert.equal((await fetch(server.origin() + approved.url)).status, 404);
+  await server.request(`/api/jobs/${dishJob.id}/retry`, { body: {}, status: 409 });
 });
 
 test('Atlas Draft request contract resumes from saved pose, splat and download checkpoints', { timeout: 50_000 }, async (t) => {
@@ -431,9 +502,9 @@ test('Atlas Draft request contract resumes from saved pose, splat and download c
   await server.start();
   const originalFetch = globalThis.fetch;
   const count = 5;
-  const raw = Buffer.alloc(16 + count * 20);
+  const raw = Buffer.alloc(16 + count * 19);
   raw.write('NGSP');
-  raw.writeUInt32LE(3, 4);
+  raw.writeUInt32LE(2, 4);
   raw.writeUInt32LE(count, 8);
   raw[13] = 12;
   const spz = gzipSync(raw);
@@ -449,7 +520,7 @@ test('Atlas Draft request contract resumes from saved pose, splat and download c
   let jobId;
   t.mock.method(globalThis, 'fetch', async (input, init) => {
     const url = new URL(input);
-    if (url.hostname === 'files.example') {
+    if (url.hostname === 'storage.googleapis.com') {
       assert.equal(init.headers, undefined);
       calls.push(url.pathname);
       if (url.pathname === '/draft.spz') {
@@ -482,7 +553,7 @@ test('Atlas Draft request contract resumes from saved pose, splat and download c
         assert.equal(init.method, 'GET');
         if (hits === 1) return new Response(null, { status: 503 });
         return Response.json({ id: 'pose-01', done: true, response: { frames: posedFrames.map((frame) => ({
-          ...frame, imageAsset: { ...frame.imageAsset, url: 'https://files.example/posed.png' },
+          ...frame, imageAsset: { ...frame.imageAsset, url: 'https://storage.googleapis.com/posed.png' },
           depth: { ...frame.depth, confidenceAsset: { assetId: 'unused' } }, centroidWorld: [0, 0, 0],
         })) } });
       case '/tasks:posedImages2Splats':
@@ -495,11 +566,11 @@ test('Atlas Draft request contract resumes from saved pose, splat and download c
         assert.equal(init.method, 'GET');
         if (hits === 1) return Response.json({ id: 'splat-01', done: false });
         return Response.json({ id: 'splat-01', done: true, response: {
-          draftSplat: { assetId: 'draft-01', url: 'https://files.example/draft.spz' }, refinedSplats: {},
+          draftSplat: { assetId: 'draft-01', url: 'https://storage.googleapis.com/draft.spz' }, refinedSplats: {},
         } });
       case '/assets/draft-01:createReadUrl':
         assert.equal(init.method, 'POST');
-        return Response.json({ readUrl: 'https://files.example/fresh.spz' });
+        return Response.json({ readUrl: 'https://storage.googleapis.com/fresh.spz' });
       default:
         assert.fail(`Unexpected Atlas request ${path}`);
     }
@@ -557,9 +628,14 @@ test('Atlas Draft request contract resumes from saved pose, splat and download c
   assert.equal(asset.gaussian_count, count);
   assert.equal(asset.original_spz_url, `/storage/outputs/${jobId}-original.spz`);
   assert.equal(asset.metadata.conversion_status, asset.format === 'sog' ? 'compressed' : 'spz_fallback');
-  const served = await fetch(server.origin() + asset.original_spz_url);
+  const served = await fetch(server.origin() + asset.original_spz_url, { headers: { 'X-Admin-Passcode': server.config.adminPasscode } });
   assert.equal(served.status, 200);
   assert.deepEqual(Buffer.from(await served.arrayBuffer()), spz);
+  if (asset.format === 'spz') {
+    const viewer = await fetch(server.origin() + asset.url, { headers: { 'X-Admin-Passcode': server.config.adminPasscode } });
+    assert.equal(viewer.status, 200);
+    assert.equal(gunzipSync(Buffer.from(await viewer.arrayBuffer())).readUInt32LE(4), 3);
+  }
   assert.deepEqual(calls, [
     '/assets', '/assets', '/tasks:images2PosedRGBD', '/operations/pose-01', '/operations/pose-01',
     '/tasks:posedImages2Splats', '/tasks:posedImages2Splats', '/operations/splat-01', '/operations/splat-01',
@@ -628,6 +704,8 @@ test('live web reviews deduplicate lookups, retain only sourced reviews, and fal
   const source = 'https://www.yelp.com/biz/example-review-page';
   let requests = 0;
   let payload;
+  const started = Promise.withResolvers();
+  const release = Promise.withResolvers();
   t.mock.method(globalThis, 'fetch', async (input, init) => {
     if (new URL(input).hostname !== 'reviews.example') return originalFetch(input, init);
     requests++;
@@ -635,20 +713,30 @@ test('live web reviews deduplicate lookups, retain only sourced reviews, and fal
     assert.equal(init.redirect, 'error');
     payload = JSON.parse(init.body);
     if (!payload.input.includes(place.name)) return Response.json({ error: { message: 'test-review-key upstream detail' } }, { status: 502 });
-    await delay(40);
+    started.resolve();
+    await release.promise;
     const excerpt = { author: 'Example Reviewer', text: 'The patio was quiet.', source: 'Yelp', rating: 4, date_label: 'November 2026', url: source };
     return Response.json({ status: 'completed', output: [
-      { type: 'web_search_call', action: { sources: [{ url: source }] } },
+      null, { type: 'web_search_call', action: { sources: [null, { url: source }] } },
       { type: 'message', content: [{ type: 'output_text', text: JSON.stringify({
-        ratings: [{ source: 'Yelp', rating: 4.2, count: 52, url: source }],
+        ratings: [null, { source: 'Yelp', rating: 4.2, count: 52, url: source }],
         highlights: [{ text: 'Customers mention a quiet patio.', url: source }],
-        reviews: [excerpt, excerpt, { ...excerpt, url: 'https://unverified.example/review' }],
+        reviews: [null, excerpt, excerpt, { ...excerpt, url: 'https://unverified.example/review' }],
       }) }] },
     ] });
   });
 
   await server.start({ worker: false });
-  const [first, parallel] = await Promise.all([server.request(venuePath + '/live-reviews'), server.request(venuePath + '/live-reviews')]);
+  const firstRequest = server.request(venuePath + '/live-reviews');
+  let overlap;
+  try {
+    await Promise.race([started.promise, firstRequest.then(() => assert.fail('Lookup finished before the upstream request'))]);
+    overlap = fetchLiveReviews(place, server.config, '127.0.0.1');
+    assert.equal(requests, 1);
+  } finally {
+    release.resolve();
+  }
+  const [first, parallel] = await Promise.all([firstRequest, overlap]);
   assert.equal(first.place_id, place.id);
   assert.equal(first.live, true);
   assert.ok(Number.isFinite(Date.parse(first.fetched_at)));
@@ -690,7 +778,7 @@ test('gpt-live-1.1 broker preserves SDP and retries rejected optional standby an
   });
   const originalFetch = globalThis.fetch;
   const requests = [];
-  const offer = 'v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=offer\r\na=candidate:example\r\n';
+  const offer = 'v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=offer\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=candidate:example\r\n';
   const answer = 'v=0\r\no=- 2 2 IN IP4 127.0.0.1\r\ns=answer\r\n';
   t.mock.method(globalThis, 'fetch', async (input, init) => {
     const url = new URL(input);
@@ -731,7 +819,7 @@ test('gpt-live-1.1 broker preserves SDP and retries rejected optional standby an
         assert.ok(instructions.includes(expected), `Missing instruction: ${expected}`);
       }
       const catalogDishes = demoPlaces.flatMap(({ dishes }) => dishes);
-      assert.equal(catalogDishes.length, 65);
+      assert.equal(catalogDishes.length, 63);
       for (const dish of catalogDishes) {
         assert.ok(instructions.includes(`${dish.id} "${dish.name}" ${formatDishPrice(dish.price)} [3D]`), `Missing dish and price: ${dish.id}`);
       }
@@ -759,6 +847,7 @@ test('gpt-live-1.1 broker preserves SDP and retries rejected optional standby an
   assert.equal(statusOn.voice, 'ballad');
   assert.ok(['ballad', 'cedar', 'ash', 'marin'].every((voice) => statusOn.voices.includes(voice)));
   await server.request('/api/live/sessions', { body: { sdp: 'not-sdp' }, status: 400 });
+  await server.request('/api/live/sessions', { body: { sdp: offer, voice: 42 }, status: 400 });
   assert.deepEqual(await server.request('/api/realtime/session', { method: 'POST' }), {
     client_secret: 'realtime_test_secret', expires_at: 1_900_000_000, model: 'gpt-realtime',
   });
@@ -778,4 +867,214 @@ test('gpt-live-1.1 broker preserves SDP and retries rejected optional standby an
   assert.equal(created.sdp, answer);
   await server.request('/api/live/sessions', { body: { sdp: offer }, status: 201 });
   assert.equal(requests.length, 4);
+});
+
+test('pipeline credentials cannot administer jobs and idempotent job requests survive restart', async (t) => {
+  const server = await setup(t, { contributorPasscode: 'test-contributor' });
+  await server.start({ worker: false });
+  const contributor = { passcode: false, headers: { 'X-Upload-Passcode': 'test-contributor', 'Idempotency-Key': 'capture-01' } };
+  const body = { filename: 'test.png', mimeType: 'image/png', dataBase64: image.toString('base64'), place_id: placeId };
+  const upload = await server.request('/api/uploads', { ...contributor, body, status: 201 });
+  const jobBody = { kind: 'dish', place_id: placeId, upload_ids: [upload.id], dish_name: 'Noodles', dish_price: 14.5 };
+  const [job, duplicate] = await Promise.all([1, 2].map(() => server.request('/api/jobs', { ...contributor, body: jobBody, status: 202 })));
+  assert.equal(job.id, duplicate.id);
+  assert.equal(job.idempotency_key, undefined);
+  assert.equal((await server.request('/api/jobs', contributor)).length, 1);
+  const legacyContributor = { passcode: false, headers: { 'X-Admin-Passcode': 'test-contributor' } };
+  assert.equal((await server.request('/api/jobs', legacyContributor)).length, 1);
+  assert.equal((await server.request('/api/jobs', { passcode: false, headers: { 'X-Upload-Passcode': 'test-passcode' } })).length, 1);
+  await server.request('/api/jobs', { passcode: false, status: 401 });
+  await server.request('/api/admin/moderation', { ...legacyContributor, status: 401 });
+  await server.request('/api/debug/logs', { ...contributor, body: { logs: [] }, status: 401 });
+  await server.request(`/api/jobs/${job.id}/publish`, { ...contributor, body: {}, status: 401 });
+  await server.request('/api/admin/moderation', { passcode: false, headers: { Authorization: 'Bearer test-passcode' }, status: 401 });
+  await server.request('/api/admin/moderation', { passcode: false, headers: { 'X-Upload-Passcode': 'test-passcode' }, status: 401 });
+  await server.request('/api/admin/moderation');
+  await server.stop();
+  await server.start({ worker: false });
+  assert.equal((await server.request('/api/jobs', { ...contributor, body: jobBody, status: 202 })).id, job.id);
+  await server.request('/api/jobs', { ...contributor, body: { ...jobBody, dish_name: 'Dessert' }, status: 409 });
+});
+
+test('an uploaded food photo must carry the dish name and its menu price', async (t) => {
+  const server = await setup(t);
+  await server.start({ worker: false });
+  const upload = await server.request('/api/uploads', {
+    body: { filename: 'plate.png', mimeType: 'image/png', dataBase64: image.toString('base64'), place_id: placeId },
+    status: 201,
+  });
+  const base = { kind: 'dish', place_id: placeId, upload_ids: [upload.id] };
+  const noPrice = await server.request('/api/jobs', { body: { ...base, dish_name: 'Street corn' }, status: 400 });
+  assert.match(noPrice.error, /menu price/);
+  const noName = await server.request('/api/jobs', { body: { ...base, dish_price: 8.5 }, status: 400 });
+  assert.match(noName.error, /name of the dish/);
+  await server.request('/api/jobs', { body: { ...base, dish_name: 'Street corn', dish_price: 0 }, status: 400 });
+  await server.request('/api/jobs', { body: { ...base, dish_name: 'Street corn', dish_price: 900 }, status: 400 });
+  const job = await server.request('/api/jobs', {
+    body: { ...base, dish_name: 'Street corn', dish_price: 8.5 }, status: 202,
+  });
+  assert.equal(job.dish_price, 8.5);
+  assert.equal(job.dish_name, 'Street corn');
+  // A room job carries no dish fields at all.
+  const room = await server.request('/api/jobs', { body: { kind: 'room', place_id: placeId, upload_ids: [upload.id] }, status: 202 });
+  assert.equal(room.dish_price, null);
+});
+
+test('non-loopback binds fail closed and admin auth throttles before parsing JSON', async (t) => {
+  const server = await setup(t, { host: '0.0.0.0', adminPasscode: undefined, contributorPasscode: 'upload', allowUnauthenticatedDemo: false });
+  const app = await createApp(server.config, { worker: false });
+  t.after(() => app.close());
+  const missing = await app.inject({ method: 'GET', url: '/api/jobs', headers: { 'X-Upload-Passcode': 'upload' } });
+  assert.equal(missing.statusCode, 401);
+  const demo = await createApp({ ...server.config, contributorPasscode: undefined, allowUnauthenticatedDemo: true }, { worker: false });
+  t.after(() => demo.close());
+  assert.equal((await demo.inject('/api/jobs')).statusCode, 200);
+  const malformed = { method: 'POST', url: '/api/debug/logs', headers: { 'Content-Type': 'application/json' }, payload: '{' };
+  for (let attempt = 0; attempt < 12; attempt++) assert.equal((await demo.inject(malformed)).statusCode, 401);
+  assert.equal((await demo.inject(malformed)).statusCode, 429);
+});
+
+test('missing and symlinked demo assets are omitted independently', async (t) => {
+  const { dir, config } = await setup(t);
+  const demo = join(dir, 'demo');
+  const outside = join(dir, 'outside.ply');
+  await mkdir(demo);
+  await writeFile(outside, fixturePly());
+  await symlink(outside, join(demo, room));
+  await writeFile(join(demo, dish), fixturePly());
+  const app = await createApp({ ...config, demoAssets: [demo] }, { worker: false });
+  t.after(() => app.close());
+  const manifest = (await app.inject(`/api/restaurants/${placeId}/manifest`)).json();
+  assert.equal(manifest.room_asset, null);
+  assert.equal(manifest.menu_items[0].dish_asset.gaussian_count, 5);
+  await rm(join(demo, dish));
+  const withoutDish = (await app.inject(`/api/restaurants/${placeId}/manifest`)).json();
+  assert.equal(withoutDish.menu_items[0].dish_asset, null);
+  assert.equal((await app.inject('/assets-demo/' + room)).statusCode, 404);
+});
+
+test('worker lease generation fences a paused owner and survives release', () => {
+  const store = new Store(':memory:');
+  try {
+    const initial = store.claimWorker('first');
+    const job = { id: 'lease-test', status: 'queued', updated_at: '' };
+    store.put('jobs', job);
+    assert.deepEqual(store.claimWorker('first'), initial);
+    assert.equal(store.claimWorker('second'), undefined);
+    store.sqlite.exec('UPDATE worker_lease SET expires = 0');
+    const next = store.claimWorker('second');
+    assert.equal(next.generation, initial.generation + 1);
+    const mirrored = [];
+    store.onJobUpdate = ({ status }) => mirrored.push(status);
+    store.transaction(() => {
+      store.updateJob(job, { status: 'needs_review' }, next);
+      assert.deepEqual(mirrored, []);
+    });
+    assert.deepEqual(mirrored, ['needs_review']);
+    assert.throws(() => store.transaction(() => {
+      store.updateJob(job, { status: 'ready' }, next);
+      store.updateJob(job, { status: 'failed' }, initial);
+    }), WorkerLeaseLost);
+    assert.deepEqual(mirrored, ['needs_review']);
+    assert.equal(store.get('jobs', job.id).status, 'needs_review');
+    store.releaseWorker('second');
+    assert.equal(store.claimWorker('second').generation, next.generation + 1);
+  } finally {
+    store.sqlite.close();
+  }
+});
+
+test('provider downloads enforce streamed byte and redirect limits', async (t) => {
+  const { dir } = await setup(t);
+  const fetch = t.mock.method(globalThis, 'fetch', async (url) => {
+    if (url.endsWith('/redirect')) return new Response(null, { status: 302, headers: { location: 'https://storage.invalid/asset' } });
+    return new Response(new ReadableStream({
+      start(stream) {
+        stream.enqueue(Uint8Array.from([1, 2]));
+        stream.enqueue(Uint8Array.from([3, 4]));
+        stream.close();
+      },
+    }));
+  });
+  const path = join(dir, 'asset.ply');
+  await assert.rejects(downloadFile('https://replicate.delivery/redirect', () => path, 'trellis'), /trusted HTTPS|download host/);
+  assert.equal(fetch.mock.callCount(), 1);
+  await assert.rejects(downloadFile('https://replicate.delivery/asset', () => path, 'trellis', undefined, 3), /byte limit/);
+  await assert.rejects(readFile(path), { code: 'ENOENT' });
+});
+
+test('Boston demo schedules use the offset at 1 a.m. on DST transition days', () => {
+  assert.equal(demoSchedules('place-bucen', ['Green-B'], '2026-03-07', 0)[0].departure_time, '2026-03-08T06:12:00.000Z');
+  assert.equal(demoSchedules('place-bucen', ['Green-B'], '2026-10-31', 0)[0].departure_time, '2026-11-01T05:12:00.000Z');
+});
+
+test('MBTA normalizes schedule route lists and keeps successful branches during a partial 429', async (t) => {
+  const { config } = await setup(t);
+  const app = await createApp(config, { worker: false });
+  t.after(() => app.close());
+  const seen = [];
+  t.mock.method(globalThis, 'fetch', async (input) => {
+    const url = new URL(input);
+    const route = url.searchParams.get('filter[route]');
+    seen.push(route);
+    if (route === 'Green-C') return new Response(null, { status: 429, headers: { 'Retry-After': '120' } });
+    return Response.json({ data: [{ id: 'first-schedule', type: 'schedule',
+      attributes: { direction_id: 0, departure_time: '2026-11-22T06:00:00Z' },
+      relationships: { route: { data: { id: 'Green-B' } } } }] });
+  });
+  const url = '/api/mbta/schedules?stop=place-kencl&direction=0&date=2026-11-21&route=';
+  const first = (await app.inject(url + 'Green-B,Green-C,Green-B')).json();
+  assert.equal(first.source, 'live');
+  assert.deepEqual(first.schedules.map(({ route_id }) => route_id), ['Green-B']);
+  assert.deepEqual((await app.inject(url + 'Green-C,Green-B')).json(), first);
+  assert.equal((await app.inject('/api/mbta/alerts')).json().source, 'simulated');
+  assert.deepEqual(seen, ['Green-B', 'Green-C']);
+});
+
+test('config rejects invalid ports and relative public URLs', () => {
+  const { PORT, PUBLIC_BASE_URL } = process.env;
+  try {
+    for (const port of ['', '0', '65536', '3001.5']) {
+      process.env.PORT = port;
+      assert.throws(getConfig, /PORT must be an integer/);
+    }
+    process.env.PORT = '65535';
+    for (const base of ['/relative', 'https:relative', 'ftp://example.com', '']) {
+      process.env.PUBLIC_BASE_URL = base;
+      assert.throws(getConfig, /PUBLIC_BASE_URL/);
+    }
+    process.env.PUBLIC_BASE_URL = 'https://example.com:8443/site';
+    assert.equal(getConfig().port, 65535);
+    assert.equal(getConfig().publicBaseUrl, process.env.PUBLIC_BASE_URL);
+  } finally {
+    if (PORT === undefined) delete process.env.PORT;
+    else process.env.PORT = PORT;
+    if (PUBLIC_BASE_URL === undefined) delete process.env.PUBLIC_BASE_URL;
+    else process.env.PUBLIC_BASE_URL = PUBLIC_BASE_URL;
+  }
+});
+
+test('upload ingest removes PNG metadata, rejects truncation, and bounds multipart bytes', async (t) => {
+  const { config } = await setup(t);
+  const app = await createApp(config, { worker: false });
+  t.after(() => app.close());
+  const post = (path, payload, headers = {}) => app.inject({
+    method: 'POST', url: path, payload, headers: { 'X-Admin-Passcode': config.adminPasscode, ...headers },
+  });
+  const metadata = Buffer.from('tEXtComment\0private camera notes');
+  const length = Buffer.alloc(4);
+  const checksum = Buffer.alloc(4);
+  length.writeUInt32BE(metadata.length - 4);
+  checksum.writeUInt32BE(crc32(metadata));
+  const tagged = Buffer.concat([image.subarray(0, -12), length, metadata, checksum, image.subarray(-12)]);
+  const body = (bytes) => ({ filename: 'photo.png', mimeType: 'image/png', dataBase64: bytes.toString('base64'), place_id: placeId });
+  const stripped = await post('/api/uploads', body(tagged));
+  assert.equal(stripped.statusCode, 201);
+  assert.deepEqual(await readFile(join(config.uploads, stripped.json().file)), image);
+  assert.equal((await post('/api/uploads', body(image))).json().id, stripped.json().id);
+  assert.equal((await post('/api/uploads', body(image.subarray(0, -4)))).statusCode, 400);
+  assert.equal((await post('/api/debug/logs', { logs: ['x'.repeat(1024 * 1024)] })).statusCode, 413);
+  assert.equal((await post('/api/uploads', Buffer.alloc(8 * 1024 * 1024 + 65537), {
+    'content-type': 'multipart/form-data; boundary=fixture',
+  })).statusCode, 413);
 });

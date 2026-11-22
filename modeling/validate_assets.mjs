@@ -15,17 +15,20 @@ const stationRef = {
   'place-kencl': [42.348949, -71.095169, 'Green-B', '003'],
   'place-harsq': [42.373362, -71.118956, 'Red', '004'],
   'place-chncl': [42.352547, -71.062752, 'Orange', '005'],
+  'place-haecl': [42.363021, -71.05829, 'Orange', '006'],
+  'place-coecl': [42.349974, -71.077447, 'Green-B', '007'],
+  'place-aqucl': [42.359784, -71.051652, 'Blue', '008'],
+  'place-cntsq': [42.365486, -71.103802, 'Red', '009'],
+  'place-cool': [42.342116, -71.121263, 'Green-C', '010'],
 };
 const gaussians = {
-  'room-ramen-house': [24000, 5, 4, 2.75],
-  'room-karaoke-suite': [22000, 4.2, 3.4, 2.62],
   'room-study-cafe': [20000, 5.5, 4.5, 3],
-  'dish-tonkotsu-ramen': [14000, 0.24, 0.24, 0.15],
-  'dish-katsu-curry': [13000, 0.26, 0.26 * 0.83, 0.065],
   'dish-matcha-tiramisu': [10000, 0.18, 0.18, 0.075],
 };
 const uiModels = [
   'vr-control-deck',
+  'vr-controller-left',
+  'vr-controller-right',
   'venue-pin-flag',
   'station-medallion',
   'table-menu-stand',
@@ -33,28 +36,40 @@ const uiModels = [
   'menu-book',
   'review-clipboard',
 ];
+/**
+ * Models this repo exports itself. parseModel checks them against our exporter's conventions --
+ * one node per surface, one primitive per mesh, exact accessor bounds -- which only hold for files
+ * we wrote.
+ */
 const genModels = [
   'boston-map-sculpture',
-  'mbta-train-green',
-  'mbta-train-red',
-  'mbta-train-orange',
-  'mbta-train-blue',
   'table-pedestal',
   ...uiModels,
   ...Object.keys(stationRef).map((k) => 'segment-' + k),
 ];
+/**
+ * Vendored from Flowcast and recoloured per line. These follow a different exporter's conventions
+ * -- notably one mesh carrying all sixteen primitives -- so they get their own, lighter checks
+ * below rather than going through parseModel.
+ */
+const vendorModels = [
+  'mbta-train-green',
+  'mbta-train-red',
+  'mbta-train-orange',
+  'mbta-train-blue',
+];
 const jsonNames = ['station-anchors', 'segment-anchors', 'mbta-3d-paths', 'landmark-anchors'];
 const expected = [
-  ...genModels.map((n) => n + '.glb'),
+  ...[...genModels, ...vendorModels].map((n) => n + '.glb'),
   ...Object.keys(gaussians).map((n) => n + '.ply'),
   ...jsonNames.map((n) => n + '.json'),
 ].sort();
-assert.deepEqual(
-  readdirSync(dir)
-    .filter((n) => /\.(ply|glb|json)$/.test(n))
-    .sort(),
-  expected,
-);
+const generated = readdirSync(dir).filter((n) => /\.(ply|glb|json)$/.test(n)).sort();
+assert.deepEqual(generated, expected);
+const published = readdirSync(new URL('../web/public/assets-demo/', import.meta.url))
+  .filter((n) => !/^(room-.+-atlas|dish-.+)\.sog$/.test(n))
+  .sort();
+assert.deepEqual(published, generated, 'Run pnpm assets:sync to publish the generated assets');
 const load = (n) => JSON.parse(readFileSync(dir + n + '.json'));
 const stations = load('station-anchors'),
   segments = load('segment-anchors'),
@@ -230,7 +245,7 @@ function parseModel(name) {
     draws + ' primitives',
     reportBounds(bounds),
   );
-  return { bounds, meshes };
+  return { bounds, meshes, materials: j.materials ?? [] };
 }
 for (const name of genModels) models[name] = parseModel(name);
 function exactBounds(b, lo, hi) {
@@ -272,25 +287,56 @@ for (const r of [0.1, 0.15]) {
     }
   assert.ok(hits >= 120);
 }
-for (const line of ['green', 'red', 'orange', 'blue']) {
-  const train = models['mbta-train-' + line];
-  // Centred on its own origin, so the scene can place it straight onto a track sample.
-  approx(train.bounds.min[2], -train.bounds.max[2], 1e-6, line + ' train centring');
-  // Sits above the rail, never through it.
-  assert.ok(train.bounds.min[1] > 0, line + ' train floor ' + train.bounds.min[1]);
-  // Plausible size: longer than it is wide, and small enough to read as a train on the line.
-  const length = train.bounds.max[2] - train.bounds.min[2];
-  const width = train.bounds.max[0] - train.bounds.min[0];
-  assert.ok(length > width * 2 && length < 0.05, line + ' train proportions');
-  assert.ok(train.meshes.get('Head lamps'), line + ' train has no head lamps');
-}
-// Green and Blue are the two lines that collect from overhead wire, so only they carry a
-// pantograph, which makes them taller than the third-rail stock.
-for (const line of ['green', 'blue'])
-  assert.ok(
-    models['mbta-train-' + line].bounds.max[1] > 0.0077,
-    line + ' train is missing its pantograph',
+// The trains are Flowcast's mbta-green-line-train.glb recoloured per line, so every variant must
+// stay geometrically identical to its source and differ only in the accent material. Read here
+// directly rather than through parseModel, which encodes our own exporter's conventions.
+const lineAccents = {
+  green: '#00843D',
+  red: '#DA291C',
+  orange: '#ED8B00',
+  blue: '#003DA5',
+};
+const linear2srgb = (v) =>
+  Math.round(255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055));
+let trainTriangles = null;
+let trainBin = null;
+for (const [line, accent] of Object.entries(lineAccents)) {
+  const bytes = readFileSync(dir + 'mbta-train-' + line + '.glb');
+  const jsonLength = bytes.readUInt32LE(12);
+  const doc = JSON.parse(bytes.subarray(20, 20 + jsonLength).toString('utf8'));
+  const binStart = 20 + jsonLength;
+  const bin = bytes.subarray(binStart + 8, binStart + 8 + bytes.readUInt32LE(binStart));
+
+  // Byte-identical geometry across every line: only a material factor may differ.
+  if (trainBin === null) trainBin = bin;
+  else assert.ok(bin.equals(trainBin), line + ' train geometry differs from the other lines');
+
+  const count = doc.meshes.reduce(
+    (n, m) => n + m.primitives.reduce((k, p) => k + doc.accessors[p.indices].count / 3, 0),
+    0,
   );
+  if (trainTriangles === null) trainTriangles = count;
+  assert.equal(count, trainTriangles, line + ' train triangle count');
+  assert.ok(count > 3000, line + ' train looks too simple: ' + count + ' triangles');
+
+  // Real-scale metres straight from Flowcast; the runtime scales it down to sculpture units.
+  const z = doc.accessors.filter((a) => a.min && a.min.length === 3);
+  const length = Math.max(...z.map((a) => a.max[2])) - Math.min(...z.map((a) => a.min[2]));
+  assert.ok(length > 40 && length < 50, line + ' train length ' + length);
+
+  // The accent material carries this line's official colour.
+  const material = doc.materials.find((m) => m.name === 'mbta_' + line);
+  assert.ok(material, line + ' train has no mbta_' + line + ' material');
+  const hex =
+    '#' +
+    material.pbrMetallicRoughness.baseColorFactor
+      .slice(0, 3)
+      .map((v) => linear2srgb(v).toString(16).padStart(2, '0'))
+      .join('')
+      .toUpperCase();
+  assert.equal(hex, accent, line + ' train accent is ' + hex);
+}
+
 const offsets = new Map();
 assert.deepEqual(
   paths.map((l) => l.routeId).sort(),
@@ -470,6 +516,7 @@ let movedCount = 0;
 let venueCount = 0,
   offDeckCount = 0,
   roofCount = 0;
+assert.equal(new Set(places.map(({ id }) => id)).size, places.length, 'Catalog venue IDs must be unique');
 for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
   const a = stations[id],
     s = segments[id];
@@ -525,10 +572,10 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
   // which become markers on the turf rim. Every venue must be exactly one of the two, and any
   // venue within 0.4 m of the deck centre must be on the island.
   const allPlaces = places.filter((place) => place.stop_id === id);
-  const stopPlaces = allPlaces.filter((place) => place.id in s.placeAnchors);
-  const farPlaces = allPlaces.filter((place) => place.id in s.offDeck);
-  assert.equal(stopPlaces.length + farPlaces.length, allPlaces.length);
-  assert.equal(Object.keys(s.placeAnchors).length + Object.keys(s.offDeck).length, allPlaces.length);
+  const stopPlaces = allPlaces.filter((place) => Object.hasOwn(s.placeAnchors, place.id));
+  const farPlaces = allPlaces.filter((place) => Object.hasOwn(s.offDeck, place.id));
+  const anchorIds = [...Object.keys(s.placeAnchors), ...Object.keys(s.offDeck)];
+  assert.deepEqual(anchorIds.sort(), allPlaces.map((place) => place.id).sort(), id + ' venue anchors');
   const turf = new Map([['turf', meshes.get('Island turf')]]);
   for (const place of farPlaces) {
     const { position, distanceM, compass } = s.offDeck[place.id];
@@ -628,7 +675,7 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
     minSpace.toFixed(6),
   );
 }
-assert.equal(venueCount + offDeckCount, 28);
+assert.equal(venueCount + offDeckCount, places.length);
 console.log(
   venueCount +
     ' venue pins (' + movedCount + ' door points moved onto their building), ' +

@@ -1,7 +1,7 @@
 import * as pc from 'playcanvas';
 import type { VoiceState } from '../voice/RealtimeVoice';
 import type { JarvisReveal } from './JarvisReveal';
-import type { ForearmPose } from './XRPresence';
+import { clampForearmClearance, forearmTarget, type ForearmPose } from './forearmMount';
 import { assetBase, brass, child, damp, ivory, material, pickBounds, shape, sunflower, target, wrapAngle,
   type HitTarget, type ModelLibrary, type PickBounds, type XYZ } from './sceneSupport';
 
@@ -66,6 +66,7 @@ export class CanvasSurface {
   destroy(): void {
     this.material.destroy();
     this.texture.destroy();
+    this.canvas.width = this.canvas.height = 0;
   }
 }
 
@@ -408,8 +409,6 @@ export class XRActionBar {
   readonly entity: pc.Entity;
   readonly targets: HitTarget[];
   readonly bounds: PickBounds;
-  private cuff: pc.Entity;
-  private cuffMaterial = material('#373934');
   private keys: DeckKey[];
   private status: CanvasSurface;
   private fallback?: pc.Entity;
@@ -436,6 +435,7 @@ export class XRActionBar {
   private deckBox = new pc.BoundingBox();
   private eyeLevel = new pc.Vec3();
   private anchored = false;
+  private previousMount: ForearmPose['kind'] | null = null;
   private facing = new pc.Quat();
   private facingTilt = new pc.Quat();
   private facingMatrix = new pc.Mat4();
@@ -448,9 +448,6 @@ export class XRActionBar {
     this.entity.enabled = false;
     this.entity.setLocalScale(0.52, 0.52, 0.52);
     this.bounds = pickBounds(this.entity, [0.362, 0.172, 0.064], [0, 0, -0.010]);
-    this.cuff = shape(this.entity, 'Padded forearm cuff', 'sphere', this.cuffMaterial, [0, 0, -0.085], [0.13, 0.42, 0.108]);
-    this.cuff.setLocalEulerAngles(0, 0, 90);
-    this.cuff.enabled = false;
     const fallback = this.fallback = child(this.entity, 'Procedural control deck');
     const housing = material('#44413b');
     const bezel = material(brass);
@@ -603,14 +600,17 @@ export class XRActionBar {
   }
 
   private updatePose(camera: pc.Entity, dt: number, mount: ForearmPose | null, snap: boolean, clearance?: PickBounds): void {
-    this.cuff.enabled = !!mount && !this.ar;
     if (mount) {
       this.anchored = false;
-      this.entity.setPosition(mount.position);
-      this.entity.setRotation(mount.rotation);
+      const blend = snap || this.previousMount !== mount.kind ? 1 : damp(dt, 28);
+      const target = forearmTarget(mount, camera.getPosition(), this.entity.getRotation(), blend);
+      this.entity.setPosition(clampForearmClearance(target.position, target.rotation, mount, target.radial));
+      this.entity.setRotation(target.rotation);
+      this.previousMount = mount.kind;
       return;
     }
 
+    this.previousMount = null;
     const walkedAway = camera.getPosition().distanceSq(this.destination) > 1.1 ** 2 &&
       camera.getPosition().distanceSq(this.consoleViewer) > 0.01 ** 2;
     const reanchor = snap || !this.anchored || walkedAway;
@@ -674,7 +674,6 @@ export class XRActionBar {
   destroy(): void {
     this.dropFallback();
     this.entity.destroy();
-    this.cuffMaterial.destroy();
     this.status.destroy();
     for (const key of this.keys) key.surface.destroy();
   }

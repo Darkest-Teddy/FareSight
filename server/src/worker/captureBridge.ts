@@ -5,7 +5,7 @@ import type { JobRecord, Store } from '../db/database.ts';
 import { listen } from '../db/pg.ts';
 import { setCaptureJob, syncJob } from '../services/captures.ts';
 import type { CaptureJobRow, CaptureRow, Captures } from '../services/captures.ts';
-import { prepareImage } from '../services/imagePrep.ts';
+import { MAX_IMAGE_BYTES, prepareImage } from '../services/imagePrep.ts';
 
 const POLL_MS = 15_000;
 const HEARTBEAT_MS = 30_000;
@@ -57,9 +57,9 @@ export function startCaptureBridge(store: Store, config: Config, captures: Captu
       'select seq, object_key from frames where capture_id = $1 order by seq', [job.capture_id]);
     const uploadIds = new Set<string>();
     for (const frame of frames) {
-      const bytes = await storage.get(settings.rawBucket, frame.object_key);
       let upload;
       try {
+        const bytes = await storage.get(settings.rawBucket, frame.object_key, MAX_IMAGE_BYTES);
         upload = prepareImage(store, config, {
           filename: `capture-${capture.id.slice(0, 8)}-${String(frame.seq).padStart(3, '0')}.jpg`,
           mimeType: 'image/jpeg', bytes, place_id: capture.place_id,

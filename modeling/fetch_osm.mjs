@@ -387,8 +387,19 @@ function contains(ring, [x, z]) {
 // Crops already fetched with the same centre and span are reused; pass --refresh to re-download.
 const outPath = fileURLToPath(new URL('./osm-data.json', import.meta.url));
 const refresh = process.argv.includes('--refresh');
-const cached = existsSync(outPath) ? (JSON.parse(readFileSync(outPath, 'utf8')).areas ?? {}) : {};
+const snapshot = existsSync(outPath) ? JSON.parse(readFileSync(outPath, 'utf8')) : {};
+const cached = snapshot.areas ?? {};
 const areas = {};
+let countsChanged = false;
+function saveSnapshot() {
+  writeFileSync(outPath, JSON.stringify({
+    fetchedAt: snapshot.fetchedAt,
+    attribution: 'OpenStreetMap contributors (ODbL)',
+    areas: { ...cached, ...areas },
+  }));
+  countsChanged = false;
+}
+
 for (const [stopId, stationName, label] of focal) {
   const area = chooseArea(stopId, stationName, label);
   const old = cached[stopId];
@@ -399,19 +410,16 @@ for (const [stopId, stationName, label] of focal) {
     old.centerLon === area.centerLon &&
     old.spanMeters === area.spanMeters
   ) {
-    areas[stopId] = old;
+    const { venuesInRange, venuesTotal } = area;
+    countsChanged ||= old.venuesInRange !== venuesInRange || old.venuesTotal !== venuesTotal;
+    areas[stopId] = { ...old, venuesInRange, venuesTotal };
     console.log(`${stopId} (${label}): cached (${old.buildings.length} buildings)`);
     continue;
   }
   areas[stopId] = await fetchArea(area);
-  writeFileSync(
-    outPath,
-    JSON.stringify({
-      fetchedAt: new Date().toISOString(),
-      attribution: 'OpenStreetMap contributors (ODbL)',
-      areas: { ...cached, ...areas },
-    }),
-  );
+  snapshot.fetchedAt = new Date().toISOString();
+  saveSnapshot();
   await new Promise((r) => setTimeout(r, 2500));
 }
+if (countsChanged) saveSnapshot();
 console.log(`Wrote ${outPath}`);

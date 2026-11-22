@@ -1,6 +1,6 @@
 import * as pc from 'playcanvas';
 import type { XRAssetData, XRManifestData, XRPlaceData, XRRoomData } from './bridgeTypes';
-import { isSplat, menuDishes } from '../data/preview3D';
+import { isSplat, measuredRoomForAsset, menuDishes } from '../data/preview3D';
 import { PhysicalPlaque } from './CanvasPanel3D';
 import { jarvisPoints, type JarvisReveal } from './JarvisReveal';
 import { PhysicalMenuBook } from './PhysicalMenuBook';
@@ -21,6 +21,7 @@ export class VenueSplatScene {
   private fitPanel: PhysicalPlaque;
   private plaqueModel: Promise<pc.ContainerResource | null>;
   private gallery: PhysicalPlaque[] = [];
+  private galleryImages = new Set<HTMLImageElement>();
   private figureMaterials = [material(cyan, 0.34), material('#ff9467', 0.36)];
   private standMaterial = material('#4b433b');
   private place?: XRPlaceData;
@@ -146,9 +147,8 @@ export class VenueSplatScene {
     for (const entity of [this.header.entity, this.menu.entity, this.galleryRoot, this.peopleRoot]) {
       this.reveal.finish(entity, false);
     }
-    for (const panel of this.gallery) panel.destroy();
+    this.clearGallery();
     for (const figure of this.figures) figure.destroy();
-    this.gallery = [];
     this.figures = [];
     this.menu.clear();
   }
@@ -179,7 +179,7 @@ export class VenueSplatScene {
   }
 
   private buildGallery(): void {
-    for (const panel of this.gallery) panel.destroy();
+    this.clearGallery();
     const place = this.place;
     if (!place) return;
     const photos = place.photos.slice(0, 5);
@@ -201,11 +201,14 @@ export class VenueSplatScene {
         const lines = [{ text: place.name, size: 66, weight: 700 }];
         panel.setText(lines);
         const image = new Image();
+        this.galleryImages.add(image);
         image.crossOrigin = 'anonymous';
         image.onload = () => {
+          this.releaseGalleryImage(image);
           if (this.gallery.includes(panel)) panel.setText(lines, image);
         };
         image.onerror = () => {
+          this.releaseGalleryImage(image);
           if (this.gallery.includes(panel)) panel.setText([...lines, { text: 'Photo unavailable', size: 52 }]);
         };
         image.src = photos[index];
@@ -213,6 +216,20 @@ export class VenueSplatScene {
       return panel;
     });
     if (this.galleryVisible) this.reveal.refresh(this.galleryRoot, 0.75);
+  }
+
+  private releaseGalleryImage(image: HTMLImageElement): void {
+    image.onload = image.onerror = null;
+    this.galleryImages.delete(image);
+  }
+
+  private clearGallery(): void {
+    for (const image of this.galleryImages) {
+      this.releaseGalleryImage(image);
+      image.removeAttribute('src');
+    }
+    for (const panel of this.gallery) panel.destroy();
+    this.gallery = [];
   }
 
   setWillWeFit(enabled: boolean, groupSize: number, seating: Seating): void {
@@ -228,16 +245,14 @@ export class VenueSplatScene {
     }
     this.setFitVisible(this.cardsVisible);
     const rooms = this.manifest?.rooms ?? this.place?.rooms ?? [];
-    const room = rooms.find((candidate) => candidate.seating === seating) ?? rooms[0];
+    const room = measuredRoomForAsset(rooms, this.asset, seating);
     const key = JSON.stringify([enabled, seating, groupSize, this.place?.id, this.currentRoomReady, room]);
     if (this.fitKey === key) return;
     this.fitKey = key;
     for (const figure of this.figures) figure.destroy();
     this.figures = [];
 
-    if (!this.currentRoomReady || this.asset?.scale_status !== 'measured' || !room ||
-      !Number.isFinite(room.floor_width_m) || !Number.isFinite(room.floor_depth_m) ||
-      room.floor_width_m <= 0 || room.floor_depth_m <= 0) {
+    if (!this.currentRoomReady || !room) {
       this.fitPanel.setText([{ text: 'Size not verified', color: '#854318', size: 80 }]);
       if (this.fitVisible) this.reveal.refresh(this.peopleRoot, 0.78);
       return;

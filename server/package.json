@@ -12,7 +12,8 @@
     "migrate": "node src/scripts/migrate.ts",
     "buckets": "node src/scripts/setupBuckets.ts",
     "deploy-web": "node src/scripts/deployWeb.ts",
-    "test": "node --test test/*.test.mjs"
+    "prices": "pnpm --filter @faresight/shared build && node src/scripts/fillDishPrices.ts",
+    "test": "pnpm --filter @faresight/shared build && pnpm build && node --test test/*.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1175.0",

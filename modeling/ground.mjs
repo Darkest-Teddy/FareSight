@@ -332,3 +332,28 @@ export function groundPlate(surface, lines, y) {
     },
   };
 }
+
+// ---------------------------------------------------------------------------------------------
+// The flat maps' ground.
+//
+// The Contribute app draws the network on one rounded island. Its outline is measured the same
+// polar way as the plate above: a reach per compass direction out of one centre, smoothed.
+
+/** How far past the outermost track the solid ground reaches, and how far its rim then fades. */
+const OUTLINE_SKIRT = 0.3;
+const OUTLINE_FADE = 0.1;
+
+/**
+ * The ground seen from above, for the flat maps: `solid` is the edge of the lit ground and
+ * `rim` is where it has faded into the backdrop. Both are rings of [x, z].
+ */
+export function groundOutline(lines) {
+  const centre = [0.02, 0];
+  const reach = reaches(lines, centre);
+  const ring = (pad) =>
+    reach.map((r, i) => {
+      const angle = (i / SPOKES) * Math.PI * 2;
+      return [centre[0] + Math.cos(angle) * (r + pad), centre[1] + Math.sin(angle) * (r + pad)];
+    });
+  return { solid: ring(OUTLINE_SKIRT), rim: ring(OUTLINE_SKIRT + OUTLINE_FADE) };
+}

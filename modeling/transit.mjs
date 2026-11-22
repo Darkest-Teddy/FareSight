@@ -90,6 +90,11 @@ export const focal = [
   ['place-kencl', 'Kenmore', 'Kenmore', '003', 'Green-B', '#00843D', 0.208],
   ['place-harsq', 'Harvard', 'Harvard', '004', 'Red', '#DA291C', 0.167],
   ['place-chncl', 'Chinatown', 'Chinatown', '005', 'Orange', '#ED8B00', 0.137],
+  ['place-haecl', 'Haymarket', 'Haymarket', '006', 'Orange', '#ED8B00', 0.144],
+  ['place-coecl', 'Copley', 'Copley', '007', 'Green-B', '#00843D', 0.189],
+  ['place-aqucl', 'Aquarium', 'Aquarium', '008', 'Blue', '#003DA5', 0.121],
+  ['place-cntsq', 'Central', 'Central', '009', 'Red', '#DA291C', 0.151],
+  ['place-cool', 'Coolidge Corner', 'Coolidge Corner', '010', 'Green-C', '#00843D', 0.26],
 ];
 export const project = (lat, lon, y) => [
   ((lon + 71.095) * 111320 * Math.cos((42.354 * Math.PI) / 180)) / 6500,
@@ -369,42 +374,49 @@ function drum(surface, [x, , z], bottom, top, radius, color, sides = 14) {
 }
 
 /**
- * A station bead: a white disc with the line's colour inset on top and an ink ring round it.
+ * A station bead: a white disc set into the line, wider than it, with the line's colour inset on
+ * top and an ink ring round it, so it reads as the line swelling at a stop rather than as
+ * something stacked on top.
  *
- * Both discs are raised clear of the plate so neither z-fights with it, and the white ring is
- * wider than the plate itself, which is what makes a stop legible at map scale. The bead overhangs
- * the track, and white on a pale ground has no edge, so a thin ink collar runs round the rim: it
- * dips slightly outward, which shows it from every side and hides the white wall beneath it.
+ * It occupies exactly the plate's own thickness -- same top face, same underside -- so nothing
+ * stands proud for a train to clip through. Because it is wider than the plate, its rim is what
+ * shows, and that rim is a real wall, which gives every stop a 3D edge from an angled or side-on
+ * camera. White on a pale ground has no edge of its own, so a thin ink collar runs round the top
+ * of that wall: it dips slightly outward, which shows it from every side.
+ *
+ * Earlier takes got one half of this or the other: a raised puck that trains drove through, then a
+ * flat decal with no edge at all.
  */
-const dotOuter = 0.0068;
-const dotInner = 0.0042;
+const dotOuter = 0.0062;
+const dotInner = 0.0036;
 
 function stationDot(white, colour, [x, , z], deck) {
-  const base = deck + 0.0004;
-  const lip = base + 0.0014;
-  // White body.
-  loft(white, [circle(x, base, z, dotOuter, 20), circle(x, lip, z, dotOuter, 20)], BEAD_WHITE, {
-    bottom: false,
-    top: false,
-  });
-  // The white rim left showing around the coloured centre.
-  const outer = circle(x, lip, z, dotOuter, 20);
-  const inner = circle(x, lip, z, dotInner, 20);
-  for (let j = 0; j < 20; j++) {
-    const k = (j + 1) % 20;
+  // A hair above the plate's own top face. Drawn exactly level with it the two surfaces are
+  // coplanar and z-fight, which speckles the ring; this is far too small to read as a step.
+  const top = deck + 0.00006;
+  const bottom = deck - trackThickness;
+  // The rim. Capped underneath so the disc is solid when the camera drops below the line.
+  loft(
+    white,
+    [circle(x, bottom, z, dotOuter, 24), circle(x, top, z, dotOuter, 24)],
+    BEAD_WHITE,
+    { top: false },
+  );
+  // White ring on the top face, left showing around the coloured centre.
+  const outer = circle(x, top, z, dotOuter, 24);
+  const inner = circle(x, top, z, dotInner, 24);
+  for (let j = 0; j < 24; j++) {
+    const k = (j + 1) % 24;
     face(white, [outer[j], inner[j], inner[k], outer[k]], BEAD_WHITE);
   }
-  // Coloured cap, a hair proud of the white so it never z-fights. The enamel material carries the
-  // line colour, so the cap itself is left untinted.
-  const cap = lip + 0.0003;
-  loft(colour, [circle(x, lip, z, dotInner, 20), circle(x, cap, z, dotInner, 20)], '#ffffff', {
-    bottom: false,
-  });
+  // Line colour filling the middle, a hair proud so it never z-fights the ring. The enamel
+  // material carries the line colour, so the cap itself is left untinted.
+  face(colour, circle(x, top + 0.00006, z, dotInner, 24).reverse(), '#ffffff');
   // Ink collar.
-  const brim = circle(x, lip - 0.0002, z, dotOuter, 20);
-  const edge = circle(x, lip - 0.0002 - beadInkDip, z, dotOuter + beadInkWidth, 20);
-  for (let j = 0; j < 20; j++) {
-    const k = (j + 1) % 20;
+  const brim = circle(x, top - 0.0002, z, dotOuter, 24);
+  const edge = circle(x, top - 0.0002 - beadInkDip, z, dotOuter + beadInkWidth, 24);
+  for (let j = 0; j < 24; j++) {
+    const k = (j + 1) % 24;
     face(white, [edge[j], brim[j], brim[k], edge[k]], INK);
   }
 }

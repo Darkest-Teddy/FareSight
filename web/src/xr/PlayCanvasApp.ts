@@ -34,6 +34,7 @@ interface PointerDishGrab {
   pointerId: number;
   dish: GrabbableDish;
   height: number;
+  touch?: { x: number; y: number };
   offset: pc.Vec3;
   motion: DishGrabMotion;
 }
@@ -153,6 +154,8 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private manifest: XRManifestData | null = null;
   private fit: [boolean, number, 'seated' | 'standing'] = [false, 1, 'seated'];
   private destroyed = false;
+  private navigation = 0;
+  private dprQuery?: MediaQueryList;
   private dive?: Dive;
   private hovered?: string;
   private events = new AbortController();
@@ -167,7 +170,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     try {
       const app = new pc.Application(this.canvas, {
         devtools: false,
-        graphicsDeviceOptions: { antialias: true, alpha: true, preserveDrawingBuffer: false, xrCompatible: true },
+        graphicsDeviceOptions: { antialias: false, alpha: true, preserveDrawingBuffer: false, xrCompatible: true },
       });
       this.app = app;
       const { width, height } = this.canvas.style;
@@ -253,7 +256,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
       else this.callbacks.onXrStateChange({ vrSupported: false, arSupported: false, activeMode: 'none' });
       this.resizeObserver = new ResizeObserver(() => this.resize());
       this.resizeObserver.observe(this.canvas);
-      this.resize();
+      this.watchDisplayScale();
       app.on('update', (dt: number) => this.update(dt));
       app.start();
       this.callbacks.onDebugLog('FareSight WebGL2 renderer ready', 'info');
@@ -271,6 +274,13 @@ export class PlayCanvasApp implements FareSightSceneEngine {
       light.setLocalEulerAngles(angles[0], angles[1], angles[2]);
     }
   }
+
+  private watchDisplayScale = (): void => {
+    this.dprQuery?.removeEventListener('change', this.watchDisplayScale);
+    this.dprQuery = matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+    this.dprQuery.addEventListener('change', this.watchDisplayScale);
+    this.resize();
+  };
 
   resize(): void {
     if (!this.app || this.activeXR !== 'none') return;
@@ -370,6 +380,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
 
   async setScene(mode: SceneMode): Promise<void> {
     if (!this.app) return;
+    ++this.navigation;
     if (mode === 'station') {
       const selected = this.activeStop || this.filters?.startStopId;
       await this.focusStop(this.stops.find((stop) => stop.stop_id === selected)?.stop_id ?? this.stops[0]?.stop_id ?? '');
@@ -399,6 +410,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
 
   async focusStop(stopId: string): Promise<void> {
     if (!this.app) return;
+    const navigation = ++this.navigation;
     const stop = this.stops.find((item) => item.stop_id === stopId);
     if (!stop) {
       this.callbacks.onDebugLog(`Station is unavailable: ${stopId}`, 'warn');
@@ -422,7 +434,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
       this.map.pulse(stopId);
       // Normally instant (preloaded); if the network is slow, dive anyway and let the model catch up.
       await Promise.race([this.showStation(), new Promise((resolve) => window.setTimeout(resolve, 1200))]);
-      if (this.destroyed) return;
+      if (this.destroyed || navigation !== this.navigation) return;
       if (this.mode === 'map' && this.activeStop === stopId && !this.dive && this.canDive()) {
         this.startDive(stopId, 1);
         return;
@@ -532,6 +544,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
 
   async openVenue(place: XRPlaceData, manifest: XRManifestData | null): Promise<void> {
     if (!this.app) return;
+    ++this.navigation;
     const changed = this.place?.id !== place.id;
     const previousMenu = changed ? undefined : this.activeMenu();
     this.rememberVenue(place, manifest);
@@ -543,6 +556,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
 
   async openDish(place: XRPlaceData, dish: XRDishData, compareDish?: XRDishData | null, manifest?: XRManifestData | null, comparePlaceName?: string): Promise<void> {
     if (!this.app) return;
+    ++this.navigation;
     this.releasePointerDish(false);
     const changed = this.place?.id !== place.id;
     const previousMenu = changed ? undefined : this.activeMenu();
@@ -567,7 +581,13 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   }
 
   private rememberVenue(place: XRPlaceData, manifest: XRManifestData | null): void {
-    if (this.place?.id !== place.id) this.xrVenueSpawn = undefined;
+    if (this.place?.id !== place.id) {
+      this.xrVenueSpawn = undefined;
+      this.manualPlacement.delete('dish');
+      this.surfaceMatches.delete('dish');
+      this.surfacePreview = null;
+      this.placement = null;
+    }
     this.place = place;
     this.manifest = manifest;
     this.activeStop = place.stop_id;
@@ -785,7 +805,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private setupXR(xr: pc.XrManager): void {
     this.surfaces?.destroy();
     this.surfaces = new PhysicalSurfaces(xr, this.rig);
-    this.presence = new XRPresence(xr, xr.app.root, this.rig, this.camera, this.picker, {
+    this.presence = new XRPresence(xr, xr.app.root, this.rig, this.camera, this.picker, this.models, {
       buttons: this.actions.targets,
       targets: () => [...this.reviewDeck.active.flatMap(({ targets }) => targets), ...this.sceneTargets()],
       selectEmpty: () => {
@@ -841,6 +861,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     });
     xr.on('end', () => {
       if (this.destroyed) return;
+      this.settleDive();
       this.activeXR = 'none';
       xr.app.scene.gsplat.splatBudget = desktopSplatBudget;
       this.pendingReviews = undefined;
@@ -1024,7 +1045,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     this.venue.root.enabled = venueRoom;
     if (this.gallery) this.gallery.enabled = vr && !(venueRoom && this.venue.hasRoom);
     // Atlas reconstructions contain furniture within arm's reach of the camera. Draw the room before the table's depth pass.
-    this.splats.setRoomLayer(roomBehindTable ? this.backdropLayer.id : pc.LAYERID_WORLD);
+    this.splats.setRoomLayer(roomBehindTable || this.leaving.has('dish') ? this.backdropLayer.id : pc.LAYERID_WORLD);
     this.venue.setPresentation(this.mode === 'venue', this.mode === 'venue' || roomBehindTable);
     this.dish.root.enabled = dish || this.leaving.has('dish');
     this.dish.setPresentation(dish && !passthrough, dish && (!passthrough || !!this.placement));
@@ -1264,6 +1285,12 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     const options = { capture: true, signal };
     this.canvas.addEventListener('pointerdown', (event) => {
       if (this.pointerDish) {
+        const grab = this.pointerDish;
+        if (grab.touch && event.pointerType === 'touch' && event.pointerId !== grab.pointerId) {
+          this.releasePointerDish(false, true);
+          this.orbit.adoptTouch(grab.pointerId, grab.touch.x, grab.touch.y);
+          return;
+        }
         event.stopImmediatePropagation();
         return;
       }
@@ -1280,7 +1307,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
       const point = this.dishPlanePoint(height);
       if (!point) return;
       this.pointerOnTable = false;
-      this.orbit.cancelSpin();
+      this.orbit.enabled = false;
       this.activeMenu()?.setHoveredDish(undefined);
       const motion = new DishGrabMotion();
       const offset = at.clone().sub(point);
@@ -1288,7 +1315,8 @@ export class PlayCanvasApp implements FareSightSceneEngine {
       dish.setHeld(true);
       dish.entity.setPosition(at.x, height, at.z);
       motion.reset(dish.entity.getPosition(), dish.entity.getRotation());
-      this.pointerDish = { pointerId: event.pointerId, dish, height, offset, motion };
+      const touch = event.pointerType === 'touch' ? { x: event.clientX, y: event.clientY } : undefined;
+      this.pointerDish = { pointerId: event.pointerId, dish, height, offset, motion, touch };
       this.canvas.setPointerCapture(event.pointerId);
       this.canvas.style.cursor = 'grabbing';
       event.preventDefault();
@@ -1313,6 +1341,10 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   }
 
   private movePointerDish(event: PointerEvent, grab: PointerDishGrab): void {
+    if (grab.touch) {
+      grab.touch.x = event.clientX;
+      grab.touch.y = event.clientY;
+    }
     if (!this.aimRay(event.clientX, event.clientY)) return;
     const point = this.dishPlanePoint(grab.height);
     if (!point) return;
@@ -1323,11 +1355,12 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     grab.motion.sample(entity.getPosition(), entity.getRotation());
   }
 
-  private releasePointerDish(toss: boolean): void {
+  private releasePointerDish(toss: boolean, keepCapture = false): void {
     const grab = this.pointerDish;
     if (!grab) return;
     this.pointerDish = undefined;
-    if (this.canvas.hasPointerCapture(grab.pointerId)) this.canvas.releasePointerCapture(grab.pointerId);
+    this.orbit.enabled = this.activeXR === 'none';
+    if (!keepCapture && this.canvas.hasPointerCapture(grab.pointerId)) this.canvas.releasePointerCapture(grab.pointerId);
     grab.dish.setHeld(false);
     if (toss) {
       grab.motion.release();
@@ -1408,6 +1441,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     this.events.abort();
     this.canvas.style.cursor = '';
     this.resizeObserver?.disconnect();
+    this.dprQuery?.removeEventListener('change', this.watchDisplayScale);
     this.orbit?.destroy();
     this.presence?.destroy();
     this.surfaces?.destroy();

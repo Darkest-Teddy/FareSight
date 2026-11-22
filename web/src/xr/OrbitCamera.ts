@@ -158,8 +158,16 @@ export class OrbitCamera {
     this.active = value;
     if (!value) {
       this.pointers.clear();
+      this.held.clear();
       this.cancelSpin();
     }
+  }
+
+  adoptTouch(id: number, x: number, y: number): void {
+    this.pointers.set(id, { x, y, pan: true });
+    this.downX = x;
+    this.downY = y;
+    this.moved = true;
   }
 
   cancelSpin(): void {
@@ -184,6 +192,7 @@ export class OrbitCamera {
 
   nudge(yawDeltaRad: number, pitchDeltaRad: number, zoomFactor = 1): void {
     this.cancelSpin();
+    if (!this.enabled) return;
     if (Number.isFinite(yawDeltaRad)) this.goal.yaw += yawDeltaRad;
     if (Number.isFinite(pitchDeltaRad)) this.goal.pitch = clamp(this.goal.pitch + pitchDeltaRad,
       this.goal.minPitch ?? -0.65, this.goal.maxPitch ?? 1.42);

@@ -7,7 +7,15 @@ let closing = false;
 async function shutdown() {
   if (closing) return;
   closing = true;
-  await app.close();
+  const deadline = setTimeout(() => {
+    app.log.error('Shutdown drain deadline exceeded');
+    process.exit(1);
+  }, 15_000).unref();
+  try {
+    await app.close();
+  } finally {
+    clearTimeout(deadline);
+  }
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

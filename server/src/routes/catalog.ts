@@ -6,6 +6,7 @@ import type { Config } from '../config.ts';
 import type { PendingReview, Store } from '../db/database.ts';
 import { findDemoAsset } from '../services/demoAssets.ts';
 import { fetchLiveReviews } from '../services/liveReviews.ts';
+import { fetchMenuPrices } from '../services/menuPrices.ts';
 
 export function registerCatalog(app: FastifyInstance, store: Store, config: Config) {
   const demoCounts = new Map<string, number>();
@@ -15,17 +16,22 @@ export function registerCatalog(app: FastifyInstance, store: Store, config: Conf
     if (asset?.status !== 'ready') return null;
     if (asset.backend !== 'prebuilt-demo') return asset;
     const file = findDemoAsset(config, asset.url.slice('/assets-demo/'.length));
-    if (!file?.endsWith('.ply')) return asset;
+    if (!file) return null;
+    if (!asset.url.endsWith('.ply')) return asset;
     let count = demoCounts.get(file);
     if (count === undefined) {
-      const descriptor = openSync(file, 'r');
       try {
-        const header = Buffer.alloc(4096);
-        readSync(descriptor, header);
-        count = Number(header.toString('ascii').match(/^element vertex (\d+)\r?$/m)?.[1] ?? asset.gaussian_count);
-        demoCounts.set(file, count);
-      } finally {
-        closeSync(descriptor);
+        const descriptor = openSync(file, 'r');
+        try {
+          const header = Buffer.alloc(4096);
+          readSync(descriptor, header);
+          count = Number(header.toString('ascii').match(/^element vertex (\d+)\r?$/m)?.[1] ?? asset.gaussian_count);
+          demoCounts.set(file, count);
+        } finally {
+          closeSync(descriptor);
+        }
+      } catch {
+        return null;
       }
     }
     return { ...asset, gaussian_count: count };
@@ -38,7 +44,7 @@ export function registerCatalog(app: FastifyInstance, store: Store, config: Conf
       if (review.status !== 'approved') reviews.delete(review.id);
       else reviews.set(review.id, {
         id: review.id, author: review.author_label, text: review.text, created_at: review.created_at,
-        rating: reviews.get(review.id)?.rating ?? (review.sample ? 0 : 5), sample: review.sample,
+        rating: review.rating ?? reviews.get(review.id)?.rating ?? 0, sample: review.sample,
       });
     }
     return {
@@ -60,11 +66,17 @@ export function registerCatalog(app: FastifyInstance, store: Store, config: Conf
     if (!place) return reply.code(404).send({ error: 'Place not found' });
     return hydrate(place);
   });
-  app.get<{ Params: { id: string } }>('/api/restaurants/:id/live-reviews', async ({ params }, reply) => {
+  app.get<{ Params: { id: string } }>('/api/restaurants/:id/live-reviews', async ({ params, ip }, reply) => {
     const place = store.get('places', params.id);
     if (!place) return reply.code(404).send({ error: 'Place not found' });
     reply.header('Cache-Control', 'no-store');
-    return fetchLiveReviews(place, config);
+    return fetchLiveReviews(place, config, ip);
+  });
+  app.get<{ Params: { id: string } }>('/api/restaurants/:id/live-prices', async ({ params, ip }, reply) => {
+    const place = store.get('places', params.id);
+    if (!place) return reply.code(404).send({ error: 'Place not found' });
+    reply.header('Cache-Control', 'no-store');
+    return fetchMenuPrices(hydrate(place), config, ip);
   });
   app.get<{ Params: { id: string } }>('/api/restaurants/:id/manifest', async ({ params }, reply) => {
     const stored = store.get('places', params.id);

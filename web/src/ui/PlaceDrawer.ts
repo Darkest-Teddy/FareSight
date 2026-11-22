@@ -4,8 +4,8 @@ import {
 } from '@faresight/shared';
 import { api, type Alert, type Prediction, type Trip } from '../api/client';
 import { has3DDish, has3DRoom, hasDishPreview, isSplat } from '../data/preview3D';
-import { bostonHours, formatHours, liveBriefingReview, loadLiveReviews, week } from '../data/reviewBriefing';
-import { block, button, element, errorText, field, fold, iconButton, link, message, money, option, previewBadge, section } from './dom';
+import { bostonHours, formatHours, liveBriefingReview, loadLiveReviews, reviewFacts, week } from '../data/reviewBriefing';
+import { block, button, element, errorText, field, fold, httpUrl, iconButton, link, message, money, option, previewBadge, replacePreservingFocus, section } from './dom';
 import { renderBriefingReview } from './ReviewBriefingModal';
 import { oneWayCost, type Filters } from './state';
 
@@ -111,7 +111,7 @@ function visitFacts(place: Place): { nodes: HTMLElement[]; openNow: boolean } {
 }
 
 /** Awards and published ratings. `hint` is the headline rating, when there is one. */
-function reviewFacts(place: Place): { nodes: HTMLElement[]; hint: string } {
+function publishedReviews(place: Place): { nodes: HTMLElement[]; hint: string } {
   const details = place.details;
   const nodes: HTMLElement[] = [];
   if (!details) return { nodes, hint: '' };
@@ -273,6 +273,7 @@ export class PlaceDrawer {
     let firstHighlighted: HTMLButtonElement | undefined;
     for (const place of places) {
       const item = button('', () => this.actions.showPlace(place), 'place-row');
+      item.dataset.focusKey = place.id;
       if (highlightedPlaces?.has(place.id)) {
         item.dataset.highlighted = 'true';
         if (!firstHighlighted) firstHighlighted = item;
@@ -288,7 +289,7 @@ export class PlaceDrawer {
       row.append(item, this.compareButton(place));
       list.append(row);
     }
-    this.stationList.replaceChildren(list);
+    replacePreservingFocus(this.stationList, this.title, list);
     if (compareFocus) [...list.querySelectorAll<HTMLButtonElement>('.compare-place')]
       .find((toggle) => toggle.dataset.compareVenue === compareFocus)?.focus({ preventScroll: true });
     if (firstHighlighted) firstHighlighted.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -322,7 +323,7 @@ export class PlaceDrawer {
       if (data.predictions.error) arrivals.push(button('Retry arrivals', this.actions.retryStation));
       next = data.predictions.error ? 'Unavailable' : 'Checking…';
     }
-    this.trains.body.replaceChildren(...arrivals);
+    replacePreservingFocus(this.trains.body, this.title, ...arrivals);
     this.trains.hint.textContent = next;
     this.trains.hint.dataset.tone = data.predictions.error ? 'problem' : '';
 
@@ -332,11 +333,11 @@ export class PlaceDrawer {
         || alert.route_ids.some((route) => stop.lines.includes(route))
         || (!alert.stop_ids.length && !alert.route_ids.length));
       flagged = applicable.length;
-      if (flagged) this.alerts.body.replaceChildren(...applicable.map((alert) => element('p', '', alert.header)));
-      else this.alerts.body.replaceChildren(message('No active alerts for this stop.'));
+      if (flagged) replacePreservingFocus(this.alerts.body, this.title, ...applicable.map((alert) => element('p', '', alert.header)));
+      else replacePreservingFocus(this.alerts.body, this.title, message('No active alerts for this stop.'));
       this.alerts.hint.textContent = flagged ? `${flagged} ${flagged === 1 ? 'alert' : 'alerts'}` : 'None';
     } else {
-      this.alerts.body.replaceChildren(message(data.alerts.error ?? 'Checking service alerts…', Boolean(data.alerts.error)));
+      replacePreservingFocus(this.alerts.body, this.title, message(data.alerts.error ?? 'Checking service alerts…', Boolean(data.alerts.error)));
       this.alerts.hint.textContent = data.alerts.error ? 'Unavailable' : 'Checking…';
     }
     this.alerts.hint.dataset.tone = flagged ? 'flag' : data.alerts.error ? 'problem' : '';
@@ -355,7 +356,7 @@ export class PlaceDrawer {
       const hours = visitFacts(place);
       this.visit.body.replaceChildren(...hours.nodes);
       this.visit.hint.textContent = hours.openNow ? 'Open now' : 'Closed now';
-      const published = reviewFacts(place);
+      const published = publishedReviews(place);
       const live = element('div');
       this.reviewsFold.body.replaceChildren(...published.nodes, live);
       this.reviewsFold.hint.textContent = published.hint;
@@ -384,7 +385,7 @@ export class PlaceDrawer {
     const reviewsKey = JSON.stringify(place.reviews);
     if (this.reviewsKey !== reviewsKey) {
       this.reviewsKey = reviewsKey;
-      this.notes.body.replaceChildren(...this.reviews(place));
+      replacePreservingFocus(this.notes.body, this.title, ...this.reviews(place));
       this.notes.hint.textContent = place.reviews.length ? `${place.reviews.length} ${place.reviews.length === 1 ? 'note' : 'notes'}` : 'Add yours';
     }
     if (focus) {
@@ -397,7 +398,7 @@ export class PlaceDrawer {
     const node = block('Live web reviews');
     const status = message('Checking public reviews…');
     node.append(status);
-    host.replaceChildren(node);
+    replacePreservingFocus(host, node.querySelector('h3')!, node);
     const result = await loadLiveReviews(place.id).catch(() => undefined);
     if (!host.isConnected) return;
     if (!result?.live) {
@@ -406,18 +407,19 @@ export class PlaceDrawer {
       return;
     }
     status.remove();
-    for (const { source, rating, count, url } of result.ratings) {
+    const facts = reviewFacts(place.details, result);
+    for (const { source, rating, count, url } of facts.ratings) {
       const row = element('p');
       row.append(url ? link(source, url) : source,
         ` · ${rating.toFixed(1)} / 5${count ? ` · ${ratingCount.format(count)} reviews` : ''}`);
       node.append(row);
     }
-    if (result.highlights.length) {
+    if (facts.highlights.length) {
       const highlights = element('ul', 'review-highlights');
-      highlights.append(...result.highlights.map((text) => element('li', '', text)));
+      highlights.append(...facts.highlights.map((text) => element('li', '', text)));
       node.append(highlights);
     }
-    if (result.reviews.length) {
+    if (result.reviews?.length) {
       node.append(...result.reviews.slice(0, 3).map((review) => renderBriefingReview(liveBriefingReview(review))));
     } else node.append(element('p', 'muted', 'No attributed customer excerpts found.'));
   }
@@ -468,10 +470,9 @@ export class PlaceDrawer {
     if (trip.error || trip.offline) node.append(button('Refresh trip estimate', this.actions.retryTrip, 'quiet'));
     if (originName && stop) {
       const fallback = buildMbtaTripPlannerUrl(`${originName}, Boston`, { lat: place.lat, lon: place.lon });
-      try { node.append(link('Open full directions on MBTA', trip.data?.planner_url || fallback)); }
-      catch { node.append(link('Open full directions on MBTA', fallback)); }
+      node.append(link('Open full directions on MBTA', httpUrl(trip.data?.planner_url)?.href ?? fallback));
     }
-    this.tripDetails.replaceChildren(node);
+    replacePreservingFocus(this.tripDetails, this.title, node);
     this.costs.hint.textContent = trip.data ? `${Math.max(1, Math.round(trip.data.total_min))} min trip` : '';
   }
 
@@ -481,7 +482,6 @@ export class PlaceDrawer {
       manifest.error, manifest.offline, highlightedDishId]);
     if (this.modelKey === key && this.modelManifest === manifest.data && this.modelPlace === place
         && this.modelComparison === comparison && this.modelCatalog === data.places) return;
-    const previousFocus = this.content.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.control : undefined;
     this.modelKey = key;
     this.modelManifest = manifest.data;
     this.modelPlace = place;
@@ -550,10 +550,8 @@ export class PlaceDrawer {
         slider.value = String(data.rotation);
         slider.dataset.control = 'rotation';
         const degrees = element('output', 'muted', slider.value + '°');
-        slider.addEventListener('input', () => {
-          degrees.value = slider.value + '°';
-          this.actions.rotate(Number(slider.value));
-        });
+        degrees.dataset.rotationReadout = '';
+        slider.addEventListener('input', () => this.actions.rotate(Number(slider.value)));
         const turntable = field('Turntable rotation', slider);
         turntable.classList.add('turntable');
         turntable.firstElementChild?.append(degrees);
@@ -618,6 +616,7 @@ export class PlaceDrawer {
           in3D++;
           const view = button('View in 3D', () => this.actions.openDish(entry.dish));
           view.setAttribute('aria-label', `View ${entry.dish.name} on the table in 3D`);
+          view.dataset.focusKey = entry.dish.id;
           row.append(view);
         } else row.append(element('span', 'muted', 'No 3D preview'));
         dishes.push(row);
@@ -628,13 +627,19 @@ export class PlaceDrawer {
     this.menu.node.hidden = !dataManifest || (Boolean(dish) && !dishes.length);
     this.fit.node.hidden = !fitting.length;
     this.fit.hint.textContent = fitHint;
-    this.stage.replaceChildren(node);
-    this.fit.body.replaceChildren(...fitting);
-    this.menu.body.replaceChildren(...dishes);
+    replacePreservingFocus(this.stage, this.title, node);
+    replacePreservingFocus(this.fit.body, this.title, ...fitting);
+    replacePreservingFocus(this.menu.body, this.title, ...dishes);
     // A fold that holds the thing being pointed at opens, so a highlight is never hidden.
     if (highlightedDishId && dishes.some((row) => row.dataset.highlighted === 'true')) this.menu.node.open = true;
     if (fit && fitting.length) this.fit.node.open = true;
-    if (previousFocus) this.content.querySelector<HTMLElement>(`[data-control="${previousFocus}"]`)?.focus({ preventScroll: true });
+  }
+
+  setRotation(degrees: number): void {
+    const slider = this.stage.querySelector<HTMLInputElement>('[data-control="rotation"]');
+    const readout = this.stage.querySelector<HTMLOutputElement>('[data-rotation-readout]');
+    if (slider) slider.value = String(degrees);
+    if (slider && readout) readout.value = `${slider.value}°`;
   }
 
   private reviews(place: Place) {

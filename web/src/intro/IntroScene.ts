@@ -13,8 +13,8 @@ import { assetBase, child, clamp, damp, ModelLibrary, smooth, studioAmbient, stu
  * paper sky dome. Scroll progress drives the camera, mesh reveals, and the room splat.
  */
 
-export const STOP_ID = 'place-bucen';
-export const PLACE_ID = 'bu-ramen-01';
+export const STOP_ID = 'place-kencl';
+export const PLACE_ID = 'kenmore-shudaxia-01';
 
 const mapHeight = 1.0;
 // Same constants as the in-app dive, so the landing page shows the real transition.
@@ -39,9 +39,15 @@ interface Shot {
 export const DIVE: [number, number] = [0.345, 0.585];
 /** Past this point the station plaques dissolve, clearing the view of the marker below. */
 export const CLEAR_AT = 0.305;
-/** Over this stretch every flag but the ramen counter's folds back into its roof. */
+/** Over this stretch every flag but the hot pot's folds back into its roof. */
 export const FOCUS: [number, number] = [0.775, 0.835];
 export const ROOM_START = 0.92;
+/** Over this stretch the camera comes to rest inside the room; past it the visitor may turn their head. */
+export const LOOK: [number, number] = [0.972, 0.992];
+/** How far up or down the visitor can look, in degrees from the entry view. */
+const LOOK_PITCH_LIMIT = 60;
+/** Turning this many degrees away from the entry view clears the copy off the room. */
+const LOOK_CLEAR = 16;
 const PIN_REVEAL = [0.557, 0.635] as const;
 const CITY_EXIT = [0.91, 0.96] as const;
 const featured = offlineCatalog.places.find((place) => place.id === PLACE_ID);
@@ -50,13 +56,13 @@ const shots: Shot[] = [
   // The visitor sees the full network above the gallery floor.
   { at: 0.00, look: 'map', yaw: -0.44, pitch: 0.44, distance: 2.02, shiftX: 0.31, shiftY: 0.12 },
   { at: 0.10, look: 'map', yaw: -0.30, pitch: 0.47, distance: 1.88, shiftX: 0.31, shiftY: 0.12 },
-  // Lean in over the table until BU Central's marker fills the view.
+  // Lean in over the table until Kenmore's marker fills the view.
   { at: 0.27, look: 'stop', yaw: 0.10, pitch: 0.62, distance: 0.74, shiftX: 0, shiftY: 0.26 },
   { at: 0.36, look: 'stop', yaw: 0.22, pitch: 1.12, distance: 0.36, shiftX: 0, shiftY: 0 },
   // The neighbourhood grows out of the marker; settle beside it and walk a quarter turn.
   { at: 0.585, look: 'stage', yaw: -0.52, pitch: 0.50, distance: 1.86, shiftX: 0.27, shiftY: 0 },
   { at: 0.74, look: 'stage', yaw: -0.02, pitch: 0.44, distance: 1.70, shiftX: 0.27, shiftY: 0 },
-  // One flag left standing: the ramen counter, seen from across the avenue.
+  // One flag left standing: the hot pot, seen from across the avenue.
   { at: 0.88, look: 'pin', yaw: 0.72, pitch: 0.60, distance: 0.72, shiftX: -0.26, shiftY: -0.09 },
   { at: 0.925, look: 'pin', yaw: 0.80, pitch: 0.54, distance: 0.62, shiftX: -0.26, shiftY: -0.09 },
   // Slide down the stem to the front door.
@@ -103,7 +109,18 @@ export class IntroScene {
   private featuredProgress = -1;
   private focus = -1;
   private clock = 0;
+  private awakeUntil = 0;
+  private started = false;
+  private loadRoom?: () => void;
   private pointer = { x: 0, y: 0, easedX: 0, easedY: 0 };
+  /** Whether the visitor can turn the camera right now, and whether they are dragging it. */
+  lookReady = false;
+  lookHeld = false;
+  /** How far the view is turned from the one the scroll arrived at: 0 facing it, 1 clear of the copy. */
+  lookAway = 0;
+  /** The head turn inside the room, in degrees. Only the camera's rotation ever reads it. */
+  private look = { yaw: 0, pitch: 0, easedYaw: 0, easedPitch: 0, free: 0 };
+  private drag?: { id: number; x: number; y: number };
   private anchor = new pc.Vec3();
   private stage = new pc.Vec3();
   private center = new pc.Vec3();
@@ -115,9 +132,9 @@ export class IntroScene {
   /** `onFrame` runs once per rendered frame and returns the eased scroll progress, 0 to 1. */
   constructor(private canvas: HTMLCanvasElement, private onFrame: (dt: number) => number) {}
 
-  async init(): Promise<boolean> {
+  async init(onRoom: (ready: boolean) => void): Promise<void> {
     const app = new pc.Application(this.canvas, {
-      graphicsDeviceOptions: { antialias: true, alpha: false, preserveDrawingBuffer: false },
+      graphicsDeviceOptions: { antialias: false, alpha: false, preserveDrawingBuffer: false },
     });
     this.app = app;
     app.setCanvasFillMode(pc.FILLMODE_NONE);
@@ -135,48 +152,95 @@ export class IntroScene {
     this.models = new ModelLibrary(app, log);
     this.reveal = new JarvisReveal(app.graphicsDevice, this.reducedMotion);
     this.splats = new SplatLoader(app, log, this.reducedMotion);
-    this.roomRoot = child(app.root, 'Tsuru Ramen interior', undefined, app);
+    this.roomRoot = child(app.root, 'Shu Daxia interior', undefined, app);
     this.roomRoot.enabled = false;
     const manifest = featured && offlineManifest(featured);
     this.roomSpawn.set(...(manifest?.spawn_point ?? [0, 1.55, 2]));
-    const room = this.splats.show('room', manifest?.room_asset, this.roomRoot);
-    this.splats.seekReveal('room', 0);
+
     const noop = () => undefined;
     this.map = new MapSculptureScene(app.root, app.graphicsDevice, this.models, this.reveal, log, noop, this.canvas, noop);
-    this.station = new StationDioramaScene(app, this.models, this.reveal, log, noop);
+
     this.map.root.setLocalPosition(0, mapHeight, 0);
     this.map.setImmersive(true);
     this.map.setStops(STOPS);
     this.map.setPlaces(offlineCatalog.places, this.allPlaces);
+    const sculpture = await this.models.load(`${assetBase}boston-map-sculpture.glb`);
+    if (this.app !== app) return;
+    if (!sculpture) throw new Error('The map sculpture could not be loaded');
+
+    this.station = new StationDioramaScene(app, this.models, this.reveal, log, noop);
     this.station.setPlaces(offlineCatalog.places, this.allPlaces);
     this.station.setPinsShown(false, true);
     this.station.seekReveal(0);
     this.parkStation();
 
+    const signal = this.events.signal;
     window.addEventListener('pointermove', (event) => {
       this.pointer.x = event.clientX / Math.max(1, window.innerWidth) * 2 - 1;
       this.pointer.y = event.clientY / Math.max(1, window.innerHeight) * 2 - 1;
-    }, { signal: this.events.signal, passive: true });
+      if (!this.reducedMotion.matches && event.pointerType === 'mouse') this.wake();
+      const drag = this.drag;
+      if (!drag || event.pointerId !== drag.id) return;
+      // The room follows the pointer one to one, as if the visitor held it and turned.
+      const degrees = this.lens.fov / Math.max(1, this.canvas.clientHeight);
+      this.look.yaw += (event.clientX - drag.x) * degrees;
+      this.look.pitch = clamp(this.look.pitch + (event.clientY - drag.y) * degrees, -LOOK_PITCH_LIMIT, LOOK_PITCH_LIMIT);
+      drag.x = event.clientX;
+      drag.y = event.clientY;
+      this.wake();
+    }, { signal, passive: true });
+    window.addEventListener('pointerdown', (event) => {
+      if (!this.lookReady || event.button !== 0 || (event.target as Element | null)?.closest?.('a, button')) return;
+      this.drag = { id: event.pointerId, x: event.clientX, y: event.clientY };
+      this.wake();
+    }, { signal, passive: true });
+    const release = (event: PointerEvent) => {
+      if (this.drag?.id !== event.pointerId) return;
+      this.drag = undefined;
+      this.wake();
+    };
+    window.addEventListener('pointerup', release, { signal, passive: true });
+    window.addEventListener('pointercancel', release, { signal, passive: true });
+    window.addEventListener('keydown', (event) => {
+      if (!this.lookReady || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
+      this.look.yaw += event.key === 'ArrowLeft' ? 15 : -15;
+      this.wake();
+    }, { signal });
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(this.canvas);
     this.resize();
     app.on('update', (dt: number) => this.update(dt));
 
     const stop = STOPS.find((item) => item.stop_id === STOP_ID);
-    const [sculpture, , roomReady] = await Promise.all([
-      this.models.load(`${assetBase}boston-map-sculpture.glb`),
-      stop ? this.station.show(stop) : Promise.resolve(),
-      room,
-    ]);
-    if (!this.app) return false;
-    if (!sculpture) throw new Error('The map sculpture could not be loaded');
-    this.roomReady = roomReady;
-    this.findPins();
-    return roomReady;
+    const station = stop ? this.station.show(stop) : Promise.resolve();
+    void station.then(() => {
+      if (this.app !== app) return;
+      this.findPins();
+      this.cityProgress = this.pinsProgress = -1;
+      this.wake();
+    }).catch(() => {});
+    this.loadRoom = () => {
+      this.loadRoom = undefined;
+      void this.splats.show('room', manifest?.room_asset, this.roomRoot).then((roomReady) => {
+        if (this.app !== app) return;
+        this.roomReady = roomReady;
+        onRoom(roomReady);
+        this.wake();
+      });
+      this.splats.seekReveal('room', 0);
+    };
   }
 
   start(): void {
-    this.app?.start();
+    if (!this.app || this.started) return;
+    this.started = true;
+    this.app.start();
+    this.wake();
+  }
+
+  wake(): void {
+    this.awakeUntil = performance.now() + (this.reducedMotion.matches ? 200 : 2_000);
+    if (this.started && this.app && !this.app.frameRequestId) this.app.requestAnimationFrame();
   }
 
   private addLights(root: pc.Entity): void {
@@ -195,6 +259,7 @@ export class IntroScene {
     device.maxPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
     device.resizeCanvas(width, height);
     this.lens.fov = clamp(44 + (1 - width / height) * 38, 44, 74);
+    this.wake();
   }
 
   private parkStation(): void {
@@ -229,7 +294,7 @@ export class IntroScene {
     return true;
   }
 
-  /** The ramen counter's pin and its neighbours, once the neighbourhood has built them. */
+  /** The hot pot's pin and its neighbours, once the neighbourhood has built them. */
   private findPins(): void {
     if (this.pin) return;
     const named = (name: string) => this.station.root.findByName(name) as pc.Entity | null;
@@ -323,11 +388,43 @@ export class IntroScene {
     const shiftX = mix(a.shiftX, b.shiftX) * wide;
     const shiftY = pc.math.lerp(0.26, mix(a.shiftY, b.shiftY), wide);
     this.camera.translateLocal(-shiftX * distance * tanV * aspect, -shiftY * distance * tanV, 0);
+
+    const look = this.look;
+    if (look.free <= 0) return;
+    // Inside the room only the head turns. The eye stays exactly where the scroll left it.
+    const follow = this.reducedMotion.matches ? 1 : damp(dt, 14);
+    look.easedYaw += (look.yaw - look.easedYaw) * follow;
+    look.easedPitch += (look.pitch - look.easedPitch) * follow;
+    this.camera.setEulerAngles(
+      -pitch * pc.math.RAD_TO_DEG + look.easedPitch * look.free,
+      yaw * pc.math.RAD_TO_DEG + look.easedYaw * look.free,
+      0,
+    );
+  }
+
+  /** Opens the head turn once the camera has come to rest in the room, and unwinds it on the way out. */
+  private applyLook(p: number): void {
+    const look = this.look;
+    look.free = this.roomReady ? smooth(progressAt(p, ...LOOK)) : 0;
+    const ready = look.free >= 1;
+    if (this.lookReady && !ready) {
+      // Leaving the room: let go, and drop whole turns so the view swings back the short way.
+      this.drag = undefined;
+      const turns = Math.round(look.yaw / 360) * 360;
+      look.yaw -= turns;
+      look.easedYaw -= turns;
+    }
+    if (look.free <= 0) look.yaw = look.pitch = look.easedYaw = look.easedPitch = 0;
+    this.lookReady = ready;
+    this.lookHeld = !!this.drag;
+    const turned = Math.abs(look.easedYaw - Math.round(look.easedYaw / 360) * 360);
+    this.lookAway = clamp(Math.hypot(turned, look.easedPitch) / LOOK_CLEAR, 0, 1) * look.free;
   }
 
   private update(dt: number): void {
     this.clock += dt;
     const scroll = clamp(this.onFrame(dt), 0, 1);
+    if (scroll > 0.67) this.loadRoom?.();
     const p = this.reducedMotion.matches ? reducedScene(scroll) : scroll;
     const dive = progressAt(p, ...DIVE);
     const initial = this.lastDive < 0;
@@ -354,16 +451,27 @@ export class IntroScene {
       this.roomRoot.enabled = false;
     }
     this.splats.seekReveal('room', inside);
+    this.applyLook(p);
     this.poseCamera(this.roomReady ? p : Math.min(p, 0.925), dt);
     this.backdrop.update(this.camera);
     this.map.update(dt, this.camera, this.lens, 0);
     if (this.station.root.enabled) this.station.update(this.reducedMotion.matches ? 1 : dt, this.camera);
     this.reveal.update(dt);
+    const app = this.app;
+    if (app?.frameRequestId && performance.now() >= this.awakeUntil) {
+      cancelAnimationFrame(app.frameRequestId);
+      app.frameRequestId = null;
+    }
   }
 
   destroy(): void {
     if (!this.app) return;
     this.events.abort();
+    this.drag = undefined;
+    this.lookReady = this.lookHeld = false;
+    this.lookAway = 0;
+    this.started = false;
+    this.loadRoom = undefined;
     this.resizeObserver?.disconnect();
     this.map?.destroy();
     this.station?.destroy();

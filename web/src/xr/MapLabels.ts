@@ -28,6 +28,14 @@ export type KeepClear = readonly pc.Vec3[];
 const slots = [-44, 44, -84, 84, -124, 124, -164, 164];
 const gap = 6;
 
+function setTabbable(node: HTMLButtonElement, tabbable: boolean): void {
+  const tabIndex = tabbable ? 0 : -1;
+  if (node.tabIndex === tabIndex) return;
+  node.tabIndex = tabIndex;
+  if (!tabbable && document.activeElement === node) node.blur();
+  node.ariaHidden = tabbable ? null : 'true';
+}
+
 /**
  * Crisp HTML station labels for the desktop map. Each label is a real button projected from
  * its station's 3D position, moved to the nearest free slot so labels never overlap.
@@ -65,6 +73,8 @@ export class MapLabels {
       const node = document.createElement('button');
       node.type = 'button';
       node.className = 'map-label';
+      node.style.display = 'none';
+      setTabbable(node, false);
       node.style.setProperty('--line', stop.primary_color);
       const dot = document.createElement('span');
       dot.className = 'map-label-dot';
@@ -145,6 +155,8 @@ export class MapLabels {
       this.root.dataset.live = String(opacity > 0.6);
     }
     if (opacity <= 0.01) return;
+    const width = this.root.clientWidth;
+    const height = this.root.clientHeight;
     const placed: Box[] = [];
     for (const corners of keepClear) {
       const box: Box = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
@@ -163,17 +175,20 @@ export class MapLabels {
     for (const label of this.labels) {
       const world = position(label.stop.stop_id);
       if (world) camera.worldToScreen(world, this.screen);
-      const visible = !!world && this.screen.z > 0;
+      const { x, y, z } = this.screen;
+      const visible = !!world && z > 0 && Number.isFinite(x) && Number.isFinite(y);
       if (visible !== label.shown) {
         label.shown = visible;
         label.node.style.display = visible ? '' : 'none';
       }
-      if (!visible) continue;
+      if (!visible) {
+        setTabbable(label.node, false);
+        continue;
+      }
       if (!label.width) {
         label.width = label.node.offsetWidth;
         label.height = label.node.offsetHeight;
       }
-      const { x, y } = this.screen;
       const boxAt = (slot: number): Box => ({
         left: x - label.width / 2 - gap, right: x + label.width / 2 + gap,
         top: y + slots[slot] - label.height / 2 - gap, bottom: y + slots[slot] + label.height / 2 + gap,
@@ -189,7 +204,10 @@ export class MapLabels {
           box = boxAt(next);
         }
       }
-      placed.push(box);
+      const onScreen = box.right - gap > 0 && box.left + gap < width
+        && box.bottom - gap > 0 && box.top + gap < height;
+      setTabbable(label.node, onScreen);
+      if (onScreen) placed.push(box);
       const offset = slots[label.slot];
       label.node.style.transform = `translate(${(x - label.width / 2).toFixed(1)}px, ${(y + offset - label.height / 2).toFixed(1)}px)`;
       const reach = Math.abs(offset) - label.height / 2;
