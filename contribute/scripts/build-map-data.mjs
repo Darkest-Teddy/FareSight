@@ -1,10 +1,11 @@
 // Flattens the 3D modeling sources into the 2D map data used by the Contribute app.
 //   node contribute/scripts/build-map-data.mjs
-// Inputs:  modeling/output/mbta-3d-paths.json, modeling/output/station-anchors.json,
-//          modeling/osm-data.json and the route and river tables in modeling/transit.mjs.
+// Inputs:  modeling/output/mbta-3d-paths.json, station-anchors.json and segment-anchors.json,
+//          modeling/osm-data.json, the route and river tables in modeling/transit.mjs and the ground in modeling/ground.mjs.
 // Outputs: contribute/src/data/network.json and contribute/src/data/areas/<stop_id>.json.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { norm, spline, sub } from '../../modeling/geometry.mjs';
+import { spline } from '../../modeling/geometry.mjs';
+import { groundOutline } from '../../modeling/ground.mjs';
 import { focal, project, riverBanks, routes } from '../../modeling/transit.mjs';
 
 const read = (path) => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
@@ -16,14 +17,13 @@ const write = (path, data) => {
 const modeling = '../../modeling/';
 const paths = read(modeling + 'output/mbta-3d-paths.json');
 const anchors = read(modeling + 'output/station-anchors.json');
+const islands = read(modeling + 'output/segment-anchors.json');
 const stops = read(modeling + 'stops.json');
 const osm = read(modeling + 'osm-data.json');
 
 // ---- Network: the sculpture seen from above (x east, z south), in thousandths of a model unit.
 const UNIT = 1000;
-// Half extents of the slab's deck and of the footprint its tubes and river are clipped to.
-const HALF_WIDTH = 0.742;
-const HALF_DEPTH = 0.517;
+// Half extents of the footprint the tracks are clipped to.
 const CLIP_WIDTH = 0.738;
 const CLIP_DEPTH = 0.513;
 const fixed = (value) => Number((value * UNIT).toFixed(1));
@@ -62,19 +62,52 @@ for (const [stopId, fullName, label, code] of focal) {
   Object.assign(station, { x: fixed(x), y: fixed(z) });
 }
 
-const stream = spline(riverBanks.map(([x, z, w]) => [x, w, z]), 0.011);
-const banks = [[], []];
-stream.forEach(([x, w, z], i) => {
-  const tangent = norm(sub(stream[Math.min(i + 1, stream.length - 1)], stream[Math.max(0, i - 1)]));
-  [-1, 1].forEach((side, k) => banks[k].push([
-    Math.max(-CLIP_WIDTH, Math.min(CLIP_WIDTH, x - tangent[2] * side * w)),
-    Math.max(-CLIP_DEPTH, Math.min(CLIP_DEPTH, z + tangent[0] * side * w)),
-  ]));
-});
+// The network floats on one organic piece of ground whose edge follows the lines, not on a rectangular slab.
+const ground = groundOutline(paths.lines);
+const xs = ground.rim.map(([x]) => x);
+const zs = ground.rim.map(([, z]) => z);
+
+// Just enough water to place the network in Boston: the river's curve and the channels that part the
+// peninsulas. Each stretch is a centreline of [x, z, half width] in model units, drawn as one smooth ribbon.
+// The map clips them to the ground, so a stretch can simply run off its edge.
+const water = [
+  // The Charles, on the curve the sculpture's deck used to carry, from upstream of Allston to the harbour.
+  [[-1, -0.04, 0.02], [-0.87, -0.03, 0.024], ...riverBanks.slice(0, 19)],
+  // The Inner Harbor, between downtown and East Boston, widening out to sea past the Seaport.
+  [[0.368, -0.258, 0.03], [0.428, -0.29, 0.034], [0.52, -0.295, 0.045], [0.6, -0.255, 0.055], [0.655, -0.19, 0.07], [0.69, -0.11, 0.095],
+    [0.72, -0.03, 0.13], [0.8, 0.08, 0.17], [0.95, 0.2, 0.2], [1.1, 0.3, 0.22]],
+  // The Mystic, which makes Charlestown a peninsula.
+  [[0.2, -0.69, 0.016], [0.33, -0.635, 0.02], [0.47, -0.57, 0.026], [0.585, -0.505, 0.03], [0.625, -0.41, 0.036], [0.62, -0.27, 0.05]],
+  // Fort Point Channel, between downtown and the Seaport.
+  [[0.6, -0.04, 0.018], [0.555, 0.03, 0.014], [0.505, 0.11, 0.012], [0.47, 0.17, 0.009]],
+];
+function ribbon(centreline) {
+  // The half width rides along as the spline's middle coordinate, so it eases between control points too.
+  const stream = spline(centreline.map(([x, z, w]) => [x, w, z]), 0.011);
+  const frames = stream.map(([x, w, z], i) => {
+    const ahead = stream[Math.min(i + 1, stream.length - 1)];
+    const behind = stream[Math.max(0, i - 1)];
+    const length = Math.hypot(ahead[0] - behind[0], ahead[2] - behind[2]) || 1;
+    const along = [(ahead[0] - behind[0]) / length, (ahead[2] - behind[2]) / length];
+    return { x, z, w, along, across: [-along[1], along[0]] };
+  });
+  const bank = (side) => frames.map(({ x, z, w, across }) => [x + side * across[0] * w, z + side * across[1] * w]);
+  // Round ends, so two stretches that meet at an angle join without a notch between them.
+  const cap = ({ x, z, w, along, across }, out) => Array.from({ length: 7 }, (_, k) => {
+    const angle = (k + 1) / 8 * Math.PI;
+    return [
+      x + w * out * (across[0] * Math.cos(angle) + along[0] * Math.sin(angle)),
+      z + w * out * (across[1] * Math.cos(angle) + along[1] * Math.sin(angle)),
+    ];
+  });
+  return polyline([...bank(1), ...cap(frames.at(-1), 1), ...bank(-1).reverse(), ...cap(frames[0], -1)]) + 'Z';
+}
 
 const networkBytes = write('../src/data/network.json', {
-  bounds: [-HALF_WIDTH * UNIT, -HALF_DEPTH * UNIT, HALF_WIDTH * 2 * UNIT, HALF_DEPTH * 2 * UNIT],
-  river: polyline([...banks[0], ...banks[1].reverse()]) + 'Z',
+  bounds: [Math.min(...xs), Math.min(...zs), Math.max(...xs) - Math.min(...xs), Math.max(...zs) - Math.min(...zs)].map(fixed),
+  ground: polyline(ground.solid) + 'Z',
+  groundRim: polyline(ground.rim) + 'Z',
+  water: water.map(ribbon).join(''),
   lines,
   stations: [...stations.values()],
 });
@@ -82,6 +115,8 @@ console.log(`network.json  ${lines.length} lines, ${stations.size} stations, ${(
 
 // ---- Station areas: the OSM footprints behind each diorama, in quarter metres from the deck centre.
 const Q = 4;
+// Metres of turf drawn around each island's city, the middle of the margin the diorama's island has.
+const TURF_M = 22;
 const MIN_BUILDING_M2 = 18;
 const shoelace = (ring) => Math.abs(ring.reduce((sum, [x, y], i) => {
   const [nx, ny] = ring[(i + 1) % ring.length];
@@ -121,9 +156,24 @@ function pathBuilder() {
 
 mkdirSync(new URL('../src/data/areas/', import.meta.url), { recursive: true });
 for (const area of Object.values(osm.areas)) {
-  const half = area.spanMeters / 2;
-  const margin = 24;
-  const inside = (points) => points.some(([x, y]) => Math.abs(x) <= half + margin && Math.abs(y) <= half + margin);
+  // The city is no longer a square board: it is cropped to the shoreline of the diorama's island.
+  const { outline: deckOutline, projection } = islands[area.stopId];
+  const metresPerDeckUnit = area.spanMeters / projection.deckSize;
+  const shore = deckOutline.map(([x, z]) => [x * metresPerDeckUnit, z * metresPerDeckUnit]);
+  const shoreX = shore.map(([x]) => x);
+  const shoreY = shore.map(([, y]) => y);
+  const box = [Math.min(...shoreX), Math.min(...shoreY), Math.max(...shoreX), Math.max(...shoreY)];
+  // The shoreline is convex, so a point is on the island when it is on the inner side of every edge.
+  const winding = Math.sign(shore.reduce((sum, [x, y], i) => {
+    const [nx, ny] = shore[(i + 1) % shore.length];
+    return sum + x * ny - nx * y;
+  }, 0));
+  const onIsland = ([x, y], slack = 0.25) => shore.every(([ax, ay], i) => {
+    const [bx, by] = shore[(i + 1) % shore.length];
+    return winding * ((bx - ax) * (y - ay) - (by - ay) * (x - ax)) / Math.hypot(bx - ax, by - ay) >= -slack;
+  });
+  // Ground features are clipped to the shoreline when drawn, so anything reaching its box is kept.
+  const inside = (points) => points.some(([x, y]) => x >= box[0] && x <= box[2] && y >= box[1] && y <= box[3]);
   const layers = Object.fromEntries(['water', 'park', 'pitch', 'foot', 'service', 'minor', 'major', 'building']
     .map((name) => [name, pathBuilder()]));
 
@@ -138,7 +188,8 @@ for (const area of Object.values(osm.areas)) {
       : road.kind === 'service' ? 'service' : 'minor';
     layers[layer].add(road.points, false);
   }
-  const buildings = area.buildings.filter((building) => inside(building.ring) && shoelace(building.ring) >= MIN_BUILDING_M2);
+  // Like the diorama, a building the shoreline would cut is left out whole.
+  const buildings = area.buildings.filter((building) => building.ring.every((point) => onIsland(point)) && shoelace(building.ring) >= MIN_BUILDING_M2);
   for (const building of buildings) layers.building.add(building.ring, true);
 
   // A few named landmarks keep the flat map as readable as the model.
@@ -146,7 +197,7 @@ for (const area of Object.values(osm.areas)) {
   for (const feature of [...buildings, ...area.parks]) {
     if (!feature.name) continue;
     const [x, y] = centroid(feature.ring);
-    if (Math.abs(x) > half * 0.9 || Math.abs(y) > half * 0.9) continue;
+    if (!onIsland([x, y], -30)) continue;
     const size = shoelace(feature.ring);
     if (size > (named.get(feature.name)?.size ?? 0)) named.set(feature.name, { name: feature.name, x: Math.round(x * Q), y: Math.round(y * Q), size });
   }
@@ -170,6 +221,10 @@ for (const area of Object.values(osm.areas)) {
   const bytes = write(`../src/data/areas/${area.stopId}.json`, {
     stopId: area.stopId, name: area.name, spanMeters: area.spanMeters, unitsPerMeter: Q,
     centerLat: area.centerLat, centerLon: area.centerLon, station,
+    // The island: the city's shoreline, and the box that holds it with its turf margin.
+    outline: shore.flatMap(([x, y]) => [Math.round(x * Q), Math.round(y * Q)]),
+    turf: TURF_M * Q,
+    bounds: [box[0] - TURF_M, box[1] - TURF_M, box[2] - box[0] + TURF_M * 2, box[3] - box[1] + TURF_M * 2].map((value) => Math.round(value * Q)),
     layers: Object.fromEntries(Object.entries(layers).map(([name, builder]) => [name, builder.d])),
     labels, attribution: osm.attribution,
   });

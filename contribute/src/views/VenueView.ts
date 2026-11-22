@@ -1,5 +1,6 @@
 import { MAX_ROOM_PHOTOS, type Place, type RoomModelTier, type Stop } from '@faresight/shared';
 import { api } from '../api';
+import { catalog } from '../catalog';
 import { categoryLabel, coverage, servesDishes } from '../data';
 import { button, el, errorText, haptic, icon, iconButton, motion, replay, svg, wait, type IconName } from '../dom';
 import { prepareImage } from '../photos';
@@ -17,17 +18,11 @@ interface Shot {
 
 const MIN_ROOM_PHOTOS = 2;
 const NEW_DISH = '';
-const tips: Record<Kind, string[]> = {
-  room: [
-    'Tap 360° scan and turn on the spot. The app takes each photo for you.',
-    'Adding your own instead? Let each photo overlap the one before it by about half.',
-    'Keep the light steady and wait for people to move out of frame.',
-  ],
-  dish: [
-    'Use one dish on a clear table, with the whole plate in frame.',
-    'Shoot from a low angle, about 45 degrees, not straight down.',
-    'Avoid hard shadows and hands or cutlery crossing the plate.',
-  ],
+// One line of advice, shown only once the person reaches for the camera or the library.
+// The 360° scan explains itself on its own first screen.
+const hints: Record<Kind, string> = {
+  room: 'Let each photo overlap the last by about half.',
+  dish: 'Whole plate in frame, from about 45°.',
 };
 const tiers: [RoomModelTier, string, string][] = [
   ['atlas-draft', 'Draft', 'Ready in about a minute'],
@@ -49,13 +44,18 @@ export class VenueView {
   readonly root = el('section', 'view venue-view');
   private readonly kinds: Kind[];
   private readonly shots: Record<Kind, Shot[]> = { room: [], dish: [] };
-  private readonly guide = el('ol', 'tips');
   private readonly grid = el('div', 'photo-grid');
+  private readonly hint = el('p', 'field-hint photo-hint');
+  private readonly hinted = new Set<Kind>();
   private readonly count = el('span', 'photo-count');
   private readonly options = el('section', 'options');
   private readonly feedback = el('p', 'form-error');
   private readonly send: HTMLButtonElement;
   private readonly sendLabel = el('span');
+  private readonly heading = el('h1');
+  private readonly sub = el('p', 'view-sub');
+  private readonly status = el('div', 'venue-status');
+  private readonly unsubscribe: () => void;
   private readonly dishName = el('input', 'text-input');
   private readonly diameter = el('input', 'text-input');
   private kind: Kind;
@@ -66,7 +66,7 @@ export class VenueView {
   private alive = true;
 
   constructor(
-    private readonly place: Place,
+    private place: Place,
     private readonly stop: Stop,
     private readonly actions: { back(): void; done(jobId: string): void },
   ) {
@@ -78,17 +78,18 @@ export class VenueView {
 
     const head = el('header', 'view-head');
     const title = el('div', 'head-title');
-    title.append(el('h1', '', place.name), el('p', 'view-sub', `${categoryLabel(place)} · ${stop.name} · ${place.walk_from_stop_m} m from the stop`));
+    title.append(this.heading, this.sub);
     head.append(iconButton('back', `Back to ${stop.name}`, actions.back, 'head-back'), title);
 
     const body = el('div', 'venue-body');
-    if (this.kinds.length > 1) body.append(this.kindPicker(status));
-    else body.append(this.statusNote(status.room));
+    body.append(this.status);
+    this.renderPlace();
+    this.unsubscribe = catalog.subscribe(() => this.onCatalog());
 
     const photos = el('section', 'photo-section');
     const photoHead = el('div', 'section-head');
     photoHead.append(el('h2', '', 'Photos'), this.count);
-    photos.append(photoHead, this.grid);
+    photos.append(photoHead, this.grid, this.hint);
 
     this.dishName.type = 'text';
     this.dishName.maxLength = 120;
@@ -105,7 +106,7 @@ export class VenueView {
     this.diameter.placeholder = 'Optional, for example 24';
     this.diameter.addEventListener('input', () => this.renderFooter());
 
-    body.append(this.guide, photos, this.options);
+    body.append(photos, this.options);
 
     this.feedback.setAttribute('role', 'alert');
     this.send = button('', () => void this.submit(), 'primary send');
@@ -118,10 +119,32 @@ export class VenueView {
 
   destroy() {
     this.alive = false;
+    this.unsubscribe();
     for (const shot of [...this.shots.room, ...this.shots.dish]) URL.revokeObjectURL(shot.url);
   }
 
   private get current() { return this.shots[this.kind]; }
+
+  /** Shows what comes from the place itself: its name, where it is and what it still needs. */
+  private renderPlace() {
+    const place = this.place;
+    const status = coverage(place);
+    this.heading.textContent = place.name;
+    this.sub.textContent = `${categoryLabel(place)} · ${this.stop.name} · ${place.walk_from_stop_m} m from the stop`;
+    this.status.replaceChildren(this.kinds.length > 1 ? this.kindPicker(status) : this.statusNote(status.room));
+  }
+
+  /** Follows the place when it changes on the server, without touching the photos already added. */
+  private onCatalog() {
+    const next = catalog.find(this.place.id);
+    // A scan that is being sent keeps the place it started with.
+    if (!next || !this.alive || this.busy || this.finished || JSON.stringify(next) === JSON.stringify(this.place)) return;
+    this.place = next;
+    if (this.dishId !== NEW_DISH && !next.dishes.some((dish) => dish.id === this.dishId)) this.dishId = next.dishes[0]?.id ?? NEW_DISH;
+    this.renderPlace();
+    this.renderOptions();
+    this.renderFooter();
+  }
 
   private kindPicker(status: ReturnType<typeof coverage>) {
     const picker = el('fieldset', 'kind-picker');
@@ -157,8 +180,6 @@ export class VenueView {
   }
 
   private render() {
-    this.guide.replaceChildren(...tips[this.kind].map((tip) => el('li', '', tip)));
-    replay(this.guide, 'is-swapping');
     this.renderGrid();
     this.renderOptions();
     this.renderFooter();
@@ -172,6 +193,10 @@ export class VenueView {
     if (capture) input.setAttribute('capture', 'environment');
     else input.multiple = this.kind === 'room';
     input.disabled = this.busy;
+    input.addEventListener('click', () => {
+      this.hinted.add(this.kind);
+      this.hint.textContent = hints[this.kind];
+    });
     input.addEventListener('change', () => {
       const files = Array.from(input.files ?? []);
       input.value = '';
@@ -203,6 +228,7 @@ export class VenueView {
     if (!full) tiles.push(this.picker('camera', shots.length && this.kind === 'dish' ? 'Retake' : 'Camera', true),
       this.picker('image', 'Library', false));
     this.grid.replaceChildren(...tiles);
+    this.hint.textContent = this.hinted.has(this.kind) ? hints[this.kind] : '';
 
     const needed = this.kind === 'room' ? MIN_ROOM_PHOTOS : 1;
     const ring = svg('svg', { viewBox: '0 0 24 24', class: 'count-ring', 'aria-hidden': 'true' });

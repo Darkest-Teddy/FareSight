@@ -39,6 +39,9 @@ const SKIRT = 0.3;
  */
 const FADE = 0.1;
 
+/** The point the ground is measured out from. */
+const CENTRE = [0.02, 0];
+
 const mixHex = (a, b, t) =>
   '#' +
   [1, 3, 5]
@@ -102,7 +105,7 @@ function reaches(lines, centre) {
  * that reach the backdrop colour exactly.
  */
 export function groundBlob(surface, lines, y) {
-  const centre = [0.02, 0];
+  const centre = CENTRE;
   const reach = reaches(lines, centre);
 
   // Ring radii as a fraction of each spoke's reach, with the colour each is written at.
@@ -143,4 +146,18 @@ export function groundBlob(surface, lines, y) {
       face(surface, [at(inner, i), at(inner, j), at(outer, j), at(outer, i)], shade);
     }
   }
+}
+
+/**
+ * The ground seen from above, for the flat maps that draw the same shape: `solid` is the edge of
+ * the lit ground and `rim` is where it has faded into the backdrop. Both are rings of [x, z].
+ */
+export function groundOutline(lines) {
+  const reach = reaches(lines, CENTRE);
+  const ring = (pad) =>
+    reach.map((r, i) => {
+      const angle = (i / SPOKES) * Math.PI * 2;
+      return [CENTRE[0] + Math.cos(angle) * (r + pad), CENTRE[1] + Math.sin(angle) * (r + pad)];
+    });
+  return { solid: ring(SKIRT), rim: ring(SKIRT + FADE) };
 }

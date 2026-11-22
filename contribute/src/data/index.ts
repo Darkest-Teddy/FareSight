@@ -24,7 +24,11 @@ export interface NetworkStation {
 }
 export interface NetworkData {
   bounds: number[];
-  river: string;
+  /** The ground the network floats on, and the wider ring where it fades out. */
+  ground: string;
+  groundRim: string;
+  /** The Charles and the channels between Boston's peninsulas. */
+  water: string;
   lines: NetworkLine[];
   stations: NetworkStation[];
 }
@@ -38,6 +42,10 @@ export interface AreaData {
   centerLat: number;
   centerLon: number;
   station: number[];
+  /** The island's shoreline as x, y pairs, the width of its turf margin, and the box that holds both. */
+  outline: number[];
+  turf: number;
+  bounds: number[];
   layers: Record<AreaLayer, string>;
   labels: { name: string; x: number; y: number }[];
   attribution: string;

@@ -1195,6 +1195,8 @@ export function segments(dir, only) {
       deckY: 0,
       stationAnchor,
       projection: { centerLat, centerLon, spanMeters, deckSize },
+      // The city's shoreline as [x, z] on the deck, for the flat maps that draw the same island.
+      outline: outline.map((p) => p.map((v) => Number(v.toFixed(5)))),
       placeAnchors: Object.fromEntries(venues.map(({ id, p }) => [id, topAt(meshes, p)])),
       offDeck,
       pinAnchors: sites.map((p) => topAt(meshes, p)),

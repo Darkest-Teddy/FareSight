@@ -10,6 +10,12 @@ const AIM_DEGREES = 7;
 const STEADY_SPEED = 16;
 const FAST_SPEED = 80;
 const HOLD_MS = 450;
+// The stabilizer. A photo is only taken while the phone's own motion sensors read below both limits:
+// how fast it is turning, in degrees per second, and how hard it is being moved, in metres per second squared.
+// A hand holding a phone still stays well under these; sliding or shaking it from side to side does not.
+const STEADY_TURN = 10;
+const STEADY_SHAKE = 0.5;
+const AMBER = '255 181 71';
 const POP_MS = 420;
 // Long-side field of view the dots are drawn with. It is wider than the camera's own (about 64°) on purpose:
 // at camera scale a phone in portrait shows one dot at a time, and the person could not see what comes next.
@@ -28,10 +34,19 @@ interface Card {
 
 /** iOS only hands out motion readings after the page asks from inside a tap. */
 async function requestMotion() {
-  const sensor = window.DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> } | undefined;
-  if (!sensor) return false;
-  if (typeof sensor.requestPermission !== 'function') return true;
-  try { return await sensor.requestPermission() === 'granted'; } catch { return false; }
+  type Gated = { requestPermission?: () => Promise<string> } | undefined;
+  const ask = async (sensor: Gated) => {
+    if (!sensor) return false;
+    if (typeof sensor.requestPermission !== 'function') return true;
+    try { return await sensor.requestPermission() === 'granted'; } catch { return false; }
+  };
+  // Both are asked in the same breath, while the tap still counts. Orientation aims the scan;
+  // motion feeds the stabilizer, and the scan still works without it.
+  const [orientation] = await Promise.all([
+    ask(window.DeviceOrientationEvent as unknown as Gated),
+    ask(window.DeviceMotionEvent as unknown as Gated),
+  ]);
+  return orientation;
 }
 
 /**
@@ -63,6 +78,10 @@ class GuidedScan {
   private settled = false;
   private held = 0;
   private speed = 0;
+  /** Smoothed readings of the phone's gyroscope and accelerometer, once they start arriving. */
+  private motion?: { turn: number; shake: number };
+  /** Where the stabilizer's bubble sits in the aiming ring: it drifts with the phone and settles when it is still. */
+  private drift: [number, number] = [0, 0];
   private last = 0;
   private raf = 0;
 
@@ -136,6 +155,7 @@ class GuidedScan {
     // Motion access is asked first: iOS refuses it once the tap is no longer the direct cause.
     const allowed = await requestMotion();
     window.addEventListener('deviceorientation', this.onOrientation);
+    window.addEventListener('devicemotion', this.onMotion);
     const sensed = allowed && await this.firstReading();
     if (import.meta.env.DEV && (!camera || !sensed)) this.simulate();
     else if (!camera) return this.fail('This page cannot open the camera. The scan needs a secure (https) connection.');
@@ -173,6 +193,33 @@ class GuidedScan {
     if (event.alpha === null || event.beta === null || event.gamma === null) return;
     this.sensorPose = poseFromOrientation(event.alpha, event.beta, event.gamma);
   };
+
+  private readonly onMotion = (event: DeviceMotionEvent) => {
+    const rate = event.rotationRate;
+    const push = event.acceleration;
+    if (rate?.alpha == null || push?.x == null) return;
+    const turn = Math.hypot(rate.alpha, rate.beta ?? 0, rate.gamma ?? 0);
+    const shake = Math.hypot(push.x, push.y ?? 0, push.z ?? 0);
+    const motion = this.motion ??= { turn, shake };
+    // A jolt registers at once; calm has to last a moment before it counts.
+    motion.turn = Math.max(turn, motion.turn + (turn - motion.turn) * 0.25);
+    motion.shake = Math.max(shake, motion.shake + (shake - motion.shake) * 0.25);
+    // Turning about the phone's long side and sliding it sideways both push the bubble sideways.
+    this.nudge((rate.gamma ?? 0) * 0.9 + push.x * 16, (rate.beta ?? 0) * 0.9 - (push.y ?? 0) * 16);
+  };
+
+  private nudge(x: number, y: number) {
+    const reach = 21;
+    const length = Math.hypot(x, y);
+    const scale = length > reach ? reach / length : 1;
+    this.drift = [this.drift[0] + (x * scale - this.drift[0]) * 0.3, this.drift[1] + (y * scale - this.drift[1]) * 0.3];
+  }
+
+  /** Whether the phone is still enough for a sharp photo. */
+  private get steady() {
+    if (this.speed >= STEADY_SPEED) return false;
+    return !this.motion || (this.motion.turn < STEADY_TURN && this.motion.shake < STEADY_SHAKE);
+  }
 
   private async firstReading() {
     for (let waited = 0; waited < 1200 && !this.sensorPose; waited += 50) {
@@ -233,6 +280,14 @@ class GuidedScan {
     this.last = now;
     const next = this.simulated ? reading : blend(this.pose, reading, 0.5);
     this.speed += (angleBetween(next.forward, this.pose.forward) / dt - this.speed) * 0.2;
+    // Without motion sensors the bubble follows the view itself: how fast it is sweeping sideways and up.
+    if (!this.motion) {
+      const sweep = next.forward.map((value, index) => (value - this.pose!.forward[index]) / dt / RAD);
+      this.nudge(
+        sweep[0] * next.right[0] + sweep[1] * next.right[1] + sweep[2] * next.right[2],
+        -(sweep[0] * next.up[0] + sweep[1] * next.up[1] + sweep[2] * next.up[2]),
+      );
+    }
     this.pose = next;
     if (this.scanning) this.track(dt);
     this.draw(now);
@@ -255,9 +310,12 @@ class GuidedScan {
       this.aimed = aimed;
       this.held = 0;
     }
-    if (aimed && this.speed < STEADY_SPEED) {
+    if (aimed && this.steady) {
       this.held += dt * 1000;
       if (this.held >= HOLD_MS && !this.capturing) void this.capture(aimed);
+    } else if (aimed) {
+      // Any movement starts the wait again: the photo is only taken after a full, unbroken moment of stillness.
+      this.held = 0;
     } else this.held = Math.max(0, this.held - dt * 2000);
 
     // Lead the person round one ring at a time: the horizon first, then up, then down.
@@ -277,7 +335,7 @@ class GuidedScan {
 
   private advice() {
     if (!this.guide) return '';
-    if (this.aimed) return this.speed < STEADY_SPEED ? 'Hold still' : 'Hold steady';
+    if (this.aimed) return this.steady ? 'Hold still' : 'Steady the phone';
     if (this.speed > FAST_SPEED) return 'Slow down';
     const spot = this.place(this.guide);
     if (spot.visible) return 'Aim at the glowing dot';
@@ -295,6 +353,8 @@ class GuidedScan {
   }
 
   private async capture(target: Target) {
+    // The stabilizer has the last word: nothing is captured in a moment the phone is moving.
+    if (!this.steady) return;
     const source = this.simulated ? this.simulatedFrame() : this.video;
     const width = this.simulated ? source.width : this.video.videoWidth;
     const height = this.simulated ? source.height : this.video.videoHeight;
@@ -397,6 +457,7 @@ class GuidedScan {
   private release() {
     cancelAnimationFrame(this.raf);
     window.removeEventListener('deviceorientation', this.onOrientation);
+    window.removeEventListener('devicemotion', this.onMotion);
     window.removeEventListener('resize', this.resize);
     for (const track of this.stream?.getTracks() ?? []) track.stop();
     this.stream = undefined;
@@ -461,12 +522,21 @@ class GuidedScan {
       context.stroke();
     }
 
-    // Aiming ring, with an arc that fills while the phone is held still on a dot.
+    // Aiming ring. It turns amber while a dot is in it but the phone is moving, and its arc only fills
+    // once the phone is still.
+    const shaky = this.scanning && Boolean(this.aimed) && !this.steady;
     context.beginPath();
     context.arc(width / 2, height / 2, 30, 0, Math.PI * 2);
-    context.strokeStyle = 'rgb(255 255 255 / 75%)';
-    context.lineWidth = 2;
+    context.strokeStyle = shaky ? `rgb(${AMBER})` : 'rgb(255 255 255 / 75%)';
+    context.lineWidth = shaky ? 3 : 2;
     context.stroke();
+    // The stabilizer's bubble: it drifts off centre as the phone moves and settles back when it is still.
+    if (this.scanning) {
+      context.beginPath();
+      context.arc(width / 2 + this.drift[0], height / 2 + this.drift[1], 5, 0, Math.PI * 2);
+      context.fillStyle = this.steady ? `rgb(${ACCENT})` : `rgb(${AMBER})`;
+      context.fill();
+    }
     if (this.aimed && this.held > 0) {
       context.beginPath();
       context.arc(width / 2, height / 2, 30, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, this.held / HOLD_MS));

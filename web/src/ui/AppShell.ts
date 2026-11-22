@@ -1,6 +1,6 @@
 import {
   computeTripEstimate, haversineMeters, ROUTE_COLORS, RIDE_TIMES, type Dish,
-  type GenerationJob, type MbtaSource, type Place, type Stop,
+  type GenerationJob, type Place, type Stop,
 } from '@faresight/shared';
 import { createFareSightEngine, type FareSightSceneEngine, type SceneMode } from '../xr';
 import { SoundEngine } from '../audio/SoundEngine';
@@ -27,8 +27,6 @@ const pollInterval = 18_000;
 export class AppShell {
   private readonly canvas = element('canvas', 'viewport');
   private readonly canvasNotice = element('div', 'canvas-notice');
-  private readonly status = element('span', 'service-status');
-  private readonly xrStatus = element('span', 'xr-status');
   private readonly notice = element('div', 'notice');
   private readonly breadcrumbs = element('nav', 'breadcrumbs');
   private readonly stationBoard = element('section', 'station-board panel');
@@ -53,7 +51,6 @@ export class AppShell {
   private readonly pairButton: HTMLButtonElement;
   private readonly audioButton: HTMLButtonElement;
   private readonly vrButton: HTMLButtonElement;
-  private readonly arButton: HTMLButtonElement;
   private readonly xrExit: HTMLButtonElement;
   private readonly moreButton: HTMLButtonElement;
   private readonly moreMenu = element('div', 'command-menu');
@@ -93,7 +90,6 @@ export class AppShell {
   private trip: ViewData['trip'] = {};
   private origin?: { lat: number; lon: number };
   private catalogState: 'loading' | 'live' | 'offline' = 'loading';
-  private vehicleSource?: MbtaSource | 'unavailable';
   private noticeTimer?: number;
   private syncingTransit = false;
   private xrMode: 'none' | 'vr' | 'ar' = 'none';
@@ -110,8 +106,7 @@ export class AppShell {
     brand.prepend(mark);
     this.breadcrumbs.setAttribute('aria-label', 'Scene navigation');
     const operations = element('div', 'command-actions');
-    this.vrButton = button('Enter VR', () => void this.launchXR('vr'), 'accent');
-    this.arButton = button('AR Table', () => void this.launchXR('ar'));
+    this.vrButton = button('Enter VR', () => void this.launchVR(), 'accent');
     this.xrExit = button('Exit XR', () => this.engine?.exitXR(), 'accent');
     this.xrExit.hidden = true;
     this.pairButton = button('Pair Quest', () => this.pairing.open(), 'quiet desktop-action');
@@ -175,12 +170,9 @@ export class AppShell {
       this.setMenuOpen(false);
       this.moreButton.focus();
     });
-    operations.append(this.liveDock.trigger, this.vrButton, this.arButton, this.xrExit, more);
+    operations.append(this.liveDock.trigger, this.vrButton, this.xrExit, more);
     head.append(brand, this.breadcrumbs, operations);
 
-    this.status.setAttribute('role', 'status');
-    const indicators = element('div', 'indicators');
-    indicators.append(this.status, this.xrStatus);
     this.canvas.setAttribute('aria-label', 'FareSight interactive 3D view');
     this.canvas.tabIndex = 0;
     this.canvasNotice.replaceChildren(message('Loading 3D viewer…'));
@@ -240,7 +232,7 @@ export class AppShell {
       this.mobileButtons.set(label, tab);
     }
 
-    root.replaceChildren(this.canvas, this.canvasNotice, head, indicators, this.stationBoard, this.filterBar.root, this.drawer.root, this.liveDock.root, tabs, this.notice);
+    root.replaceChildren(this.canvas, this.canvasNotice, head, this.stationBoard, this.filterBar.root, this.drawer.root, this.liveDock.root, tabs, this.notice);
     this.debug.body.append(this.renderStats, this.debugLogs,
       button('Reset camera', () => this.engine?.resetCamera()),
       button('Send debug logs', () => void this.sendDebugLogs(), 'quiet'));
@@ -249,7 +241,6 @@ export class AppShell {
     this.filterBar.setStops(this.stops);
     this.renderBreadcrumbs();
     this.applyFilters();
-    this.renderStatus();
     this.renderPanels();
   }
 
@@ -290,16 +281,9 @@ export class AppShell {
           this.root.dataset.xr = this.xrMode;
           this.vrButton.hidden = this.xrMode !== 'none';
           this.xrExit.hidden = this.xrMode === 'none';
-          this.arButton.hidden = this.xrMode !== 'none';
           this.vrButton.textContent = state.vrSupported ? 'Enter VR' : 'Reset view';
           this.vrButton.classList.toggle('accent', state.vrSupported);
-          this.arButton.title = state.arSupported ? 'Open an immersive AR table' : 'Open the virtual table on this device';
-          this.arButton.dataset.supported = String(state.arSupported);
           this.vrButton.dataset.supported = String(state.vrSupported);
-          this.xrStatus.textContent = state.activeMode === 'ar' ? 'AR table active'
-            : state.activeMode === 'vr' ? 'VR active'
-              : /Quest|OculusBrowser/i.test(navigator.userAgent) ? 'Quest browser'
-                : state.vrSupported || state.arSupported ? 'WebXR available' : 'Desktop 3D';
           if (changed) this.renderReviewCards();
         },
         onStatsUpdate: (stats) => {
@@ -323,7 +307,7 @@ export class AppShell {
       this.engine = undefined;
       this.canvasNotice.replaceChildren(message('3D viewer unavailable. Use the stop list to keep exploring.', true));
       this.log(errorText(error));
-      this.vrButton.hidden = this.arButton.hidden = true;
+      this.vrButton.hidden = true;
     }
   }
 
@@ -333,14 +317,6 @@ export class AppShell {
   }
 
   private findStop(id: string) { return this.stops.find((stop) => stop.stop_id === id); }
-
-  private renderStatus() {
-    this.status.textContent = this.catalogState === 'offline' ? 'Offline catalog'
-      : this.vehicleSource === 'live' ? 'Live MBTA'
-        : this.vehicleSource === 'simulated' ? 'Simulated trains'
-          : this.vehicleSource === 'unavailable' ? 'Trains unavailable' : 'Checking MBTA';
-    this.status.dataset.source = this.catalogState === 'offline' ? 'offline' : this.vehicleSource ?? 'pending';
-  }
 
   private async loadCatalog() {
     if (this.catalogState === 'loading') this.routeFeedback.replaceChildren(message('Checking the catalog…'));
@@ -359,7 +335,6 @@ export class AppShell {
       this.routeFeedback.replaceChildren(button('Retry connection', () => void this.loadCatalog(), 'quiet'));
     }
     if (!this.stops.length) this.routeFeedback.replaceChildren(message('The catalog has no stops.'), button('Reload stops', () => void this.loadCatalog(), 'quiet'));
-    this.renderStatus();
     this.filterBar.setStops(this.stops);
     if (this.engineReady) this.engine?.setStops(this.stops);
     this.applyFilters();
@@ -370,18 +345,15 @@ export class AppShell {
     if (this.syncingTransit) return;
     this.syncingTransit = true;
     try {
-      const { vehicles, source } = await api.vehicles();
-      this.vehicleSource = source;
+      const { vehicles } = await api.vehicles();
       if (this.engineReady) this.engine?.setLiveVehicles(vehicles.map((vehicle) => ({
         id: vehicle.id, route_id: vehicle.route_id, lat: vehicle.lat, lon: vehicle.lon, bearing: vehicle.bearing ?? undefined,
         line_color: ROUTE_COLORS[vehicle.route_id] ?? '#A8B3CF', label: vehicle.route_id,
       })));
     } catch {
-      this.vehicleSource = 'unavailable';
       if (this.engineReady) this.engine?.setLiveVehicles([]);
     } finally {
       this.syncingTransit = false;
-      this.renderStatus();
     }
   }
 
@@ -518,8 +490,10 @@ export class AppShell {
 
   private showStation(stop: Stop) {
     const changed = this.stop?.stop_id !== stop.stop_id || this.mode !== 'station';
-    // Coming from the map, the drawer waits for the 3D dive and slides in as it lands.
-    const arriving = this.mode === 'map';
+    // On desktop the station view has no side panel: places are picked from the pins in the 3D diorama.
+    // The phone keeps its bottom sheet, which waits for the 3D dive from the map and slides in as it lands.
+    const sheet = this.mobile.matches;
+    const arriving = sheet && this.mode === 'map';
     this.drawer.root.classList.toggle('arriving', arriving);
     if (arriving) this.drawer.root.addEventListener('animationend', () => this.drawer.root.classList.remove('arriving'), { once: true });
     this.stop = stop;
@@ -530,7 +504,7 @@ export class AppShell {
     this.inside = this.fit = false;
     this.mode = 'station';
     this.filterOpen = false;
-    this.drawerOpen = true;
+    this.drawerOpen = sheet;
     this.sheetExpanded = false;
     this.renderBreadcrumbs();
     this.renderPanels();
@@ -838,31 +812,16 @@ export class AppShell {
     });
   }
 
-  private async launchXR(kind: 'vr' | 'ar') {
+  private async launchVR() {
     const engine = this.engine;
     if (!engine || !this.engineReady) { this.notify('The 3D viewer is still starting.'); return; }
-    const supported = (kind === 'vr' ? this.vrButton : this.arButton).dataset.supported === 'true';
-    if (!supported && kind === 'vr') {
+    if (this.vrButton.dataset.supported !== 'true') {
       engine.resetCamera();
       return;
     }
-    if (!supported) {
-      this.setTable(true);
-      const active = this.dish ?? this.manifest.data?.menu_items.find(({ dish_asset }) => dish_asset)?.dish;
-      if (active) await this.showDish(active);
-      else this.notify('Open a venue with a published dish to use the virtual table.');
-      return;
-    }
     try {
-      if (kind === 'ar') {
-        this.setTable(false, false);
-        const dish = this.dish ?? this.manifest.data?.menu_items.find(({ dish_asset }) => dish_asset)?.dish;
-        if (dish && !this.dish) void this.showDish(dish);
-        await engine.enterAR();
-      }
-      else await engine.enterVR();
+      await engine.enterVR();
     } catch (error) {
-      if (kind === 'ar') this.setTable(true);
       this.notify('Could not start the XR session. ' + errorText(error));
     }
   }
@@ -1076,9 +1035,11 @@ export class AppShell {
           this.engine?.exitXR();
           return 'Exited XR session';
         }
+        // The AR table has no entry point in the app any more, so only VR can be launched by voice.
+        if (action !== 'enter_vr') return 'The AR table is not available';
         try {
-          await this.launchXR(action === 'enter_vr' ? 'vr' : 'ar');
-          return action === 'enter_vr' ? 'Launched VR' : 'Launched AR table';
+          await this.launchVR();
+          return 'Launched VR';
         } catch (error) {
           return `XR requires a direct button tap in the browser (${errorText(error)})`;
         }
