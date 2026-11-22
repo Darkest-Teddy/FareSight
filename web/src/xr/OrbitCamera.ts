@@ -1,6 +1,14 @@
 import * as pc from 'playcanvas';
 import { clamp, coastTurntable, damp, TurnVelocity, wrapAngle } from './sceneSupport';
 
+const MOVE_KEYS: Record<string, [number, number]> = {
+  // [forward, strafe] in the camera's own ground plane.
+  KeyW: [1, 0], ArrowUp: [1, 0],
+  KeyS: [-1, 0], ArrowDown: [-1, 0],
+  KeyA: [0, -1], ArrowLeft: [0, -1],
+  KeyD: [0, 1], ArrowRight: [0, 1],
+};
+
 interface Pose {
   pivot: pc.Vec3;
   yaw: number;
@@ -8,6 +16,13 @@ interface Pose {
   distance: number;
   min?: number;
   max?: number;
+  /** How far the pivot may be driven from its starting point, in world units. Keeps keyboard
+   *  movement on the map instead of letting the viewer wander into the void. */
+  roam?: number;
+  /** Lowest the camera may drop. Scenes with a ground plane set this so the viewer can
+   *  never orbit down to the horizon and see the plane edge-on, or past it into empty space. */
+  minPitch?: number;
+  maxPitch?: number;
 }
 
 interface Pointer {
@@ -29,6 +44,9 @@ export class OrbitCamera {
   private active = true;
   private motion = new TurnVelocity();
   private spinKind: 'yaw' | 'dish' | null = null;
+  /** Keys currently held. WASD and the arrows drive the pivot across the ground. */
+  private readonly held = new Set<string>();
+  private home = new pc.Vec3();
   private yawVelocity = 0;
   private dishVelocity = 0;
 
@@ -39,10 +57,29 @@ export class OrbitCamera {
     hover: (x: number, y: number) => void = () => {},
   ) {
     this.goal = { ...initial, pivot: initial.pivot.clone() };
+    this.home = initial.pivot.clone();
     this.pose = { ...initial, pivot: initial.pivot.clone() };
     this.previousTouchAction = canvas.style.touchAction;
     canvas.style.touchAction = 'none';
     const { signal } = this.events;
+    // Keyboard drives the pivot; the mouse keeps rotation. Listening on the window rather than
+    // the canvas means the keys work without clicking the scene first, but anything typed into
+    // a field still belongs to that field.
+    window.addEventListener('keydown', (event) => {
+      if (!this.enabled || !(event.code in MOVE_KEYS)) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+      const fresh = !this.held.has(event.code);
+      this.held.add(event.code);
+      // Nudge on press as well as moving while held. Holding is the normal case, but a quick
+      // tap can be released inside a single frame, and without this it would do nothing.
+      if (fresh) this.walk(0.09);
+      // Arrows would otherwise scroll the page under the canvas.
+      event.preventDefault();
+    }, { signal });
+    window.addEventListener('keyup', (event) => { this.held.delete(event.code); }, { signal });
+    // A lost focus must not leave a key stuck down.
+    window.addEventListener('blur', () => this.held.clear(), { signal });
     canvas.addEventListener('pointerdown', (event) => {
       if (!this.enabled) return;
       if (event.button !== 0 && event.button !== 1 && event.button !== 2) return;
@@ -80,7 +117,8 @@ export class OrbitCamera {
           this.spinKind = this.turnDish(dish) ? 'dish' : 'yaw';
           if (this.spinKind === 'yaw') this.goal.yaw += yaw;
           this.motion.add(this.spinKind === 'dish' ? dish : yaw, performance.now());
-          this.goal.pitch = clamp(this.goal.pitch + dy * 0.006, -0.65, 1.42);
+          this.goal.pitch = clamp(this.goal.pitch + dy * 0.006,
+            this.goal.minPitch ?? -0.65, this.goal.maxPitch ?? 1.42);
         }
       }
       previous.x = event.clientX;
@@ -150,6 +188,7 @@ export class OrbitCamera {
     const progress = damp(dt, dragging || this.yawVelocity !== 0 ? 24 : 8);
     this.yawVelocity = coastTurntable(this.yawVelocity, dt, 5.5, (delta) => { this.goal.yaw += delta; });
     this.dishVelocity = coastTurntable(this.dishVelocity, dt, 5.5, this.turnDish);
+    this.walk(dt);
     const pose = this.pose;
     const goal = this.goal;
     pose.pivot.lerp(pose.pivot, goal.pivot, progress);
@@ -169,6 +208,49 @@ export class OrbitCamera {
 
   private zoom(factor: number): void {
     this.goal.distance = clamp(this.goal.distance * factor, this.goal.min ?? 0.15, this.goal.max ?? 6);
+  }
+
+  /**
+   * Move the pivot across the ground from held keys.
+   *
+   * Forward is the camera's own forward flattened onto the ground, so W always goes where the
+   * viewer is looking regardless of pitch -- using camera.forward directly would drive the
+   * pivot into the floor as the camera tilts down. Speed scales with distance so a step feels
+   * the same whether zoomed in or out, and the result is clamped to a radius around the
+   * starting pivot so the map can't be left behind.
+   */
+  private walk(dt: number): void {
+    if (!this.held.size) return;
+    let forward = 0;
+    let strafe = 0;
+    for (const code of this.held) {
+      const move = MOVE_KEYS[code];
+      if (!move) continue;
+      forward += move[0];
+      strafe += move[1];
+    }
+    if (!forward && !strafe) return;
+    const step = this.goal.distance * 0.9 * Math.min(dt, 0.05);
+    const ahead = this.camera.forward.clone();
+    ahead.y = 0;
+    if (ahead.length() < 1e-4) return;
+    ahead.normalize();
+    const side = this.camera.right.clone();
+    side.y = 0;
+    side.normalize();
+    const scale = 1 / Math.hypot(forward, strafe);
+    this.goal.pivot.addScaled(ahead, forward * scale * step);
+    this.goal.pivot.addScaled(side, strafe * scale * step);
+
+    const roam = this.goal.roam;
+    if (roam === undefined) return;
+    const dx = this.goal.pivot.x - this.home.x;
+    const dz = this.goal.pivot.z - this.home.z;
+    const drift = Math.hypot(dx, dz);
+    if (drift <= roam) return;
+    const k = roam / drift;
+    this.goal.pivot.x = this.home.x + dx * k;
+    this.goal.pivot.z = this.home.z + dz * k;
   }
 
   private pan(dx: number, dy: number): void {

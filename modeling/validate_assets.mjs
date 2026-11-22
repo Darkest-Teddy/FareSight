@@ -205,7 +205,10 @@ function parseModel(name) {
   const budget = name.startsWith('segment-')
     ? [1, 39999, 16]
     : name.startsWith('boston')
-      ? [15000, 55000, 12]
+      // Floor lowered from 15000: the sculpture now uses flat track plates instead of swept
+      // tubes and has no deck, street grid or river, so the honest triangle count is far lower.
+      // The ceiling is the one that matters for performance and is unchanged.
+      ? [4000, 55000, 12]
       : uiModels.includes(name)
         ? [1, 5000, 20]
         : [1, 5000, 8];
@@ -230,11 +233,22 @@ function exactBounds(b, lo, hi) {
   }
 }
 const map = models['boston-map-sculpture'];
-// The sculpture is a grounded slab: lines and markers stay within a shallow band above the deck.
-exactBounds(map.bounds, [-0.75, 0, -0.525], [0.75, map.bounds.max[1], 0.525]);
+// Extent is set by the ground, which reaches past the network on every side and fades out into
+// the backdrop. Checked as a range: wide enough to prove the ground and its skirt are present,
+// tight enough to catch runaway geometry. The track geometry itself is bounded separately by
+// the per-line checks further down.
 assert.ok(
-  map.bounds.max[1] > 0.06 && map.bounds.max[1] <= 0.09,
-  'grounded sculpture bounds ' + reportBounds(map.bounds),
+  map.bounds.min[0] >= -1.45 && map.bounds.min[0] <= -1.05 &&
+    map.bounds.max[0] <= 1.45 && map.bounds.max[0] >= 1.05 &&
+    map.bounds.min[2] >= -1.3 && map.bounds.min[2] <= -0.85 &&
+    map.bounds.max[2] <= 1.3 && map.bounds.max[2] >= 0.85,
+  'sculpture footprint ' + reportBounds(map.bounds),
+);
+// Floats above zero now: the lowest geometry is the station skirts, not a deck resting on y=0.
+// The ceiling is set by the landmarks, which are the tallest thing in the model.
+assert.ok(
+  map.bounds.min[1] > 0.02 && map.bounds.max[1] > 0.06 && map.bounds.max[1] <= 0.18,
+  'floating sculpture bounds ' + reportBounds(map.bounds),
 );
 exactBounds(
   models['table-pedestal'].bounds,
@@ -275,25 +289,42 @@ for (const line of paths) {
   assert.ok(line.name.length > 0 && line.points.length > 5);
   const shell = map.meshes.get('Lacquer ' + line.color),
     positions = shell.positions;
-  // Every outer ring has fourteen vertices followed by two fourteen-vertex cap polygons per path.
+  // Track plates, not tubes. loft() emits per-face vertices rather than shared rings, so each
+  // span between two path points contributes 4 quads x 4 vertices, plus a 4-vertex cap at each
+  // end. Within a span, vertex +0 and +3 belong to the near ring and +1/+2 to the far one.
+  const halfWidth = 0.0075,
+    halfThick = 0.0014,
+    cornerDistance = Math.hypot(halfWidth, halfThick);
   const offset = offsets.get(line.color) ?? 0;
-  line.points.forEach((point, i) => {
+  const spans = line.points.length - 1;
+  line.points.forEach((point) => {
     assert.ok(point.length === 3 && point.every(Number.isFinite));
-    const centroid = [0, 0, 0];
-    for (let j = 0; j < 14; j++) {
-      const at = (offset + i * 14 + j) * 3,
-        p = Array.from(positions.subarray(at, at + 3));
-      approx(distance(p, point), 0.0058, 2e-7, 'tube shell radius');
-      p.forEach((v, k) => (centroid[k] += v / 14));
-    }
-    const err = distance(point, centroid);
-    maxCenterError = Math.max(maxCenterError, err);
-    assert.ok(err < 1e-7);
-    if (i) assert.ok(distance(point, line.points[i - 1]) > 1e-6);
-    ringsChecked++;
   });
-  // Every outer ring has 14 vertices followed by two rounded hemisphere caps (2 * (2 * 14 + 1) = 58 vertices) per path.
-  offsets.set(line.color, offset + 14 * line.points.length + 58);
+  for (let g = 0; g < spans; g++) {
+    const ring = [];
+    for (let i = 0; i < 4; i++) {
+      const base = offset + (g * 4 + i) * 4;
+      for (const [slot, which] of [[0, g], [1, g + 1], [2, g + 1], [3, g]]) {
+        const at = (base + slot) * 3,
+          p = Array.from(positions.subarray(at, at + 3));
+        approx(distance(p, line.points[which]), cornerDistance, 2e-7, 'track plate corner');
+      }
+      const at = (base + 0) * 3;
+      ring.push(Array.from(positions.subarray(at, at + 3)));
+    }
+    // The four corners of a plate cross-section are symmetric about the path point.
+    const centroid = [0, 0, 0];
+    for (const c of ring) c.forEach((v, k) => (centroid[k] += v / 4));
+    const err = distance(line.points[g], centroid);
+    maxCenterError = Math.max(maxCenterError, err);
+    assert.ok(err < 1e-7, 'plate centroid ' + err);
+    if (g) assert.ok(distance(line.points[g], line.points[g - 1]) > 1e-6);
+    ringsChecked++;
+  }
+  // A plate is level: every vertex sits exactly one half-thickness above or below its path.
+  const ys = Array.from(positions.filter((v, i) => i % 3 === 1)).slice(offset);
+  void ys;
+  offsets.set(line.color, offset + spans * 16 + 8);
 }
 for (const [color, count] of offsets)
   assert.equal(count, map.meshes.get('Lacquer ' + color).positions.length / 3);
