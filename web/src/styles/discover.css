@@ -135,6 +135,8 @@
   transition: background 160ms var(--ease), color 160ms var(--ease);
 }
 
+.discover-chip[hidden] { display: none; }
+
 .discover-chip:hover:not(.is-selected) { background: var(--surface-2); color: var(--ink); }
 
 /* Sunflower always sits behind ink text, never behind white. */

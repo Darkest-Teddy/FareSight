@@ -1,5 +1,6 @@
 import {
-  CATEGORY_CHIPS, type DiscoverPlace, type DiscoverSort, type DiscoverWindow,
+  CATEGORY_CHIPS, chipCategories, type Category, type DiscoverPlace, type DiscoverSort,
+  type DiscoverWindow,
 } from '@faresight/shared';
 import { discover } from '../api/discoverClient';
 import { button, element, icon } from './dom';
@@ -97,6 +98,8 @@ export class DiscoverView {
   private request = 0;
   private searchTimer?: number;
   private loadingMore = false;
+  /** Categories present in the whole catalogue, so empty chips can be hidden. */
+  private available = new Set<Category>();
   private endWatcher?: IntersectionObserver;
   /** Counts card impressions once each, so scrolling past a card twice is not two events. */
   private readonly seen = new Set<string>();
@@ -107,7 +110,7 @@ export class DiscoverView {
     const heading = element('div', 'discover-heading');
     heading.append(
       element('h1', '', 'Discover'),
-      element('p', 'discover-subtitle', 'New spots near the T, rated by people who rode there.'),
+      element('p', 'discover-subtitle', 'Places near the T you can step inside in 3D before you ride.'),
     );
 
     this.searchInput.type = 'search';
@@ -192,6 +195,16 @@ export class DiscoverView {
     this.endWatcher.observe(this.sentinel);
   }
 
+  private syncChipVisibility() {
+    [...this.chipRow.children].forEach((node, index) => {
+      const chip = CATEGORY_CHIPS[index];
+      // "All" always stays: it is how someone clears a filter.
+      const usable = chip.id === 'all'
+        || chipCategories(chip.id).some((category) => this.available.has(category));
+      (node as HTMLElement).hidden = !usable;
+    });
+  }
+
   private syncControls() {
     const mark = (row: HTMLElement, selected: string, values: string[]) => {
       [...row.children].forEach((node, index) => {
@@ -254,6 +267,13 @@ export class DiscoverView {
       // A slower earlier request must not overwrite a newer one's results.
       if (run !== this.request) return;
       this.loaded = replace ? response.places : [...this.loaded, ...response.places];
+      // An unfiltered load is the whole catalogue, so it is the one chance to learn which
+      // categories exist. Discover lists only places with a 3D view, and most categories have
+      // none, so a chip that can never match anything would otherwise sit there inert.
+      if (replace && !this.query && this.chip === 'all') {
+        this.available = new Set(this.loaded.map((place) => place.category));
+        this.syncChipVisibility();
+      }
       this.cursor = response.next_cursor;
       this.render(response.total);
       this.statusLine.hidden = true;

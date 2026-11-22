@@ -108,6 +108,21 @@ function gatheredRating(rows: RatingRow[] | undefined): AggregateRating | null {
   };
 }
 
+/**
+ * The ids of every 3D asset a seeded place could open, room first.
+ *
+ * `room_asset_id` alone is not the whole story: a venue whose only captures are dishes still has
+ * something to walk into, and the venue view shows them.
+ */
+function assetIds(place: Place): string[] {
+  return [
+    place.room_asset_id,
+    ...place.rooms.map((room) => room.asset_id),
+    ...place.dishes.map((dish) => dish.asset_id),
+    ...place.seat_views.map((view) => view.asset_id),
+  ].filter((id): id is string => Boolean(id));
+}
+
 function fromCatalog(place: Place, createdAt: Date): DiscoverPlace {
   const stop = stopsById.get(place.stop_id);
   return {
@@ -296,9 +311,20 @@ export function createDiscover(accounts: Accounts, store: Store) {
     const [contributedPlaces, ratings, photos] = await Promise.all([
       contributed(), gatheredRatings(), thumbnails(),
     ]);
+
+    /**
+     * Discover lists only what somebody can actually step into in 3D.
+     *
+     * An asset counts only once it is `ready`: a build that is still converting, or one an admin
+     * rejected, is not something to send a visitor to. For a contributed place the pipeline sets
+     * `asset_id` exactly when its splat is finished, so its presence is the same signal.
+     */
+    const explorable = (place: Place) =>
+      assetIds(place).some((id) => store.get('assets', id)?.status === 'ready');
+
     const places = [
-      ...store.all('places').map((place: Place) => fromCatalog(place, catalogEpoch)),
-      ...contributedPlaces,
+      ...store.all('places').filter(explorable).map((place: Place) => fromCatalog(place, catalogEpoch)),
+      ...contributedPlaces.filter((place) => place.asset_id),
     ].map((place) => {
       // What the backfill found from several sites beats a single hand-researched figure, because
       // it is both more current and weighted across more reviews. The hand-researched entry stays
