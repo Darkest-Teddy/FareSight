@@ -236,7 +236,10 @@ export class AppShell {
     for (const [label, wantsDiscover] of [['Map', false], ['Discover', true]] as const) {
       const tab = button(label, () => this.setDiscoverOpen(wantsDiscover), 'view-toggle-option');
       tab.setAttribute('role', 'tab');
-      tab.dataset.view = wantsDiscover ? 'discover' : 'map';
+      // Deliberately not `data-view`: the shell element already carries that for the view it is
+      // currently showing, so reusing it here made `[data-view="discover"]` match two different
+      // elements meaning two different things.
+      tab.dataset.viewTarget = wantsDiscover ? 'discover' : 'map';
       this.viewToggle.append(tab);
     }
 
@@ -761,7 +764,7 @@ export class AppShell {
     const view = this.discoverOpen ? 'discover' : 'map';
     this.root.dataset.view = view;
     for (const tab of this.viewToggle.children) {
-      const selected = (tab as HTMLElement).dataset.view === view;
+      const selected = (tab as HTMLElement).dataset.viewTarget === view;
       tab.classList.toggle('is-selected', selected);
       tab.setAttribute('aria-selected', String(selected));
     }
