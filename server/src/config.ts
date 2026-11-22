@@ -31,6 +31,8 @@ function captureConfig() {
     // Stable across restarts, so a restarted worker keeps the heartbeat on the jobs it already holds.
     workerId: env.WORKER_ID || hostname(),
     minFrames: Math.max(2, Number(env.MIN_FRAMES) || 2),
+    // Off on a machine that shares the database but must leave the building to another server.
+    buildCaptures: env.CAPTURE_BUILDS !== 'false',
   };
 }
 
