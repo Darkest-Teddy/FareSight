@@ -6,9 +6,11 @@
 
 ## Architecture
 
+![Vantage System Architecture](images/vantage-architecture.png)
+
 - **`modeling/`** — Deterministic procedural glTF 2.0 (`.glb`) and binary 3D Gaussian Splat (`.ply`) generators:
-  - **Boston Map Sculpture** (`boston-map-sculpture.glb`): a grounded base slab with an inlaid Charles River and street grid, MBTA Green (B/C/D/E), Red, Orange, and Blue tubes stacked in three shallow layers, white on-line stop markers, transfer posts at interchanges, raised drums for the five explorable stations, and `mbta-train-capsule.glb`.
-  - **5 Floating-Island City Segment Dioramas** (`segment-place-*.glb`): BU Central, Packard's Corner, Kenmore, Harvard Square, and Chinatown, each an OpenStreetMap city block with Boston landmarks on a low-poly island of turf, earth and rock (`modeling/segment-island.mjs`).
+  - **Boston Map Sculpture** (`boston-map-sculpture.glb`): a grounded base slab with an inlaid Charles River and street grid, MBTA Green (B/C/D/E), Red, Orange, and Blue tubes stacked in three shallow layers, white on-line stop markers, transfer posts at interchanges, raised drums for the ten explorable stations, and `mbta-train-capsule.glb`.
+  - **10 Floating-Island City Segment Dioramas** (`segment-place-*.glb`): BU Central, Packard's Corner, Kenmore, Harvard Square, Chinatown, Haymarket, Copley, Aquarium, Central Square, and Coolidge Corner. Each is an OpenStreetMap city block on a low-poly island of turf, earth and rock (`modeling/segment-island.mjs`).
   - **2 Demo 3DGS `.ply` Assets**: Study café and matcha tiramisu (`18 cm`), plus `table-pedestal.glb`.
 - **`shared/`** (`@faresight/shared`) — Shared TypeScript domain types, Boston flat-earth sculpture projection, MBTA fare constants (`$2.40` subway / `$1.70` bus), precomputed ride times, and trip estimate math.
 - **`server/`** (`@faresight/server`) — Node + TypeScript + Fastify + built-in SQLite (`node:sqlite`) + persistent resumable job worker:
@@ -20,7 +22,7 @@
     - **Asset processing** uses `@playcanvas/splat-transform` to decimate and compress splats to `.sog`. Originals are retained as `.spz` for Atlas and `.ply` for TRELLIS and demo jobs. If compression is unavailable, Atlas serves a viewer-compatible SPZ and PLY jobs serve the normalized PLY. Dish scaling uses the 5th–95th percentile of the splat bounds.
   - `POST /api/assets/:id/publish`, `GET /api/restaurants`, `GET /api/restaurants/:id/manifest`
   - `POST /api/restaurants/:id/reviews`, `GET/POST /api/admin/moderation`, `POST/GET /api/debug/logs`
-  - `GET /api/mbta/{vehicles,predictions,alerts,schedules,trip}` — Cached MBTA V3 proxy (10s / 60s / 1h TTL) with realistic Boston simulation fallback.
+  - `GET /api/mbta/{vehicles,predictions,alerts,schedules,trip}` — Cached MBTA V3 proxy with a Boston simulation fallback. TTLs are 5s for vehicles, 10s for predictions, 60s for alerts, and 1h for schedules.
   - `GET /api/live/status` reports the voice configuration. `POST /api/live/sessions` brokers the app’s GPT Live WebRTC connection using `gpt-live-1.1` and the `ballad` voice by default. A Responses backend (`gpt-6-luna` by default) handles catalog and transit queries and controls the app’s scenes, filters, and review clipboards.
   - `POST /api/realtime/session` mints a short-lived `gpt-realtime` credential configured with the `ballad` voice. The server loads `OPENAI_API_KEY` from the environment for both endpoints.
   - `POST /api/pairing/create` & `WS /ws/pair/:code` — 4-digit Phone ↔ Quest headset handoff.
