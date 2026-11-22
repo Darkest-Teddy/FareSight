@@ -1,6 +1,7 @@
 import { AppShell } from './ui/AppShell';
 import './styles/tokens.css';
 import './styles/app.css';
+import './styles/content.css';
 
 const root = document.querySelector<HTMLElement>('#app');
 if (!root) throw new Error('FareSight requires a main app element.');

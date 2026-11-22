@@ -66,6 +66,9 @@ export class FilterBar {
     this.root.append(heading, chips, controls);
   }
 
+  /** Desktop only: collapse the controls to a one-line trip summary outside the map overview. */
+  setCompact(compact: boolean) { this.root.dataset.compact = String(compact); }
+
   setStops(stops: Stop[]) {
     this.start.replaceChildren(...stops.map((stop) => option(stop.stop_id, stop.name)));
   }

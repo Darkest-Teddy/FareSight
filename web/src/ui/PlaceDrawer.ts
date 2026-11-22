@@ -578,6 +578,12 @@ export class PlaceDrawer {
     this.modelDetails.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
 
+  /** Shows the send-to-device actions only while a headset or phone is paired. */
+  setPaired(paired: boolean) { this.root.dataset.paired = String(paired); }
+
+  /** Hides headset-only controls (passthrough table) on devices without WebXR. */
+  setXrCapable(capable: boolean) { this.root.dataset.xrCapable = String(capable); }
+
   hide() { this.root.hidden = true; }
 }
 
