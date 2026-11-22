@@ -4,7 +4,7 @@ import {
 import { api, type Alert, type Prediction, type Trip } from '../api/client';
 import { has3D, has3DDish, has3DRoom, isSplat } from '../data/preview3D';
 import { composeBriefingCard } from '../data/composeBriefing';
-import { loadPlaceDecision, nextTrainLabel, type BriefingCard, type BriefingMode, type PlaceDecision } from '../data/reviewBriefing';
+import { catalogReviewSnapshots, loadLiveReviews, loadPlaceDecision, nextTrainLabel, type BriefingCard, type BriefingMode, type PlaceDecision } from '../data/reviewBriefing';
 import { cravings, initialFilters, matchingPlaces, oneWayCost, type Craving, type Filters } from '../ui/state';
 import type { Seating } from '../ui/PlaceDrawer';
 import type { SceneMode } from '../xr';
@@ -235,6 +235,20 @@ export class LiveController {
         const details = await this.reviewDetails(place, venueStop, state.filters);
         return { result: { ok: true, details } };
       }
+      case 'get_live_reviews': {
+        if (!place) return { result: { ok: false, error: 'Unknown venue ID.' } };
+        const response = await loadLiveReviews(place.id).catch(() => ({
+          place_id: place.id, live: false, fetched_at: new Date().toISOString(),
+          ratings: place.details?.ratings ?? [], highlights: place.details?.review_highlights ?? [], reviews: [],
+        }));
+        const reviews = response.reviews.map((review) => ({ ...review, live: true, sample: false }));
+        if (response.live) {
+          const catalog = this.reviewSnapshots.get(place.id)?.filter(({ live }) => !live) ?? catalogReviewSnapshots(place);
+          this.reviewSnapshots.set(place.id, [...reviews.map(({ author, ...review }) =>
+            ({ ...review, author_label: author, created_at: response.fetched_at })), ...catalog]);
+        }
+        return { result: { ok: true, placeName: place.name, ...response, reviews } };
+      }
       case 'compare_places': {
         const ids: unknown[] = Array.isArray(args.placeIds) ? args.placeIds : [];
         if (ids.length < 2 || ids.length > 3 || new Set(ids).size !== ids.length) {
@@ -289,7 +303,7 @@ export class LiveController {
 
   private async reviewDetails(place: Place, stop: Stop, filters: Filters): Promise<PlaceDecision> {
     const details = await loadPlaceDecision(place, stop, filters);
-    this.reviewSnapshots.set(place.id, details.reviews);
+    this.reviewSnapshots.set(place.id, [...this.reviewSnapshots.get(place.id)?.filter(({ live }) => live) ?? [], ...details.reviews]);
     return details;
   }
 
