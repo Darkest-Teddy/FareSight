@@ -1,6 +1,6 @@
 import type { AuthStatus, AuthUser } from '@faresight/shared';
 import { auth } from '../api/discoverClient';
-import { button, element } from './dom';
+import { button, element, iconButton } from './dom';
 
 /**
  * Sign in and registration for contributors.
@@ -59,7 +59,7 @@ export class AccountModal {
     const passwordField = element('label', 'account-field');
     passwordField.append(element('span', '', 'Password'), this.passwordInput);
 
-    this.submitButton = button('Sign in', () => undefined, 'account-submit');
+    this.submitButton = button('Sign in', () => undefined, 'accent account-submit');
     this.submitButton.type = 'submit';
     this.errorLine.hidden = true;
     this.errorLine.setAttribute('role', 'alert');
@@ -73,7 +73,7 @@ export class AccountModal {
     this.switchButton = button('', () => this.setRegistering(!this.registering), 'account-switch');
     this.divider.append(element('span', '', 'or'));
 
-    const close = button('×', () => this.close(), 'account-close');
+    const close = iconButton('close', 'Close', () => this.close(), 'account-close');
     close.setAttribute('aria-label', 'Close');
 
     this.dialog.setAttribute('role', 'dialog');

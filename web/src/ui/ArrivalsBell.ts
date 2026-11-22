@@ -1,6 +1,6 @@
 import type { DiscoverArrival, NotificationFeed } from '@faresight/shared';
 import { discover } from '../api/discoverClient';
-import { button, element } from './dom';
+import { button, element, iconButton } from './dom';
 
 const TOAST_MS = 7000;
 
@@ -26,8 +26,9 @@ export class ArrivalsBell {
   private refreshTimer?: number;
 
   constructor(private readonly onOpenDiscover: () => void) {
-    this.button = button('🔔', () => this.toggle(), 'bell-button');
-    this.button.setAttribute('aria-label', 'New places');
+    // A line icon from the shared set, not an emoji: emoji render in their own colour and font,
+    // so they ignore the button's state and sit outside the design language.
+    this.button = iconButton('bell', 'New places', () => this.toggle(), 'bell-button');
     this.button.setAttribute('aria-expanded', 'false');
     this.badge.hidden = true;
     this.button.append(this.badge);

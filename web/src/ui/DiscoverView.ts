@@ -2,7 +2,7 @@ import {
   CATEGORY_CHIPS, type DiscoverPlace, type DiscoverSort, type DiscoverWindow,
 } from '@faresight/shared';
 import { discover } from '../api/discoverClient';
-import { button, element } from './dom';
+import { button, element, icon } from './dom';
 
 const SORTS: { id: DiscoverSort; label: string }[] = [
   { id: 'new', label: 'New' },
@@ -83,7 +83,7 @@ export class DiscoverView {
       }, 250);
     });
     const search = element('div', 'discover-search');
-    search.append(element('span', 'discover-search-icon', '⌕'), this.searchInput);
+    search.append(icon('search'), this.searchInput);
     header.append(heading, search);
 
     for (const { id, label } of CATEGORY_CHIPS) {
