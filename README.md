@@ -23,6 +23,14 @@
   - `POST /api/realtime/session` — Mints a short-lived `gpt-realtime` credential for the app’s GPT Live button, XR Voice key, and Quest A/X shortcut. The server loads `OPENAI_API_KEY` from the environment, and the browser connects over WebRTC using the `ash` voice.
   - `POST /api/pairing/create` & `WS /ws/pair/:code` — 4-digit Phone ↔ Quest headset handoff.
 - **`web/`** (`@faresight/web`) — PlayCanvas v2 + WebXR (`immersive-vr` & `immersive-ar` passthrough) 4-scene app with an animated map-to-station dive, 3D canvas panels, Web Audio synthesizer, responsive 2D Phone Companion, Upload & Pipeline Studio, Pairing, Moderation, and offline cache-first Service Worker (`/sw.js`).
+- **`contribute/`** (`@faresight/contribute`) — Mobile-first app for people who add the photos behind the 3D rooms and dishes, served from its own subdomain (`contribute.<domain>`). It has no 3D engine: the map sculpture and the station dioramas are drawn as flat, touch-driven SVG maps.
+  - **Network map**: the sculpture seen from above (same tubes, river and station positions), with the five stops as tappable nodes showing how many places are already in 3D. Tapping a stop dives into its neighborhood.
+  - **Station map**: the diorama's OSM footprints seen from above, with a brass pin per place and a swipeable card rail that stays in sync with the map.
+  - **Add photos**: pick the space (2–32 overlapping photos) or a dish (1 photo), shoot with the camera or pick from the library, then upload and start the Atlas / TRELLIS job. HEIC and oversized photos are re-encoded on the phone first.
+  - **360° scan**: for a space, the app can take the photos itself. The contributor turns on the spot while dots mark the directions still to capture; aiming at a dot and holding still takes that photo and pops the dot, and a round map shows what is left behind them. It needs the camera and motion sensors, which phones only open on HTTPS: `pnpm --filter @faresight/contribute dev:https` serves the app on `https://<your-LAN-IP>:5181` with a self-signed certificate.
+  - **My scans**: live progress of each job started on the phone, through to "In review". Publishing stays with an admin in the main app.
+  - Uploads use the existing API. The contributor enters the `ADMIN_PASSCODE` once as an invite code and it is kept on the device.
+  - `pnpm --filter @faresight/contribute data` rebuilds `contribute/src/data/` from `modeling/output/` and `modeling/osm-data.json`. Run it after regenerating the models.
 
 ## Quick Start
 
@@ -30,10 +38,11 @@
 pnpm install
 cp .env.example .env      # Optional: add OPENAI_API_KEY, GEMINI_API_KEY, WLT_API_KEY, REPLICATE_API_TOKEN, MBTA_API_KEY
 pnpm assets:sync          # Sync modeling/output/* into web/public/assets-demo/
-pnpm dev                  # Starts Fastify server (:3001) + Vite web app (:5173)
+pnpm dev                  # Starts Fastify server (:3001) + Vite web app (:5173) + Contribute app (:5180)
 ```
 
 - Open `http://localhost:5173` on desktop/mobile (or deploy over HTTPS for Meta Quest 3 WebXR).
+- Open `http://contribute.localhost:5180` for the Contribute app, or `http://<your-LAN-IP>:5180` from a phone on the same network. To deploy it, build `contribute/` (`pnpm --filter @faresight/contribute build`) and point the `contribute.` subdomain at `contribute/dist`. Either proxy `/api` and `/storage` to the Fastify server from that host, or build with `VITE_API_ORIGIN=https://<api-host>`.
 - An Atlas project API key needs `tasks.create`, `operations.read`, `assets.create`, and `assets.read`. Set `WLT_API_KEY` or leave it unset and use `WORLDLABS_API_KEY`. Override `WLT_API_BASE_URL` to use a different Atlas v2 endpoint.
 - Install a current `@playcanvas/splat-transform` CLI on the server's PATH to keep Atlas room previews within the 100,000-Gaussian conversion target. Large original SPZs can exceed the viewer's existing Gaussian safety limit.
 - Without API keys (`PIPELINE_MODE=auto`), the Upload 3D studio runs a labeled demo simulation through all pipeline stages (`Queued -> Generating -> Downloading -> Converting -> Needs review -> Ready`) and publishes into the live manifest.

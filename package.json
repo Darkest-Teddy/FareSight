@@ -7,7 +7,8 @@
   "scripts": {
     "dev:server": "pnpm --filter @faresight/shared build && pnpm --filter @faresight/server dev",
     "dev:web": "pnpm --filter @faresight/web dev",
-    "dev": "pnpm --filter @faresight/shared build && pnpm --parallel --filter @faresight/server --filter @faresight/web dev",
+    "dev:contribute": "pnpm --filter @faresight/contribute dev",
+    "dev": "pnpm --filter @faresight/shared build && pnpm --parallel --filter @faresight/server --filter @faresight/web --filter @faresight/contribute dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm --filter @faresight/shared build && pnpm -r typecheck",
     "assets:sync": "mkdir -p web/public/assets-demo && cp -R modeling/output/. web/public/assets-demo/"

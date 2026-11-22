@@ -6,6 +6,7 @@ server/data/*.db*
 server/storage/uploads
 server/storage/outputs
 .DS_Store
+contribute/.cert
 
 # Splat experiment binaries (photos, PLY/SPZ/SOG, renders)
 experiments/**/sources/
