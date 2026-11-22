@@ -208,9 +208,8 @@ button.quiet:is(.menu-toggle, .sidebar-back, .sidebar-home):hover:not(:disabled)
   height: .4rem;
   transform: translateY(-50%);
   border-radius: 50%;
-  background: var(--muted);
+  background: var(--price);
 }
-.service-status[data-source=live]::after { background: var(--positive); }
 .map-controls { display: contents; }
 .map-reset { display: none; }
 .station-board {
@@ -590,13 +589,9 @@ button.quiet:is(.menu-toggle, .sidebar-back, .sidebar-home):hover:not(:disabled)
 @keyframes sidebar-in { from { opacity: 0; transform: translateX(-16px); } }
 @keyframes controls-in { from { opacity: 0; transform: translateY(-8px); } }
 @keyframes notice-in { from { opacity: 0; transform: translate(-50%, -8px); } }
-@keyframes status-pulse { 50% { opacity: .55; } }
 
 .command-menu, .voice-dock, .modal[open] { animation: surface-in 180ms var(--ease-out); }
 .notice:not([hidden]) { animation: notice-in 180ms var(--ease-out); }
-@media (prefers-reduced-motion: no-preference) {
-  .service-status[data-source=live]::after { animation: status-pulse 2.4s ease-in-out infinite; }
-}
 
 @media (min-width: 769px) {
   .app-shell {

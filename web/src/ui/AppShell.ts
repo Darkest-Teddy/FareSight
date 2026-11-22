@@ -444,6 +444,8 @@ export class AppShell {
         : this.vehicleSource === 'simulated' ? 'Simulated trains'
           : this.vehicleSource === 'unavailable' ? 'Trains unavailable' : 'Checking MBTA';
     this.status.dataset.source = this.catalogState === 'offline' ? 'offline' : this.vehicleSource ?? 'pending';
+    // Live data is the normal case and needs no badge; the chip only appears when something is degraded.
+    this.status.hidden = this.catalogState !== 'offline' && (this.vehicleSource === 'live' || this.vehicleSource === undefined);
   }
 
   private async loadCatalog() {
