@@ -1,13 +1,13 @@
 # FareSight (BostonHacks 2026)
 
-**Try it before you ride:** explore Boston food spots, study cafés, karaoke suites, and live venues through the MBTA in 3D/WebXR on Meta Quest 3 (and 2D on any phone or laptop), filtered by craving, total budget including T fare, start stop, and group size.
+**Try it before you ride:** explore Boston food spots, study cafés and live venues through the MBTA in 3D/WebXR on Meta Quest 3 (and 2D on any phone or laptop), filtered by craving, total budget including T fare, start stop, and group size.
 
 ## Architecture
 
 - **`modeling/`** — Deterministic procedural glTF 2.0 (`.glb`) and binary 3D Gaussian Splat (`.ply`) generators:
   - **Boston Map Sculpture** (`boston-map-sculpture.glb`): a grounded base slab with an inlaid Charles River and street grid, MBTA Green (B/C/D/E), Red, Orange, and Blue tubes stacked in three shallow layers, white on-line stop markers, transfer posts at interchanges, raised drums for the five explorable stations, and `mbta-train-capsule.glb`.
   - **5 Floating-Island City Segment Dioramas** (`segment-place-*.glb`): BU Central, Packard's Corner, Kenmore, Harvard Square, and Chinatown, each an OpenStreetMap city block with Boston landmarks on a low-poly island of turf, earth and rock (`modeling/segment-island.mjs`).
-  - **6 Demo 3DGS `.ply` Assets**: Ramen house, karaoke suite, study café, tonkotsu ramen (`24 cm`), katsu curry (`26 cm`), and matcha tiramisu (`18 cm`), plus `table-pedestal.glb`.
+  - **2 Demo 3DGS `.ply` Assets**: Study café and matcha tiramisu (`18 cm`), plus `table-pedestal.glb`.
 - **`shared/`** (`@faresight/shared`) — Shared TypeScript domain types, Boston flat-earth sculpture projection, MBTA fare constants (`$2.40` subway / `$1.70` bus), precomputed ride times, and trip estimate math.
 - **`server/`** (`@faresight/server`) — Node + TypeScript + Fastify + built-in SQLite (`node:sqlite`) + persistent resumable job worker:
   - `POST /api/uploads` — Multipart/base64 image upload, orientation/dimension parsing, SHA-256 deduplication, original archival.
@@ -67,7 +67,7 @@ docker compose up -d
 # Copy the commented capture values from .env.example into .env, then:
 pnpm --filter @faresight/server buckets    # Create both buckets, set CORS and public read on the splat bucket
 pnpm --filter @faresight/server migrate    # Optional: the server also applies pending migrations when it starts
-node scripts/capture_flow.mjs bu-ramen-01 photo1.jpg photo2.jpg   # One capture through a running server
+node scripts/capture_flow.mjs harvard-cafe-01 photo1.jpg photo2.jpg   # One capture through a running server
 ```
 
 For production, use the pooled Tiger Data URL as `DATABASE_URL` and the direct one as `DATABASE_URL_DIRECT` (`LISTEN` does not work through a transaction pooler). Point `VULTR_S3_ENDPOINT` at the bucket's region, for example `https://ewr1.vultrobjects.com`, run `buckets` once, and set `APP_ORIGINS` to the app origins that may upload. Put a CDN in front of the splat bucket by setting `CDN_BASE_URL`. `pnpm --filter @faresight/server migrate down` reverts the last migration.

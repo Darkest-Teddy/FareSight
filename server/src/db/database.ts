@@ -114,7 +114,7 @@ export class Store {
           continue;
         }
         const {
-          name, vibe, hours, details, lat, lon, walk_from_stop_m, stop_id,
+          name, vibe, hours, details, lat, lon, walk_from_stop_m, stop_id, pin_index,
           typical_price, cravings, family_friendly, evening_venue,
         } = place;
         const seedDishIds = new Set(place.dishes.map(({ id }) => id));
@@ -138,7 +138,7 @@ export class Store {
         };
         const hasUploadedPreview = !seedRoom || stored.dishes.some(({ asset_id }) => !isSeedAsset(asset_id));
         this.put('places', {
-          ...stored, name, vibe, hours, details, lat, lon, walk_from_stop_m, stop_id,
+          ...stored, name, vibe, hours, details, lat, lon, walk_from_stop_m, stop_id, pin_index,
           typical_price, cravings, family_friendly, evening_venue,
           rooms: refreshPreviews(place.rooms, stored.rooms ?? [], true),
           seat_views: refreshPreviews(place.seat_views, stored.seat_views ?? []),
@@ -148,8 +148,8 @@ export class Store {
           price_checked_on: hasUploadedPreview ? stored.price_checked_on : place.price_checked_on,
         });
       }
-      // Venues dropped from the catalog because they sit outside their station's model.
-      for (const id of ['allston-bostongoods-01', 'allston-coreanos-01', 'allston-brightonmusic-01']) {
+      // Retire previously seeded venues while preserving the original uploaded files.
+      for (const id of ['allston-bostongoods-01', 'allston-coreanos-01', 'allston-brightonmusic-01', 'bu-ramen-01', 'allston-karaoke-01']) {
         this.sqlite.prepare('DELETE FROM upload_places WHERE place_id = ?').run(id);
         this.sqlite.prepare("DELETE FROM reviews WHERE json_extract(data, '$.place_id') = ?").run(id);
         this.sqlite.prepare('DELETE FROM places WHERE id = ?').run(id);

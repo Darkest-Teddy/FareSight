@@ -18,7 +18,7 @@ import { frameKey, uploadTarget } from '../dist/services/captureKeys.js';
 import { createObjectStorage } from '../dist/services/objectStorage.js';
 import { upgradeSpz } from '../dist/services/spzUpgrade.js';
 
-const placeId = 'bu-ramen-01';
+const placeId = 'harvard-cafe-01';
 const captures = {
   databaseUrl: process.env.TEST_DATABASE_URL ?? 'postgres://faresight:faresight@localhost:54329/faresight',
   endpoint: process.env.TEST_S3_ENDPOINT ?? 'http://localhost:9009',
@@ -66,7 +66,7 @@ async function setup(t, overrides = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'faresight-capture-'));
   const demo = join(dir, 'demo');
   await mkdir(demo);
-  await writeFile(join(demo, 'room-ramen-house.ply'), fixturePly());
+  await writeFile(join(demo, 'room-study-cafe.ply'), fixturePly());
   const config = {
     ...getConfig(), database: join(dir, 'faresight.db'), uploads: join(dir, 'uploads'), outputs: join(dir, 'outputs'),
     demoAssets: [demo], host: '127.0.0.1', port: 0, mode: 'demo', adminPasscode: 'test-passcode',

@@ -797,7 +797,7 @@ export class LiveController {
       return {
         result: {
           ok: false,
-          error: `Could not find a dish matching "${dishQuery}". Available 3D dishes include Signature Tonkotsu Ramen, Crispy Pork Katsu Curry, and Ceremonial Matcha Tiramisu + Latte.`,
+          error: `Could not find a dish matching "${dishQuery}". Available 3D dishes include Carnitas Burrito, Iced Caramel Macchiato, and Ceremonial Matcha Tiramisu + Latte.`,
         },
         actionLabel: `Dish not found: ${dishQuery}`,
       };
@@ -991,9 +991,9 @@ export class LiveController {
     }
     state = this.app.getState();
     if (!state.place) {
-      const karaoke = state.places.find((p) => p.rooms.length > 0);
-      if (!karaoke) return { result: { ok: false, error: 'Open a venue with a measured room first.' }, actionLabel: 'No room open' };
-      await this.app.showVenue(karaoke, { inside: true });
+      const venueWithRooms = state.places.find((p) => p.rooms.length > 0);
+      if (!venueWithRooms) return { result: { ok: false, error: 'Open a venue with a measured room first.' }, actionLabel: 'No room open' };
+      await this.app.showVenue(venueWithRooms, { inside: true });
       state = this.app.getState();
     }
 

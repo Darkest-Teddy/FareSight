@@ -159,7 +159,7 @@ export class LiveVoiceDock {
   private renderEmptyFeed(): void {
     this.hasTranscript = false;
     this.feed.replaceChildren(
-      element('p', 'message', 'Try “Open Tsuru Tonkotsu Ramen” or “Show me two 3D dishes to compare.”'),
+      element('p', 'message', 'Try “Open Shu Daxia Hot Pot” or “Show me two 3D dishes to compare.”'),
     );
   }
 }

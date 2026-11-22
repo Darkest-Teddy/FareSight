@@ -174,7 +174,7 @@ export const FARESIGHT_LIVE_TOOLS: LiveFunctionTool[] = [
     parameters: {
       type: 'object',
       properties: {
-        place: { type: 'string', description: 'Place ID (e.g. bu-ramen-01, allston-karaoke-01, harvard-cafe-01) or place name.' },
+        place: { type: 'string', description: 'Place ID (e.g. bu-starbucks-01, kenmore-jefes-01, kenmore-shudaxia-01, harvard-cafe-01) or place name.' },
         step_inside: { type: 'boolean', description: 'Whether to enter the 3D room splat immediately when available. Default true.' },
         highlight_dish: { type: 'string', description: 'Optional dish ID or name to highlight on the 3D menu book and drawer.' },
       },
@@ -204,7 +204,7 @@ export const FARESIGHT_LIVE_TOOLS: LiveFunctionTool[] = [
     parameters: {
       type: 'object',
       properties: {
-        dish: { type: 'string', description: 'Dish ID (e.g. bu-ramen-tonkotsu, bu-ramen-katsu, harvard-matcha-tiramisu) or dish name.' },
+        dish: { type: 'string', description: 'Dish ID (e.g. bu-starbucks-macchiato, kenmore-jefes-burrito, harvard-matcha-tiramisu) or dish name.' },
         place: { type: 'string', description: 'Optional place ID or name if disambiguation is needed.' },
         compare_dish: { type: 'string', description: 'Optional second published 3D dish ID or name from any venue.' },
         compare_place: { type: 'string', description: 'Optional exact venue ID for the comparison dish.' },
@@ -270,7 +270,7 @@ export const FARESIGHT_LIVE_TOOLS: LiveFunctionTool[] = [
     type: 'function',
     name: 'set_will_we_fit',
     description:
-      'Toggle and configure the 3D "Will we fit?" floor-space capacity visualizer inside a venue room (such as Echo Box Karaoke Lounge), updating group size and seated/standing layout.',
+      'Toggle and configure the 3D "Will we fit?" floor-space capacity visualizer inside a venue room with measured floor dimensions, updating group size and seated/standing layout.',
     parameters: {
       type: 'object',
       properties: {
@@ -345,7 +345,7 @@ export const FARESIGHT_LIVE_TOOLS: LiveFunctionTool[] = [
 
 export const CRAVING_FILTERS = [
   ['all', 'All'], ['ramen', 'Ramen & Noodles'], ['cheap', 'Cheap Eats'], ['study', 'Study Cafes'],
-  ['groups', 'Karaoke & Groups'], ['music', 'Live Music'], ['shops', 'Shops & Markets'], ['parks', 'Parks & Views'],
+  ['groups', 'Group Dining'], ['music', 'Live Music'], ['shops', 'Shops & Markets'], ['parks', 'Parks & Views'],
 ] as const;
 
 const stop = { type: 'string', enum: STOPS.map(({ stop_id }) => stop_id) };

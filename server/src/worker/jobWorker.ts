@@ -21,15 +21,7 @@ const progress = { queued: 0, generating: 15, downloading: 65, converting: 85, n
 const outputUrl = (path: string) => `/storage/outputs/${basename(path)}`;
 
 function demoFilename(job: JobRecord): string {
-  if (job.kind === 'room') {
-    if (job.place_id === 'allston-karaoke-01') return 'room-karaoke-suite.ply';
-    if (job.place_id === 'harvard-cafe-01') return 'room-study-cafe.ply';
-    return 'room-ramen-house.ply';
-  }
-  const dish = `${job.dish_id ?? ''} ${job.dish_name ?? ''}`.toLowerCase();
-  if (/katsu|curry/.test(dish)) return 'dish-katsu-curry.ply';
-  if (/matcha|tiramisu/.test(dish)) return 'dish-matcha-tiramisu.ply';
-  return 'dish-tonkotsu-ramen.ply';
+  return job.kind === 'room' ? 'room-study-cafe.ply' : 'dish-matcha-tiramisu.ply';
 }
 
 function description(job: JobRecord, live: string): string {

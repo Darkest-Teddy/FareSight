@@ -14,7 +14,7 @@ import { assetBase, child, clamp, damp, ModelLibrary, smooth } from '../xr/scene
  */
 
 export const STOP_ID = 'place-bucen';
-export const PLACE_ID = 'bu-ramen-01';
+export const PLACE_ID = 'bu-starbucks-01';
 
 const mapHeight = 1.0;
 // Same constants as the in-app dive, so the landing page shows the real transition.
@@ -39,7 +39,7 @@ interface Shot {
 export const DIVE: [number, number] = [0.345, 0.585];
 /** Past this point the station plaques dissolve, clearing the view of the marker below. */
 export const CLEAR_AT = 0.305;
-/** Over this stretch every flag but the ramen counter's folds back into its roof. */
+/** Over this stretch every flag but Starbucks's folds back into its roof. */
 export const FOCUS: [number, number] = [0.775, 0.835];
 export const ROOM_START = 0.92;
 const PIN_REVEAL = [0.557, 0.635] as const;
@@ -56,7 +56,7 @@ const shots: Shot[] = [
   // The neighbourhood grows out of the marker; settle beside it and walk a quarter turn.
   { at: 0.585, look: 'stage', yaw: -0.52, pitch: 0.50, distance: 1.86, shiftX: 0.27, shiftY: 0 },
   { at: 0.74, look: 'stage', yaw: -0.02, pitch: 0.44, distance: 1.70, shiftX: 0.27, shiftY: 0 },
-  // One flag left standing: the ramen counter, seen from across the avenue.
+  // One flag left standing: Starbucks, seen from across the avenue.
   { at: 0.88, look: 'pin', yaw: 0.72, pitch: 0.60, distance: 0.72, shiftX: -0.26, shiftY: -0.09 },
   { at: 0.925, look: 'pin', yaw: 0.80, pitch: 0.54, distance: 0.62, shiftX: -0.26, shiftY: -0.09 },
   // Slide down the stem to the front door.
@@ -138,7 +138,7 @@ export class IntroScene {
     this.models = new ModelLibrary(app, log);
     this.reveal = new JarvisReveal(app.graphicsDevice, this.reducedMotion);
     this.splats = new SplatLoader(app, log, this.reducedMotion);
-    this.roomRoot = child(app.root, 'Tsuru Ramen interior', undefined, app);
+    this.roomRoot = child(app.root, 'Starbucks (Warren Towers) interior', undefined, app);
     this.roomRoot.enabled = false;
     const manifest = featured && offlineManifest(featured);
     this.roomSpawn.set(...(manifest?.spawn_point ?? [0, 1.55, 2]));
@@ -258,7 +258,7 @@ export class IntroScene {
     return true;
   }
 
-  /** The ramen counter's pin and its neighbours, once the neighbourhood has built them. */
+  /** The Starbucks's pin and its neighbours, once the neighbourhood has built them. */
   private findPins(): void {
     if (this.pin) return;
     const named = (name: string) => this.station.root.findByName(name) as pc.Entity | null;

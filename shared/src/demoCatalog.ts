@@ -18,7 +18,6 @@ type Listing = [
 
 const listings: Listing[][] = [
   [
-    ['bu-ramen-01', 'Tsuru Tonkotsu Ramen', 'restaurant', 42.35015, -71.10665, 85, 14.5, '11:30', '22:00', ['ramen', 'katsu', 'noodles'], 'Small ramen counter with table seating along the wall.', true, true],
     ['bu-pavement-01', 'Pavement Coffeehouse', 'study', 42.34985, -71.10721, 50, 9, '07:00', '19:00', ['coffee', 'bagels', 'study'], 'Bagels between lectures and a library nook for reading.', true],
     ['bu-nudpob-01', 'Nud Pob Thai Cuisine', 'restaurant', 42.34986, -71.10731, 60, 17, '11:30', '21:30', ['thai', 'noodles', 'curry'], 'Campus standby for pad see ew and Thai curries.', true, true],
     ['bu-halal-01', 'The Halal Shack at the GSU', 'restaurant', 42.35100, -71.10917, 225, 13, '11:00', '20:00', ['halal', 'rice bowls', 'shawarma'], 'Halal rice bowls and wraps in the George Sherman Union food hall.', true],
@@ -27,7 +26,6 @@ const listings: Listing[][] = [
     ['bu-starbucks-01', 'Starbucks (Warren Towers)', 'study', 42.34908, -71.10358, 290, 7.5, '07:00', '20:00', ['coffee', 'study', 'espresso'], 'Campus coffeehouse at Warren Towers on Commonwealth Ave with espresso bar and study seating.', true],
   ],
   [
-    ['allston-karaoke-01', 'Echo Box Karaoke Lounge', 'event_space', 42.35183, -71.12428, 60, 48, '16:00', '01:00', ['karaoke', 'private room', 'groups'], 'Private karaoke suite with a sofa wall and an open floor.', true, true],
     ['allston-brownsugar-01', 'Brown Sugar Cafe', 'restaurant', 42.35215, -71.12196, 280, 20, '11:30', '22:00', ['thai', 'curry', 'fried rice'], 'Shared Thai plates in a lively dining room.', true, true],
     ['allston-groovythrifty-01', 'Groovy Thrifty', 'shop', 42.35237, -71.12829, 290, 14, '12:00', '18:00', ['thrift', 'vintage', 'clothing'], 'Secondhand and vintage racks on Brighton Avenue.', true],
     ['allston-super88-01', 'Super 88 Market & Food Court', 'market', 42.35254, -71.12539, 100, 13, '09:00', '21:00', ['dumplings', 'boba', 'groceries'], 'Grocery aisles and a food court for groups with different cravings.', true],
@@ -94,13 +92,13 @@ function addDemoAsset(input: DemoAssetInput): Asset {
   return asset;
 }
 
-function flagship(id: string, roomFile: string, spawn_point: Vector3, measured = false): Place {
+function flagship(id: string, roomFile: string, spawn_point: Vector3): Place {
   const place = byId(id);
   place.seed_status = 'demo_venue';
   place.room_asset_id = addDemoAsset({
     id: `${id}-room`, kind: 'room', file: roomFile, spawn_point,
-    scale_status: measured ? 'measured' : 'approximate',
-    scale_label: measured ? 'Actual size (4.2 m × 3.4 m)' : 'Approximate size',
+    scale_status: 'approximate',
+    scale_label: 'Approximate size',
   }).id;
   return place;
 }
@@ -115,16 +113,7 @@ function atlasRoom(id: string, file: string, gaussian_count: number): void {
   }).id;
 }
 
-const ramen = flagship('bu-ramen-01', 'room-ramen-house.ply', [0, 1.55, 2]);
 const cafe = flagship('harvard-cafe-01', 'room-study-cafe.ply', [0, 1.55, 2.1]);
-const karaoke = flagship('allston-karaoke-01', 'room-karaoke-suite.ply', [0, 1.55, 2], true);
-karaoke.stated_capacity = 14;
-karaoke.rooms = (['seated', 'standing'] as const).map((seating) => ({
-  id: `echo-box-${seating}`, place_id: karaoke.id, name: `Private suite (${seating})`,
-  room_type: 'karaoke', stated_capacity: 14, floor_width_m: 4.2, floor_depth_m: 3.4,
-  seating, price: 48, price_unit: 'hour', asset_id: karaoke.room_asset_id,
-}));
-
 atlasRoom('kenmore-jefes-01', 'room-eljefes-atlas.sog', 344_961);
 atlasRoom('kenmore-shudaxia-01', 'room-shudaxia-atlas.sog', 349_370);
 atlasRoom('bu-starbucks-01', 'room-starbucks-atlas.sog', 349_990);
@@ -148,10 +137,6 @@ function addDish(
   place.dishes.push({ id, place_id: place.id, name, price, plate_diameter_m: diameter, portion_note, asset_id: asset.id });
 }
 
-addDish(ramen, 'bu-ramen-tonkotsu', 'Signature Tonkotsu Ramen', 14.5, 0.24, 'dish-tonkotsu-ramen.ply',
-  'One 24 cm bowl with pork, noodles and egg.', { vessel: 'bowl' });
-addDish(ramen, 'bu-ramen-katsu', 'Crispy Pork Katsu Curry', 15.75, 0.26, 'dish-katsu-curry.ply',
-  'One cutlet with rice and curry on a 26 cm plate.', { vessel: 'plate' });
 addDish(cafe, 'harvard-matcha-tiramisu', 'Ceremonial Matcha Tiramisu + Latte', 9.25, 0.18,
   'dish-matcha-tiramisu.ply', 'One slice of matcha tiramisu and a latte.', { vessel: 'plate' });
 

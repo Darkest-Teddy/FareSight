@@ -22,7 +22,7 @@ test('researched hours and details reach the catalog and refresh stale stored pl
   assert.deepEqual(art.hours.tue, ['10:00', '17:00']);
   assert.equal(art.details.hours_verified, true);
   assert.ok(art.details.ratings.length > 0 && art.details.review_highlights.length > 0);
-  assert.equal((await app.inject('/api/restaurants/bu-ramen-01')).json().details, undefined);
+  assert.equal((await app.inject('/api/restaurants/harvard-cafe-01')).json().details, undefined);
 
   // Simulate a database written before facts existed: drop details and restore old uniform hours.
   await app.close();

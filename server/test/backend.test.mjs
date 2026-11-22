@@ -19,11 +19,11 @@ import { findDemoAsset } from '../dist/services/demoAssets.js';
 import { inspectSplat } from '../dist/services/splatProcessor.js';
 import { fetchLiveReviews } from '../dist/services/liveReviews.js';
 
-const room = 'room-ramen-house.ply';
-const dish = 'dish-tonkotsu-ramen.ply';
+const room = 'room-study-cafe.ply';
+const dish = 'dish-matcha-tiramisu.ply';
 const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64');
 const secondImage = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
-const placeId = 'bu-ramen-01';
+const placeId = 'harvard-cafe-01';
 
 function fixturePly() {
   const fields = ['x', 'y', 'z', 'f_dc_0', 'f_dc_1', 'f_dc_2', 'opacity', 'scale_0', 'scale_1', 'scale_2', 'rot_0', 'rot_1', 'rot_2', 'rot_3'];
@@ -123,7 +123,7 @@ test('HTTP catalog and live MBTA proxy plus two-way WebSocket pairing', { timeou
   const [places, stops, manifest] = await Promise.all([
     server.request('/api/restaurants'), server.request('/api/stops'), server.request(`/api/restaurants/${placeId}/manifest`),
   ]);
-  assert.equal(places.length, 30);
+  assert.equal(places.length, 28);
   assert.equal(stops.length, 5);
   for (const stop of stops) {
     const pins = places.filter((place) => place.stop_id === stop.stop_id).map((place) => place.pin_index);
@@ -131,10 +131,10 @@ test('HTTP catalog and live MBTA proxy plus two-way WebSocket pairing', { timeou
     assert.equal(new Set(pins).size, pins.length);
     assert(pins.every((pin) => pin >= 0 && pin <= 7));
   }
-  assert.equal(manifest.room_asset.url, '/assets-demo/room-ramen-house.ply');
+  assert.equal(manifest.room_asset.url, '/assets-demo/room-study-cafe.ply');
   assert.equal(manifest.room_asset.provenance, 'demo_splat');
-  assert.deepEqual(manifest.spawn_point, [0, 1.55, 2]);
-  assert.deepEqual(manifest.menu_items.map(({ dish, dish_asset }) => [dish.price, dish_asset.plate_diameter_m]), [[14.5, 0.24], [15.75, 0.26]]);
+  assert.deepEqual(manifest.spawn_point, [0, 1.55, 2.1]);
+  assert.deepEqual(manifest.menu_items.map(({ dish, dish_asset }) => [dish.price, dish_asset.plate_diameter_m]), [[9.25, 0.18]]);
   for (const asset of [manifest.room_asset, ...manifest.menu_items.map(({ dish_asset }) => dish_asset)]) {
     if (!findDemoAsset(server.config, asset.url.split('/').at(-1))) continue;
     const file = await fetch(server.origin() + asset.url);
@@ -145,18 +145,18 @@ test('HTTP catalog and live MBTA proxy plus two-way WebSocket pairing', { timeou
   const [vehicles, predictions, alerts, schedules, trip] = await Promise.all([
     server.request('/api/mbta/vehicles'), server.request('/api/mbta/predictions?stop=place-bucen'),
     server.request('/api/mbta/alerts'), server.request('/api/mbta/schedules?stop=place-bucen'),
-    server.request('/api/mbta/trip?from=place-kencl&to=place-bucen&walkToVenueM=80&venueLat=42.35015&venueLon=-71.10665'),
+    server.request('/api/mbta/trip?from=place-kencl&to=place-bucen&walkToVenueM=290&venueLat=42.34908&venueLon=-71.10358'),
   ]);
   assert(vehicles.vehicles.length > 0);
   if (process.env.FARESIGHT_TEST_LIVE_MBTA !== '1') assert.equal(vehicles.source, 'live');
   assert(Array.isArray(predictions.predictions));
   assert(Array.isArray(alerts.alerts));
   assert(schedules.schedules.every((item) => item.last_trip));
-  assert.equal(trip.walk_to_venue_min, 1.3);
+  assert.equal(trip.walk_to_venue_min, 290 * 1.3 / 80);
   assert.equal(trip.fare, 2.4);
   const plannerParams = new URL(trip.planner_url).searchParams;
   assert.equal(plannerParams.get('plan[from_stop_id]'), 'place-kencl');
-  assert.equal(plannerParams.get('plan[to_latitude]'), '42.35015');
+  assert.equal(plannerParams.get('plan[to_latitude]'), '42.34908');
   t.diagnostic(`MBTA vehicles=${vehicles.source} (${vehicles.vehicles.length}), predictions=${predictions.source} (${predictions.predictions.length}), alerts=${alerts.source}, schedules=${schedules.source}`);
 
   const { code } = await server.request('/api/pairing/create', { method: 'POST', status: 201 });
@@ -174,7 +174,7 @@ test('HTTP catalog and live MBTA proxy plus two-way WebSocket pairing', { timeou
     assert.deepEqual(await headset.message(), { type: 'peer_joined', peers: 2 });
     assert.deepEqual(await paired, { type: 'peer_joined', peers: 2 });
 
-    for (const payload of [{ type: 'open_place', place_id: placeId }, { type: 'open_dish', place_id: placeId, dish_id: 'bu-ramen-tonkotsu' }, { type: 'send_trip', trip }, { type: 'sync_filters', filters: { family_friendly: true } }]) {
+    for (const payload of [{ type: 'open_place', place_id: placeId }, { type: 'open_dish', place_id: placeId, dish_id: 'harvard-matcha-tiramisu' }, { type: 'send_trip', trip }, { type: 'sync_filters', filters: { family_friendly: true } }]) {
       const source = payload.type === 'open_place' ? headset : phone;
       const destination = source === phone ? headset : phone;
       const incoming = destination.message();
@@ -216,41 +216,44 @@ test('catalog startup refreshes bundled SOG previews and preserves uploaded asse
       { ...beef, name: 'Marbled Beef Mountain', price: null }] });
     const starbucks = getPlace('bu-starbucks-01');
     putPlace({ ...starbucks, dishes: starbucks.dishes.slice(0, 2) });
-    const ramen = getPlace(placeId);
-    const [tonkotsu, katsu] = ramen.dishes;
-    putPlace({ ...ramen, room_asset_id: 'uploaded-room', dishes: [
-      { ...tonkotsu, price: 13 }, { ...katsu, name: 'Custom curry' },
-      { ...tonkotsu, id: 'obsolete-demo-dish', asset_id: 'obsolete-demo-preview' },
-      { ...tonkotsu, id: 'uploaded-dish', name: 'Uploaded appetizer', asset_id: 'uploaded-discrete-preview' },
+    const cafe = getPlace(placeId);
+    const [tiramisu] = cafe.dishes;
+    putPlace({ ...cafe, room_asset_id: 'uploaded-room', dishes: [
+      { ...tiramisu, price: 13 },
+      { ...tiramisu, id: 'obsolete-demo-dish', asset_id: 'obsolete-demo-preview' },
+      { ...tiramisu, id: 'uploaded-dish', name: 'Uploaded appetizer', asset_id: 'uploaded-discrete-preview' },
     ] });
-    const retired = { ...ramen, id: 'allston-bostongoods-01' };
-    db.prepare('INSERT INTO places VALUES (?, ?)').run(retired.id, JSON.stringify(retired));
+    const retired = { ...cafe, id: 'bu-ramen-01' };
+    const insertRetired = db.prepare('INSERT INTO places VALUES (?, ?)');
+    insertRetired.run(retired.id, JSON.stringify(retired));
+    const retiredKaraoke = { ...retired, id: 'allston-karaoke-01' };
+    insertRetired.run(retiredKaraoke.id, JSON.stringify(retiredKaraoke));
     db.prepare('INSERT INTO uploads (id, data) VALUES (?, ?)').run('retired-image', JSON.stringify({ id: 'retired-image', sha256: 'retired-hash' }));
     db.prepare('INSERT INTO upload_places VALUES (?, ?)').run('retired-image', retired.id);
     db.prepare('INSERT INTO reviews VALUES (?, ?)').run('retired-review', JSON.stringify({ id: 'retired-review', place_id: retired.id }));
-    putPlace({ ...getPlace(placeId), stop_id: 'old-stop', rooms: [], seat_views: [], typical_price: 999,
-      cravings: ['stale'], family_friendly: !ramen.family_friendly, evening_venue: !ramen.evening_venue,
+    putPlace({ ...getPlace(placeId), stop_id: 'old-stop', pin_index: 99, rooms: [], seat_views: [], typical_price: 999,
+      cravings: ['stale'], family_friendly: !cafe.family_friendly, evening_venue: !cafe.evening_venue,
       reviews: [{ id: 'runtime-review', author: 'Diner', rating: 3, text: 'Good', created_at: '' }] });
     const putAsset = (asset) => db.prepare('INSERT OR REPLACE INTO assets VALUES (?, ?)').run(asset.id, JSON.stringify(asset));
     const asset = (id) => demoAssets.find((asset) => asset.id === id);
-    putAsset({ ...asset('kenmore-jefes-01-room'), format: 'ply', url: '/assets-demo/room-ramen-house.ply', gaussian_count: 0 });
+    putAsset({ ...asset('kenmore-jefes-01-room'), format: 'ply', url: '/assets-demo/room-study-cafe.ply', gaussian_count: 0 });
     putAsset({ ...asset('kenmore-shudaxia-01-room'), gaussian_count: 349_369 });
     putAsset({ ...asset('bu-starbucks-macchiato-splat'), gaussian_count: 0 });
-    putAsset({ ...asset(tonkotsu.asset_id), id: 'obsolete-demo-preview' });
-    putAsset({ ...asset(katsu.asset_id), backend: 'trellis', format: 'sog', url: '/storage/outputs/custom-curry.sog' });
-    putAsset({ ...asset(katsu.asset_id), id: 'uploaded-discrete-preview', backend: 'trellis', format: 'sog', url: '/storage/outputs/appetizer.sog' });
-    putAsset({ ...asset(ramen.room_asset_id), id: 'uploaded-room', backend: 'atlas', format: 'sog', url: '/storage/outputs/uploaded-room.sog' });
+    putAsset({ ...asset(tiramisu.asset_id), id: 'obsolete-demo-preview' });
+    putAsset({ ...asset(tiramisu.asset_id), id: 'uploaded-discrete-preview', backend: 'trellis', format: 'sog', url: '/storage/outputs/appetizer.sog' });
+    putAsset({ ...asset(cafe.room_asset_id), id: 'uploaded-room', backend: 'atlas', format: 'sog', url: '/storage/outputs/uploaded-room.sog' });
   } finally {
     db.close();
   }
   await server.start({ worker: false });
   const results = await Promise.all([placeId, 'kenmore-jefes-01', 'kenmore-shudaxia-01', 'bu-starbucks-01']
     .map((id) => server.request(`/api/restaurants/${id}/manifest`)));
-  const [ramen, jefes, shu, starbucks] = results;
-  await server.request('/api/restaurants/allston-bostongoods-01', { status: 404 });
+  const [cafe, jefes, shu, starbucks] = results;
+  await server.request('/api/restaurants/bu-ramen-01', { status: 404 });
+  await server.request('/api/restaurants/allston-karaoke-01', { status: 404 });
   const restartedDb = new DatabaseSync(server.config.database);
   try {
-    assert.equal(restartedDb.prepare('SELECT * FROM upload_places WHERE place_id = ?').get('allston-bostongoods-01'), undefined);
+    assert.equal(restartedDb.prepare('SELECT * FROM upload_places WHERE place_id = ?').get('bu-ramen-01'), undefined);
     assert.equal(restartedDb.prepare('SELECT * FROM reviews WHERE id = ?').get('retired-review'), undefined);
     assert.ok(restartedDb.prepare('SELECT * FROM uploads WHERE id = ?').get('retired-image'));
   } finally {
@@ -258,19 +261,17 @@ test('catalog startup refreshes bundled SOG previews and preserves uploaded asse
   }
   const refreshed = await server.request(`/api/restaurants/${placeId}`);
   const seed = demoPlaces.find(({ id }) => id === placeId);
-  for (const field of ['stop_id', 'typical_price', 'cravings', 'family_friendly', 'evening_venue', 'seat_views']) {
+  for (const field of ['stop_id', 'pin_index', 'typical_price', 'cravings', 'family_friendly', 'evening_venue', 'seat_views']) {
     assert.deepEqual(refreshed[field], seed[field]);
   }
   assert.equal(refreshed.reviews.find(({ id }) => id === 'runtime-review').rating, 3);
   assert.deepEqual(refreshed.rooms.map(({ id }) => id), seed.rooms.map(({ id }) => id));
-  assert.equal(ramen.room_asset.id, 'uploaded-room');
-  assert.equal(ramen.menu_items.length, 3);
-  assert.equal(ramen.menu_items[0].dish_asset.url, '/assets-demo/dish-tonkotsu-ramen.ply');
-  assert.equal(ramen.menu_items[0].dish.price, 14.5);
-  assert.equal(ramen.menu_items[1].dish.name, 'Custom curry');
-  assert.equal(ramen.menu_items[1].dish_asset.url, '/storage/outputs/custom-curry.sog');
-  assert.equal(ramen.menu_items[2].dish.name, 'Uploaded appetizer');
-  assert.equal(ramen.menu_items[2].dish_asset.url, '/storage/outputs/appetizer.sog');
+  assert.equal(cafe.room_asset.id, 'uploaded-room');
+  assert.equal(cafe.menu_items.length, 2);
+  assert.equal(cafe.menu_items[0].dish_asset.url, '/assets-demo/dish-matcha-tiramisu.ply');
+  assert.equal(cafe.menu_items[0].dish.price, 9.25);
+  assert.equal(cafe.menu_items[1].dish.name, 'Uploaded appetizer');
+  assert.equal(cafe.menu_items[1].dish_asset.url, '/storage/outputs/appetizer.sog');
   assert.equal(jefes.restaurant.price_checked_on, demoPlaces.find(({ id }) => id === 'kenmore-jefes-01').price_checked_on);
   for (const [manifest, name, count] of [[jefes, 'eljefes', 344_961], [shu, 'shudaxia', 349_370], [starbucks, 'starbucks', 349_990]]) {
     assert.equal(manifest.room_asset.url, `/assets-demo/room-${name}-atlas.sog`);
@@ -327,7 +328,7 @@ test('upload, intake, failed download with restart and retry, room and dish publ
   const storedImage = await fetch(server.origin() + roomUpload.url, { headers: { 'X-Admin-Passcode': server.config.adminPasscode } });
   assert.equal(storedImage.status, 200);
   assert.deepEqual(Buffer.from(await storedImage.arrayBuffer()), image);
-  const dishUpload = await server.request('/api/uploads', { body: { ...postImage, filename: 'ramen-dish.png', dataBase64: secondImage.toString('base64') }, status: 201 });
+  const dishUpload = await server.request('/api/uploads', { body: { ...postImage, filename: 'cafe-dish.png', dataBase64: secondImage.toString('base64') }, status: 201 });
   const selection = await server.request('/api/intake', { body: { place_id: placeId, upload_ids: [roomUpload.id, dishUpload.id] } });
   assert.equal(selection.used_model, 'manual-heuristic-fallback');
   assert.equal(selection.manual_override_allowed, true);
@@ -341,7 +342,7 @@ test('upload, intake, failed download with restart and retry, room and dish publ
   assert(failed.provider_task_id);
   await server.stop();
 
-  for (const name of [room, dish, 'dish-katsu-curry.ply']) {
+  for (const name of [room, dish]) {
     const source = findDemoAsset({ ...server.config, demoAssets: actual }, name);
     t.diagnostic(`${name} input: ${source ? 'modeling asset' : 'binary PLY test fixture'}`);
     if (source) await copyFile(source, join(tempDemo, name));
@@ -379,7 +380,7 @@ test('upload, intake, failed download with restart and retry, room and dish publ
   await server.stage(queued.id, 'ready');
 
   const dishJob = await server.request('/api/jobs', { body: {
-    kind: 'dish', place_id: placeId, upload_ids: [dishUpload.id], dish_id: 'bu-ramen-tonkotsu',
+    kind: 'dish', place_id: placeId, upload_ids: [dishUpload.id], dish_id: 'harvard-matcha-tiramisu',
   }, status: 202 });
   const dishReview = await server.stage(dishJob.id, 'needs_review');
   const dishAsset = await server.request(`/api/assets/${dishReview.asset_id}/publish`, { body: { plate_diameter_m: 0.25 } });
@@ -391,7 +392,6 @@ test('upload, intake, failed download with restart and retry, room and dish publ
   assert.deepEqual(updated.spawn_point, [0.1, 1.55, 2]);
   assert.equal(updated.room_asset.id, asset.id);
   assert.equal(updated.menu_items[0].dish_asset.id, dishAsset.id);
-  assert.equal(updated.menu_items[1].dish_asset.url, '/assets-demo/dish-katsu-curry.ply');
   assert.equal((await server.request('/api/jobs')).length, 2);
 });
 
@@ -815,7 +815,7 @@ test('gpt-live-1.1 broker preserves SDP and retries rejected optional standby an
         assert.ok(instructions.includes(expected), `Missing instruction: ${expected}`);
       }
       const catalogDishes = demoPlaces.flatMap(({ dishes }) => dishes);
-      assert.equal(catalogDishes.length, 65);
+      assert.equal(catalogDishes.length, 63);
       for (const dish of catalogDishes) {
         assert.ok(instructions.includes(`${dish.id} "${dish.name}" ${formatDishPrice(dish.price)} [3D]`), `Missing dish and price: ${dish.id}`);
       }
@@ -919,7 +919,9 @@ test('missing and symlinked demo assets are omitted independently', async (t) =>
   const manifest = (await app.inject(`/api/restaurants/${placeId}/manifest`)).json();
   assert.equal(manifest.room_asset, null);
   assert.equal(manifest.menu_items[0].dish_asset.gaussian_count, 5);
-  assert.equal(manifest.menu_items[1].dish_asset, null);
+  await rm(join(demo, dish));
+  const withoutDish = (await app.inject(`/api/restaurants/${placeId}/manifest`)).json();
+  assert.equal(withoutDish.menu_items[0].dish_asset, null);
   assert.equal((await app.inject('/assets-demo/' + room)).statusCode, 404);
 });
 

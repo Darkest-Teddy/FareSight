@@ -15,11 +15,7 @@ const stationRef = {
   'place-chncl': [42.352547, -71.062752, 'Orange', '005'],
 };
 const gaussians = {
-  'room-ramen-house': [24000, 5, 4, 2.75],
-  'room-karaoke-suite': [22000, 4.2, 3.4, 2.62],
   'room-study-cafe': [20000, 5.5, 4.5, 3],
-  'dish-tonkotsu-ramen': [14000, 0.24, 0.24, 0.15],
-  'dish-katsu-curry': [13000, 0.26, 0.26 * 0.83, 0.065],
   'dish-matcha-tiramisu': [10000, 0.18, 0.18, 0.075],
 };
 const uiModels = [
