@@ -47,6 +47,14 @@ const familyOf = (routeId: string): string => {
 interface Train {
   root: pc.Entity;
   track?: Track;
+  /**
+   * Which way along the track the train faces: +1 with increasing distance, -1 against.
+   *
+   * Kept on the train because a stopped vehicle gives nothing to infer it from -- its reported
+   * position has not changed -- and without it a halted train keeps whatever rotation it last had,
+   * or none at all if it arrived stopped, and sits skewed across the line.
+   */
+  heading: number;
   from: number;
   to: number;
   elapsed: number;
@@ -114,6 +122,29 @@ function snapToTrack(track: Track, x: number, z: number): { distance: number; er
     distance = pc.math.lerp(track.distances[i - 1], track.distances[i], t);
   }
   return { distance, error };
+}
+
+/**
+ * Which way along a track a vehicle is pointing, from the compass bearing MBTA reports.
+ *
+ * The sculpture projects +x east and +z south, so a direction (dx, dz) is at compass
+ * atan2(dx, -dz). Comparing that with the reported bearing says whether the train runs with the
+ * track's distance axis or against it. Without this a train that arrives already stopped has no
+ * travel to infer from and would face an arbitrary way down the line.
+ */
+function headingFromBearing(track: Track, distance: number, bearing: number): number {
+  const length = track.distances[track.distances.length - 1];
+  const a = new pc.Vec3();
+  const b = new pc.Vec3();
+  sampleTrack(track, clamp(distance - 0.002, 0, length), a);
+  sampleTrack(track, clamp(distance + 0.002, 0, length), b);
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  if (Math.abs(dx) < 1e-9 && Math.abs(dz) < 1e-9) return 1;
+  const forward = (Math.atan2(dx, -dz) * 180) / Math.PI;
+  // Shortest signed angle between the track's forward direction and the reported bearing.
+  const delta = Math.abs(((forward - bearing + 540) % 360) - 180);
+  return delta > 90 ? -1 : 1;
 }
 
 function sampleTrack(track: Track, distance: number, position: pc.Vec3): void {
@@ -431,7 +462,7 @@ export class MapSculptureScene {
       const isNew = !train;
       if (!train) {
         const root = child(this.trainRoot, vehicle.label || vehicle.id);
-        train = { root, elapsed: pollInterval, from: 0, to: 0 };
+        train = { root, elapsed: pollInterval, from: 0, to: 0, heading: 1 };
         this.trains.set(vehicle.id, train);
         this.trainRoutes.set(vehicle.id, familyOf(vehicle.route_id));
         this.attachTrainModel(train, familyOf(vehicle.route_id));
@@ -439,6 +470,10 @@ export class MapSculptureScene {
       if (train.track === track) {
         train.from = pc.math.lerp(train.from, train.to, clamp(train.elapsed / pollInterval, 0, 1));
       } else train.from = snap.distance;
+      const stationary = Math.abs(snap.distance - train.from) < 1e-5;
+      if (Number.isFinite(vehicle.bearing) && (isNew || stationary)) {
+        train.heading = headingFromBearing(track, snap.distance, vehicle.bearing as number);
+      }
       train.to = snap.distance;
       train.track = track;
       train.elapsed = 0;
@@ -478,15 +513,35 @@ export class MapSculptureScene {
     sampleTrack(train.track, distance, this.trainPosition);
     this.trainPosition.y += trainLift;
     train.root.setLocalPosition(this.trainPosition);
-    if (Math.abs(train.to - train.from) > 0.00001) {
-      const step = Math.sign(train.to - train.from) * 0.002;
-      const length = train.track.distances[train.track.distances.length - 1];
-      sampleTrack(train.track, clamp(distance + step, 0, length), this.trainLookAt);
-      this.trainLookAt.y += trainLift;
-      if (this.trainLookAt.distanceSq(this.trainPosition) > 1e-12) {
-        this.root.getWorldTransform().transformPoint(this.trainLookAt, this.trainLookAt);
-        train.root.lookAt(this.trainLookAt);
-      }
+
+    // Orient every frame, whether or not the train is moving. This used to be skipped when
+    // `to === from`, which is exactly the case for anything STOPPED_AT a platform -- and most
+    // trains are stopped most of the time -- so those kept their default rotation and lay across
+    // the line at an angle instead of along it.
+    if (Math.abs(train.to - train.from) > 1e-5) train.heading = Math.sign(train.to - train.from);
+    const length = train.track.distances[train.track.distances.length - 1];
+    // Sample a little along the track and face that way. Near an end the step would fall off the
+    // track and collapse to zero, so it flips to look back from the other side instead.
+    const step = train.heading * 0.002;
+    let ahead = clamp(distance + step, 0, length);
+    let flip = 1;
+    if (Math.abs(ahead - distance) < 1e-9) {
+      ahead = clamp(distance - step, 0, length);
+      flip = -1;
+    }
+    sampleTrack(train.track, ahead, this.trainLookAt);
+    this.trainLookAt.y += trainLift;
+    if (flip < 0) {
+      // Mirror the sample through the train so it still faces along its heading.
+      this.trainLookAt.set(
+        2 * this.trainPosition.x - this.trainLookAt.x,
+        this.trainPosition.y,
+        2 * this.trainPosition.z - this.trainLookAt.z,
+      );
+    }
+    if (this.trainLookAt.distanceSq(this.trainPosition) > 1e-12) {
+      this.root.getWorldTransform().transformPoint(this.trainLookAt, this.trainLookAt);
+      train.root.lookAt(this.trainLookAt);
     }
   }
 
