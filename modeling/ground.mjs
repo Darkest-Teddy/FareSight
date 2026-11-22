@@ -1,51 +1,55 @@
 // The ground the network sits on.
 //
-// Two problems had to be solved together. A rectangular deck reads as a slab dropped under the
-// map -- its corners have nothing to do with where Boston actually is. And any finite ground ends
-// somewhere, and a hard edge against the backdrop looks like the map ran out rather than like a
-// place.
+// It is cut to the city: solid where buildings stand, fading out a short way past the last of
+// them, and absent beyond that so the rails run on over nothing at the cleared ends of each line.
 //
-// So the shape is derived from the network itself: for each direction out from the centre, the
-// ground reaches as far as the furthest track in that direction plus the width of the city beside
-// it, then those radii are smoothed into an organic outline. No corners, no bounding box, and the
-// silhouette follows the lines because it is built from them.
+// The shape comes from a distance field rather than from a radius per compass direction. The
+// earlier polar version measured one reach for each of 128 bearings out of a single centre, and
+// that cannot hug a city: a reach spread even a few degrees to its neighbours bulges by a tenth of
+// a unit at this radius, so the outline ballooned into an ellipse no matter how the skirt was
+// tuned. Here every building is measured individually -- the ground exists wherever it is within
+// REACH of any of them -- which is what makes the edge follow the blocks instead of circling them.
 //
-// The blend is done with vertex colour rather than transparency. Everything in this pipeline bakes
-// colour per face, so the outer ring is written at exactly the renderer's backdrop value and the
-// rings inside it step up to the ground tone. The rim therefore dissolves into the background
-// instead of ending -- no alpha, no blend state, no sort-order fighting with the buildings, and it
-// behaves identically from every camera angle.
+// The outline stays organic for free. A union of discs has no corners, and the rim is a gradient
+// rather than a hard boundary, so no contour has to be extracted or triangulated: the field is
+// sampled on a grid and written straight out as vertex colour.
 import { face } from './geometry.mjs';
 
 /** Must match studioBackdrop in web/src/xr/PlayCanvasApp.ts, or the rim will show a seam. */
 const BACKDROP = '#151922';
 
-/** The lit ground under the middle of the network. */
-const GROUND = '#1e2432';
-
-/** Directions sampled around the centre. 128 is smooth at this scale and costs little. */
-const SPOKES = 128;
+/**
+ * The lit ground under the middle of the network.
+ *
+ * Lighter than it used to be. The old tone was only a shade off the backdrop, which was fine when
+ * the blob sprawled across most of the frame but leaves a tight one almost invisible: once the
+ * ground hugs the buildings, contrast is the only thing telling you it is there.
+ */
+const GROUND = '#272f3e';
 
 /**
- * How far past the outermost building the solid ground reaches: enough to give the last block a
- * pavement to stand on, no more.
+ * The ground is a morphological closing of the city: grown by GROW so the gaps between scattered
+ * blocks seal into one surface, then shrunk back by nearly the same amount so the outer edge
+ * returns to the buildings it came from.
+ *
+ * Doing only the growth leaves the edge GROW away from the last block, which is far too generous.
+ * Doing only a small growth never seals the interior and the ground breaks into islands around
+ * each building. Closing gets both: a continuous surface that still finishes a pavement's width
+ * past the outermost block.
  */
-const SKIRT = 0.022;
+const GROW = 0.085;
+const KEEP = 0.018;
+
+/** How far the rim then takes to dissolve into the backdrop. */
+const FADE = 0.028;
 
 /**
- * How many neighbouring directions each building's reach carries to, and how wide the final
- * smoothing pass is. Both are small on purpose -- they are what decides whether the outline hugs
- * the last row of buildings or balloons into a smooth blob around the whole network.
+ * Grid step for sampling the field.
+ *
+ * The interior is one flat colour, so resolution only matters at the rim, where the fade spans a
+ * couple of cells and the per-vertex gradient hides the rest.
  */
-const DILATE = 3;
-const SMOOTH = 2;
-
-/**
- * How far the rim fades out. Short on purpose: the ground is one blob around the network, not a
- * set of concentric shells. This was 0.42 across two extra rings, which read as two further blobs
- * ringing the first rather than as one shape dissolving.
- */
-const FADE = 0.055;
+const STEP = 0.012;
 
 const mixHex = (a, b, t) =>
   '#' +
@@ -59,144 +63,132 @@ const mixHex = (a, b, t) =>
     })
     .join('');
 
-/**
- * Reach per direction, from where the city actually got built.
- *
- * Taken from building sites rather than from the track, because the two no longer agree: the last
- * stretch of every line is deliberately left unbuilt, and ground drawn to the rails would run out
- * past the final block into country that has nothing on it. Driving it from the buildings means
- * the blob ends where they do, and the lines carry on beyond its edge.
- *
- * Each site is binned by bearing from the centre and the furthest in each bin wins. Empty bins are
- * filled by walking out to the nearest neighbour that has a value, then the whole ring is smoothed
- * circularly so the outline curves instead of stepping.
- */
-function reaches(sites, centre) {
-  const raw = new Array(SPOKES).fill(0);
-  for (const [sx, sz, radius] of sites) {
-    const dx = sx - centre[0];
-    const dz = sz - centre[1];
-    const bin =
-      (Math.round((Math.atan2(dz, dx) / (Math.PI * 2)) * SPOKES) + SPOKES) % SPOKES;
-    // Reach to the far side of the building, not its centre, so nothing overhangs the edge.
-    raw[bin] = Math.max(raw[bin], Math.hypot(dx, dz) + (radius ?? 0));
-  }
-
-  // Spread each direction's reach over a few neighbours.
-  //
-  // This is what covers the gaps between scattered blocks, and it is deliberately narrow: a wide
-  // window reaches past a lone outlying building and drags the whole edge out with it. Taking the
-  // maximum rather than an average is the point -- it guarantees every building is enclosed
-  // without pulling the outline any further than the furthest one in that direction.
-  const spread = new Array(SPOKES).fill(0);
-  for (let i = 0; i < SPOKES; i++)
-    for (let k = -DILATE; k <= DILATE; k++)
-      spread[i] = Math.max(spread[i], raw[(i + k + SPOKES) % SPOKES]);
-
-  // Directions with nothing at all still need a value, or the outline collapses to the centre.
-  for (let i = 0; i < SPOKES; i++) {
-    if (spread[i] > 0) continue;
-    let back = 0;
-    let forward = 0;
-    while (spread[(i - back + SPOKES) % SPOKES] === 0 && back < SPOKES) back++;
-    while (spread[(i + forward) % SPOKES] === 0 && forward < SPOKES) forward++;
-    const a = spread[(i - back + SPOKES) % SPOKES];
-    const b = spread[(i + forward) % SPOKES];
-    spread[i] = (a * forward + b * back) / Math.max(1, back + forward);
-  }
-
-  // One light pass, only enough to take the facets off. Heavier smoothing rounded the outline
-  // into an ellipse that bore no relation to where the city actually stopped.
-  const smooth = new Array(SPOKES);
-  for (let i = 0; i < SPOKES; i++) {
-    let sum = 0;
-    for (let k = -SMOOTH; k <= SMOOTH; k++) sum += spread[(i + k + SPOKES) % SPOKES];
-    smooth[i] = sum / (SMOOTH * 2 + 1);
-  }
-  return smooth;
-}
-
-/**
- * Build the ground into `surface`, which is shared with the city so this costs no extra draw call.
- *
- * Four concentric rings: a solid core, a solid outer edge at the city limit, then two fading rings
- * that reach the backdrop colour exactly.
- */
-/**
- * Build the ground into `surface`, which is shared with the city so this costs no extra draw call.
- *
- * One blob, not a stack of rings. An earlier version drew concentric bands with face(), which
- * bakes a single flat colour per quad -- so each band came out a uniform shade with a hard edge
- * against its neighbour, and the ground read as three separate blobs rather than one fading out.
- * Removing bands only changed how many of those edges there were.
- *
- * The fix is to colour per vertex instead. Surface.vertex() takes its own colour, so the shade is
- * interpolated across every triangle and the rim dissolves continuously with no steps anywhere.
- */
-const RINGS = 14;
-
-/** Fraction of the radius that stays full-strength ground before the rim starts to fade. */
-const SOLID = 0.74;
-
 /** Smooth, so the fade has no visible start or end. */
 const smoothstep = (t) => t * t * (3 - 2 * t);
 
-function quad(surface, points, colours) {
-  const up = [0, 1, 0];
-  const ids = points.map((point, i) => surface.vertex(point, up, colours[i]));
-  surface.indices.push(ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]);
+/**
+ * Distance from a point to the nearest building's edge, negative inside one.
+ *
+ * Sites are bucketed by cell so each sample only tests the handful nearby; checking all of them
+ * for every grid point is the one part of this that would actually be slow.
+ */
+function fieldSampler(sites) {
+  const cell = 0.08;
+  const buckets = new Map();
+  const key = (i, j) => i + ':' + j;
+  let span = 0;
+  for (const site of sites) {
+    span = Math.max(span, site[2]);
+    const i = Math.floor(site[0] / cell);
+    const j = Math.floor(site[1] / cell);
+    const k = key(i, j);
+    if (!buckets.has(k)) buckets.set(k, []);
+    buckets.get(k).push(site);
+  }
+  // How many rings of cells can hold a site whose edge still reaches GROW from here.
+  const rings = Math.ceil((GROW + span) / cell);
+
+  return (x, z) => {
+    const ci = Math.floor(x / cell);
+    const cj = Math.floor(z / cell);
+    let best = Infinity;
+    for (let i = -rings; i <= rings; i++)
+      for (let j = -rings; j <= rings; j++) {
+        const here = buckets.get(key(ci + i, cj + j));
+        if (!here) continue;
+        for (const [sx, sz, radius] of here) {
+          const d = Math.hypot(x - sx, z - sz) - radius;
+          if (d < best) best = d;
+        }
+      }
+    return best;
+  };
 }
 
+/**
+ * Build the ground into `surface`, which is shared with the city so this costs no extra draw call.
+ */
 export function groundBlob(surface, sites, y) {
-  const centre = [0.02, 0];
-  const reach = reaches(sites, centre);
+  if (!sites.length) return 0;
+  // The shrink step can only pull the edge back to where the growth put it.
+  const erode = Math.max(0, GROW - KEEP);
 
-  // Radius and colour at ring `u` (0 at the centre, 1 at the outer rim) along spoke `i`.
-  const radiusAt = (u, i) => {
-    const solid = reach[i] + SKIRT;
-    return u <= SOLID
-      ? solid * (u / SOLID)
-      : solid + FADE * ((u - SOLID) / (1 - SOLID));
-  };
-  const tintAt = (u) => (u <= SOLID ? 0 : smoothstep((u - SOLID) / (1 - SOLID)));
-  const colourAt = (u) => mixHex(GROUND, BACKDROP, tintAt(u));
-  const pointAt = (u, i) => {
-    const angle = (i / SPOKES) * Math.PI * 2;
-    const r = radiusAt(u, i);
-    return [centre[0] + Math.cos(angle) * r, y, centre[1] + Math.sin(angle) * r];
-  };
-
-  // Core fan out to the first ring.
-  const hub = [centre[0], y, centre[1]];
-  const first = 1 / RINGS;
-  const core = colourAt(0);
-  const firstColour = colourAt(first);
-  for (let i = 0; i < SPOKES; i++) {
-    const j = (i + 1) % SPOKES;
-    const a = pointAt(first, i);
-    const b = pointAt(first, j);
-    const up = [0, 1, 0];
-    const ids = [
-      surface.vertex(hub, up, core),
-      surface.vertex(b, up, firstColour),
-      surface.vertex(a, up, firstColour),
-    ];
-    surface.indices.push(ids[0], ids[1], ids[2]);
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const [x, z, radius] of sites) {
+    minX = Math.min(minX, x - radius - GROW - STEP);
+    maxX = Math.max(maxX, x + radius + GROW + STEP);
+    minZ = Math.min(minZ, z - radius - GROW - STEP);
+    maxZ = Math.max(maxZ, z + radius + GROW + STEP);
   }
 
-  // Then one continuous sheet out to the rim, shaded per vertex.
-  for (let k = 1; k < RINGS; k++) {
-    const inner = k / RINGS;
-    const outer = (k + 1) / RINGS;
-    const ci = colourAt(inner);
-    const co = colourAt(outer);
-    for (let i = 0; i < SPOKES; i++) {
-      const j = (i + 1) % SPOKES;
-      quad(
-        surface,
-        [pointAt(inner, i), pointAt(inner, j), pointAt(outer, j), pointAt(outer, i)],
-        [ci, ci, co, co],
-      );
+  const distanceAt = fieldSampler(sites);
+  const cols = Math.ceil((maxX - minX) / STEP) + 1;
+  const rows = Math.ceil((maxZ - minZ) / STEP) + 1;
+  const at = (c, r) => r * cols + c;
+
+  // Grow: every vertex within GROW of a building. This is the sealed, over-generous shape.
+  const grown = new Uint8Array(cols * rows);
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++)
+      grown[at(c, r)] = distanceAt(minX + c * STEP, minZ + r * STEP) <= GROW ? 1 : 0;
+
+  // Shrink: how far each vertex is from the nearest point outside that shape. Vertices deep
+  // inside keep a large clearance; ones near the grown edge lose it, which is what walks the
+  // boundary back in towards the buildings.
+  const window = Math.ceil((erode + FADE) / STEP) + 1;
+  const clearance = new Float64Array(cols * rows);
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++) {
+      if (!grown[at(c, r)]) continue;
+      let best = Infinity;
+      for (let j = -window; j <= window; j++) {
+        const rr = r + j;
+        if (rr < 0 || rr >= rows) continue;
+        for (let i = -window; i <= window; i++) {
+          const cc = c + i;
+          // Outside the grid counts as outside the shape, so the edge cannot leak off it.
+          const outside = cc < 0 || cc >= cols || !grown[at(cc, rr)];
+          if (!outside) continue;
+          const d = Math.hypot(i, j) * STEP;
+          if (d < best) best = d;
+        }
+      }
+      clearance[at(c, r)] = best;
     }
-  }
+
+  // Solid once a vertex clears the erode depth; dissolving over the FADE just inside that.
+  const tintAt = (d) =>
+    1 - smoothstep(Math.max(0, Math.min(1, (d - (erode - FADE)) / FADE)));
+  const up = [0, 1, 0];
+  let quads = 0;
+
+  for (let r = 0; r < rows - 1; r++)
+    for (let c = 0; c < cols - 1; c++) {
+      const corners = [
+        clearance[at(c, r)],
+        clearance[at(c + 1, r)],
+        clearance[at(c + 1, r + 1)],
+        clearance[at(c, r + 1)],
+      ];
+      // Nothing to draw where every corner has already dissolved.
+      if (corners.every((d) => d <= erode - FADE)) continue;
+
+      const x0 = minX + c * STEP;
+      const z0 = minZ + r * STEP;
+      const points = [
+        [x0, y, z0],
+        [x0 + STEP, y, z0],
+        [x0 + STEP, y, z0 + STEP],
+        [x0, y, z0 + STEP],
+      ];
+      const colours = corners.map((d) => mixHex(GROUND, BACKDROP, tintAt(d)));
+      const ids = points.map((point, i) => surface.vertex(point, up, colours[i]));
+      surface.indices.push(ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]);
+      quads++;
+    }
+
+  return quads;
 }

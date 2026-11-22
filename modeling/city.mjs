@@ -463,6 +463,15 @@ export function cityBlocks(surface, lines, slabTop) {
   let count = 0;
   /** Where a building actually went, so the ground can be drawn to exactly this extent. */
   const sites = [];
+  /**
+   * Centreline samples on the built stretch of each line.
+   *
+   * The ground needs these for continuity. Buildings alone are spaced further apart than any
+   * sensible pavement, so a union of discs around them breaks into islands; the spine stitches
+   * the corridor together while the buildings are what push the edge outward. It stops where the
+   * end clearance begins, so the ground still ends before the line does.
+   */
+  const spine = [];
   for (const line of lines) {
     const pts = line.points;
     // Cumulative distance along the track, so placement can tell how near a line's end it is.
@@ -484,6 +493,7 @@ export function cityBlocks(surface, lines, slabTop) {
       if (fromEnd < clear) continue;
       // Ramps 0 to 1 across the fade stretch just inside the cleared ends.
       const reached = Math.min(1, (fromEnd - clear) / endFade);
+      spine.push([pts[i][0], pts[i][2], 0]);
 
       const tangent = norm(sub(pts[i + 1], pts[i - 1]));
       const side = [-tangent[2], 0, tangent[0]];
@@ -541,5 +551,5 @@ export function cityBlocks(surface, lines, slabTop) {
     }
   }
 
-  return { count, sites };
+  return { count, sites, spine };
 }

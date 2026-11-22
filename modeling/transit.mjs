@@ -504,7 +504,8 @@ export function mapSculpture(dir) {
   // Both share one surface, so the ground and all 200-odd buildings stay a single draw call and
   // the order between them does not matter to the renderer.
   const blocks = cityBlocks(city, lines, slabTop);
-  groundBlob(city, blocks.sites, slabTop - 0.0006);
+  // Buildings set how far out the ground reaches; the spine keeps it continuous between them.
+  groundBlob(city, [...blocks.sites, ...blocks.spine], slabTop - 0.0006);
   if (process.env.FARESIGHT_VERBOSE) console.log('city blocks placed:', blocks.count);
 
   // Transfer posts tie stacked platforms of different lines together.
