@@ -11,7 +11,9 @@ import { buildComparisonBriefingCard, buildPlaceBriefingCard, loadLiveReviews, l
 import { LiveController, type AppControlSurface } from '../live/LiveController';
 import { RealtimeVoice } from '../voice/RealtimeVoice';
 import { AdminModal } from './AdminModal';
+import { ArrivalsBell } from './ArrivalsBell';
 import { attribution } from './AttributionModal';
+import { DiscoverView } from './DiscoverView';
 import { button, element, errorText, httpUrl, icon, iconButton, link, message, modal, previewBadge, type IconName } from './dom';
 import { FilterBar } from './FilterBar';
 import { LiveVoiceDock } from './LiveVoiceDock';
@@ -64,6 +66,15 @@ export class AppShell {
   private readonly sound = new SoundEngine();
   private readonly logs: string[] = [];
   private readonly mobile = matchMedia('(max-width: 768px)');
+  private readonly discover: DiscoverView;
+  private readonly bell: ArrivalsBell;
+  private readonly viewToggle = element('div', 'view-toggle');
+  /**
+   * Discover is a flat 2D page, not a scene in the 3D engine, so it is tracked separately from
+   * `mode`. Opening it hides the canvas and pauses the engine; closing it resumes exactly the
+   * scene that was showing, without reloading the engine or its splats.
+   */
+  private discoverOpen = false;
   private engine?: FareSightSceneEngine;
   private engineReady = false;
   private sceneVersion = 0;
@@ -204,8 +215,24 @@ export class AppShell {
       this.setMenuOpen(false);
       this.moreButton.focus();
     });
-    operations.append(this.vrButton, this.xrExit, this.liveDock.trigger, more);
-    head.append(lead, operations);
+    this.discover = new DiscoverView((place) => void this.openDiscoverPlace(place));
+    this.discover.root.hidden = true;
+    this.bell = new ArrivalsBell(() => this.setDiscoverOpen(true));
+
+    // The Map / Discover control, as in the reference design. Discover is a sibling of the whole
+    // 3D experience rather than a step inside it, so it sits here and not in the breadcrumbs.
+    this.viewToggle.setAttribute('role', 'tablist');
+    this.viewToggle.setAttribute('aria-label', 'View');
+    for (const [label, wantsDiscover] of [['Map', false], ['Discover', true]] as const) {
+      const tab = button(label, () => this.setDiscoverOpen(wantsDiscover), 'view-toggle-option');
+      tab.setAttribute('role', 'tab');
+      tab.dataset.view = wantsDiscover ? 'discover' : 'map';
+      this.viewToggle.append(tab);
+    }
+
+    operations.append(this.bell.root, this.vrButton, this.xrExit, this.liveDock.trigger, more);
+    // Between the two groups, so it reads as centred.
+    head.append(lead, this.viewToggle, operations);
 
     this.canvas.setAttribute('aria-label', 'FareSight interactive 3D view');
     this.canvas.tabIndex = 0;
@@ -281,7 +308,7 @@ export class AppShell {
     }
 
     root.replaceChildren(this.canvas, this.canvasNotice, head, this.stationBoard, this.filterBar.root, this.drawer.root,
-      this.reviewModal.root, this.liveDock.root, tabs, this.notice);
+      this.discover.root, this.reviewModal.root, this.liveDock.root, tabs, this.notice);
     document.addEventListener('keydown', (event) => {
       if (!(event.target instanceof Element && event.target.closest('dialog[open]'))) this.reviewModal.dismissOnEscape(event);
     });
@@ -292,6 +319,7 @@ export class AppShell {
     this.sound.setMuted(true);
     this.sound.onStateChange = () => this.renderAudioState();
     this.filterBar.setStops(this.stops);
+    this.syncViewToggle();
     this.renderBreadcrumbs();
     this.applyFilters();
     this.renderStatus();
@@ -301,6 +329,9 @@ export class AppShell {
   async start() {
     void this.loadCatalog();
     void this.refreshTransit();
+    // The bell watches for arrivals on every view, not just Discover, so somebody exploring the
+    // 3D map still learns that a place was added.
+    this.bell.start();
     window.setInterval(() => {
       if (document.visibilityState !== 'visible') return;
       void this.refreshTransit();
@@ -629,8 +660,67 @@ export class AppShell {
     if (mode === 'dish' && this.dish) void this.showDish(this.dish, this.comparison?.dish.id, this.comparison?.place.id);
   }
 
+  /**
+   * Switches between the 3D experience and the Discover page.
+   *
+   * The engine is paused rather than destroyed. Re-creating it would mean reloading the map
+   * sculpture and every splat on each switch, which is far too slow for a control someone is
+   * expected to flick back and forth.
+   */
+  private setDiscoverOpen(open: boolean) {
+    if (this.discoverOpen === open) return;
+    this.discoverOpen = open;
+    this.discover.root.hidden = !open;
+    this.canvas.hidden = open;
+    this.canvasNotice.hidden = open;
+    this.syncViewToggle();
+    if (open) {
+      this.setFilterOpen(false);
+      this.engine?.setPaused(true);
+      void this.discover.activate();
+    } else {
+      this.discover.deactivate();
+      this.engine?.setPaused(false);
+      this.engine?.resize();
+    }
+    this.renderPanels();
+  }
+
+  /**
+   * Opens a place chosen on Discover.
+   *
+   * A seeded place has a pin on its station diorama, so it can fly the camera there and pulse the
+   * flag. A contributed place deliberately has no pin at all (specification D6), so there is
+   * nowhere to fly to and it opens its own detail view instead. The card shows which it is, so
+   * the two behaviours are not a surprise.
+   */
+  private async openDiscoverPlace(entry: { id: string; source: 'catalog' | 'contributed'; station_id: string | null }) {
+    if (entry.source === 'catalog') {
+      const place = this.places.find(({ id }) => id === entry.id);
+      if (place) {
+        this.setDiscoverOpen(false);
+        await this.showVenue(place);
+        return;
+      }
+    }
+    // Contributed places live only on Discover. Until their detail view exists, say so plainly
+    // rather than navigating somewhere that cannot show them.
+    this.notify('This place was added from the phone app. Its 3D view opens here once the scan finishes.');
+  }
+
+  private syncViewToggle() {
+    const view = this.discoverOpen ? 'discover' : 'map';
+    this.root.dataset.view = view;
+    for (const tab of this.viewToggle.children) {
+      const selected = (tab as HTMLElement).dataset.view === view;
+      tab.classList.toggle('is-selected', selected);
+      tab.setAttribute('aria-selected', String(selected));
+    }
+  }
+
   private showMap() {
     ++this.navigation;
+    if (this.discoverOpen) this.setDiscoverOpen(false);
     if (this.mode !== 'map') this.sound.playBack();
     this.mode = 'map';
     this.filterOpen = false;

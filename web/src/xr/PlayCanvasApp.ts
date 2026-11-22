@@ -282,6 +282,18 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     this.resize();
   };
 
+  /**
+   * Stops the render loop without tearing the engine down, for when the canvas is hidden behind
+   * another view. Destroying and rebuilding would mean reloading the map sculpture and every
+   * splat on each switch. Never pauses during an XR session, where the headset drives the loop
+   * and stopping it would freeze the view on the user's face.
+   */
+  setPaused(paused: boolean): void {
+    if (!this.app || this.activeXR !== 'none') return;
+    this.app.autoRender = !paused;
+    if (!paused) this.app.renderNextFrame = true;
+  }
+
   resize(): void {
     if (!this.app || this.activeXR !== 'none') return;
     const width = Math.max(1, this.canvas.clientWidth);

@@ -119,6 +119,8 @@ export interface FareSightSceneEngine {
   init(): Promise<void>;
   destroy(): void;
   resize(): void;
+  /** Stops the render loop while the canvas is hidden, without tearing the engine down. */
+  setPaused(paused: boolean): void;
   setScene(mode: SceneMode): Promise<void>;
   setPlaces(places: XRPlaceData[], filteredIds: Set<string>): void;
   setStops(stops: XRStopData[]): void;

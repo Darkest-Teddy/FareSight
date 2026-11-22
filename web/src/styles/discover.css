@@ -1,0 +1,566 @@
+/*
+ * The Discover page, the arrivals bell and the toast stack.
+ *
+ * Discover is a flat 2D page layered over the hidden 3D canvas, so it owns a full-height
+ * scrolling region of its own rather than sitting inside the panel grid the scenes use.
+ */
+
+/* --- The Map / Discover switch in the command bar --- */
+
+.view-toggle {
+  display: flex;
+  gap: 0.15rem;
+  padding: 0.2rem;
+  border-radius: 999px;
+  background: rgb(11 16 32 / 70%);
+  border: 1px solid var(--edge-soft);
+}
+
+.view-toggle-option {
+  padding: 0.35rem 0.95rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.view-toggle-option:hover { color: var(--text); }
+
+.view-toggle-option.is-selected {
+  background: var(--panel-raised);
+  color: var(--text);
+  box-shadow: 0 1px 6px rgb(0 0 0 / 35%);
+}
+
+/* The 3D chrome is meaningless while a flat page is showing. */
+.app-shell[data-view='discover'] .station-board,
+.app-shell[data-view='discover'] .filter-bar,
+.app-shell[data-view='discover'] .breadcrumbs,
+.app-shell[data-view='discover'] .place-drawer,
+.app-shell[data-view='discover'] .canvas-notice { display: none; }
+
+/* --- Page shell --- */
+
+.discover {
+  position: absolute;
+  inset: var(--command-height) 0 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2.5rem var(--rail) 4rem;
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgb(79 227 255 / 7%), transparent 60%),
+    var(--canvas);
+}
+
+.discover-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  max-width: 1400px;
+  margin: 0 auto 1.75rem;
+}
+
+.discover-heading h1 { margin: 0; font-size: clamp(2rem, 4vw, 2.75rem); letter-spacing: -0.02em; }
+
+.discover-subtitle { margin: 0.4rem 0 0; color: var(--muted); font-size: 0.95rem; }
+
+.discover-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 260px;
+  max-width: 480px;
+}
+
+.discover-search-icon {
+  position: absolute;
+  left: 0.9rem;
+  color: var(--muted);
+  font-size: 1.1rem;
+  pointer-events: none;
+}
+
+.discover-search-input {
+  width: 100%;
+  padding: 0.75rem 1rem 0.75rem 2.4rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.85rem;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.95rem;
+}
+
+.discover-search-input::placeholder { color: var(--muted); }
+.discover-search-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* --- Filters and sorts --- */
+
+.discover-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 1400px;
+  margin: 0 auto 2rem;
+}
+
+.discover-chips, .discover-sort, .discover-window { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.discover-controls-right { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+
+.discover-chip {
+  padding: 0.55rem 1.1rem;
+  border: 1px solid var(--edge-soft);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+}
+
+.discover-chip:hover { color: var(--text); border-color: var(--edge); }
+
+.discover-chip.is-selected {
+  background: var(--panel-raised);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.discover-sort, .discover-window {
+  gap: 0.15rem;
+  padding: 0.2rem;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--edge-soft);
+}
+
+.discover-sort-option, .discover-window-option {
+  padding: 0.4rem 0.95rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.discover-sort-option.is-selected, .discover-window-option.is-selected {
+  background: #fff;
+  color: #0b1020;
+  font-weight: 600;
+}
+
+.discover-window[hidden] { display: none; }
+
+/* --- Sections --- */
+
+.discover-section { max-width: 1400px; margin: 0 auto 2.5rem; }
+.discover-section[hidden] { display: none; }
+
+.discover-section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.discover-section-title {
+  margin: 0 0 1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.discover-count { color: var(--muted); font-size: 0.88rem; }
+
+.discover-status { max-width: 1400px; margin: 0 auto 1rem; color: var(--muted); }
+.discover-status[hidden] { display: none; }
+
+.discover-empty {
+  grid-column: 1 / -1;
+  padding: 3rem 1rem;
+  text-align: center;
+  color: var(--muted);
+}
+
+.discover-featured {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.25rem;
+}
+
+.discover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1.25rem;
+}
+
+/* --- Cards --- */
+
+.discover-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--edge-soft);
+  border-radius: 0.9rem;
+  background: var(--panel);
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.discover-card:hover, .discover-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--edge);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 35%);
+  outline: none;
+}
+
+.discover-card:focus-visible { border-color: var(--accent); }
+
+.discover-card-media {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  background: var(--panel-raised);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.discover-card.is-large .discover-card-media { aspect-ratio: 16 / 9; }
+
+.discover-card-image { width: 100%; height: 100%; object-fit: cover; }
+
+/*
+ * Seeded places ship no photographs, so an empty tile is tinted by category and shows the
+ * venue's initial. Better than an empty rectangle, and it keeps the grid even.
+ */
+.discover-card-media.is-empty { background: linear-gradient(145deg, #1a2340, #141b33); }
+.discover-card-media[data-category='restaurant'] { background: linear-gradient(145deg, #3a2340, #1b1430); }
+.discover-card-media[data-category='study'] { background: linear-gradient(145deg, #23374a, #141f33); }
+.discover-card-media[data-category='music'] { background: linear-gradient(145deg, #3a2a52, #1a1433); }
+.discover-card-media[data-category='outdoor'] { background: linear-gradient(145deg, #1f3a32, #121f2c); }
+.discover-card-media[data-category='shop'] { background: linear-gradient(145deg, #3a3222, #1f1a14); }
+.discover-card-media[data-category='market'] { background: linear-gradient(145deg, #333a22, #1a2014); }
+.discover-card-media[data-category='stadium'] { background: linear-gradient(145deg, #42262a, #221418); }
+
+.discover-card-glyph {
+  font-size: 2.5rem;
+  font-weight: 600;
+  color: rgb(255 255 255 / 20%);
+}
+
+.discover-badge, .discover-3d, .discover-building {
+  position: absolute;
+  top: 0.6rem;
+  padding: 0.22rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.discover-badge { left: 0.6rem; background: #fff; color: #0b1020; }
+.discover-3d { right: 0.6rem; background: rgb(79 227 255 / 18%); color: var(--accent); border: 1px solid rgb(79 227 255 / 35%); }
+
+.discover-building {
+  right: 0.6rem;
+  background: rgb(255 181 71 / 16%);
+  color: var(--price);
+  border: 1px solid rgb(255 181 71 / 35%);
+}
+
+.discover-card-body {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 0.85rem 0.95rem 1rem;
+  border-top: 1px dashed var(--edge-soft);
+}
+
+.discover-card-text { min-width: 0; }
+
+.discover-card-name {
+  margin: 0 0 0.3rem;
+  font-size: 1rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discover-card.is-large .discover-card-name { font-size: 1.15rem; }
+
+.discover-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.discover-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--muted); }
+.discover-pin { color: var(--muted); font-size: 0.7rem; }
+.discover-sep { opacity: 0.5; }
+
+/* --- Score ring --- */
+
+.discover-score-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.discover-score {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  border: 2px solid var(--edge);
+  background: rgb(11 16 32 / 60%);
+}
+
+.discover-score.is-high { border-color: #4ade80; }
+.discover-score.is-mid { border-color: #a8b3cf; }
+.discover-score.is-low { border-color: #ffb547; }
+
+.discover-score-value { font-size: 0.95rem; font-weight: 600; }
+.discover-score-count { color: var(--muted); font-size: 0.68rem; white-space: nowrap; }
+
+.discover-trend {
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  background: rgb(74 222 128 / 14%);
+  border: 1px solid rgb(74 222 128 / 30%);
+  color: #4ade80;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.discover-more {
+  display: block;
+  margin: 1.75rem auto 0;
+  padding: 0.7rem 1.6rem;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.discover-more:hover { border-color: var(--accent); }
+.discover-more[hidden] { display: none; }
+
+/* --- The arrivals bell --- */
+
+.bell { position: relative; }
+
+.bell-button {
+  position: relative;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--edge-soft);
+  border-radius: 0.7rem;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.bell-button:hover { border-color: var(--edge); }
+.bell-button.has-unread { border-color: var(--accent); }
+
+.bell-badge {
+  position: absolute;
+  top: -0.35rem;
+  right: -0.35rem;
+  min-width: 1.15rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #0b1020;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.15rem;
+  text-align: center;
+}
+
+.bell-badge[hidden] { display: none; }
+
+.bell-panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 40;
+  width: min(22rem, calc(100vw - 2rem));
+  max-height: 26rem;
+  overflow-y: auto;
+  padding: 0.85rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.9rem;
+  background: var(--hud);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 18px 42px rgb(0 0 0 / 50%);
+}
+
+.bell-panel[hidden] { display: none; }
+
+.bell-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
+}
+
+.bell-see-all {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.bell-heading {
+  margin: 0.75rem 0 0.4rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bell-list { display: flex; flex-direction: column; gap: 0.2rem; }
+
+.bell-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.5rem 0.55rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bell-row:hover { background: var(--panel-raised); }
+
+.bell-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.88rem;
+}
+
+.bell-row-meta { flex-shrink: 0; color: var(--muted); font-size: 0.75rem; }
+.bell-empty { margin: 0; padding: 0.5rem 0.55rem; color: var(--muted); font-size: 0.82rem; }
+
+/* --- Toasts --- */
+
+.toast-stack {
+  position: fixed;
+  right: var(--rail);
+  bottom: calc(var(--rail) + env(safe-area-inset-bottom, 0px));
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 16rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--edge);
+  border-left: 3px solid var(--accent);
+  border-radius: 0.7rem;
+  background: var(--hud);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+  pointer-events: auto;
+  animation: toast-in 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.toast.is-leaving { animation: toast-out 380ms ease forwards; }
+
+.toast-label {
+  color: var(--accent);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.toast-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.toast-action {
+  flex-shrink: 0;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.toast-action:hover { border-color: var(--accent); color: var(--accent); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(1.5rem); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes toast-out {
+  to { opacity: 0; transform: translateX(1.5rem); }
+}
+
+/* Motion here is decorative, so it goes away entirely when the reader asks for less of it. */
+@media (prefers-reduced-motion: reduce) {
+  .toast, .toast.is-leaving { animation: none; }
+  .discover-card { transition: none; }
+  .discover-card:hover, .discover-card:focus-visible { transform: none; }
+}
+
+@media (max-width: 768px) {
+  .discover { padding: 1.5rem 1rem calc(var(--phone-bar) + 2rem); }
+  .discover-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem; }
+  .discover-featured { grid-template-columns: 1fr; }
+  .toast-stack { right: 0.75rem; left: 0.75rem; bottom: calc(var(--phone-bar) + 0.75rem); }
+  .toast { min-width: 0; }
+}
