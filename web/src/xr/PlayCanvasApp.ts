@@ -257,7 +257,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
       this.watchDisplayScale();
       app.on('update', (dt: number) => this.update(dt));
       app.start();
-      this.callbacks.onDebugLog('FareSight WebGL2 renderer ready', 'info');
+      this.callbacks.onDebugLog('Vantage WebGL2 renderer ready', 'info');
     } catch (error) {
       this.callbacks.onDebugLog(`Renderer initialization failed: ${String(error)}`, 'error');
       this.destroy();

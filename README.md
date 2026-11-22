@@ -1,4 +1,6 @@
-# FareSight (BostonHacks 2026)
+# Vantage (BostonHacks 2026)
+
+<img src="web/public/favicon.svg" alt="Vantage logo" width="48" height="48" />
 
 **Try it before you ride:** explore Boston food spots, study cafés and live venues through the MBTA in 3D/WebXR on Meta Quest 3 (and 2D on any phone or laptop), filtered by craving, total budget including T fare, start stop, and group size.
 
@@ -43,7 +45,7 @@ pnpm dev                  # Starts Fastify server (:3001) + Vite web app (:5173)
 ```
 
 - Open `http://localhost:5173` on desktop/mobile (or deploy over HTTPS for Meta Quest 3 WebXR).
-- Open `http://contribute.localhost:5180` for the Contribute app, or `http://<your-LAN-IP>:5180` from a phone on the same network. To deploy it, build `contribute/` (`pnpm --filter @faresight/contribute build`) and point the `contribute.` subdomain at `contribute/dist`. Either proxy `/api` and `/storage` to the Fastify server from that host, or build with `VITE_API_ORIGIN=https://<api-host>`.
+- Open `http://contribute.localhost:5180` for Vantage Contribute, or `http://<your-LAN-IP>:5180` from a phone on the same network. To deploy it, build `contribute/` (`pnpm --filter @faresight/contribute build`) and point the `contribute.` subdomain at `contribute/dist`. Either proxy `/api` and `/storage` to the Fastify server from that host, or build with `VITE_API_ORIGIN=https://<api-host>`.
 - An Atlas project API key needs `tasks.create`, `operations.read`, `assets.create`, and `assets.read`. Set `WLT_API_KEY` or leave it unset and use `WORLDLABS_API_KEY`. Override `WLT_API_BASE_URL` to use a different Atlas v2 endpoint.
 - Install a current `@playcanvas/splat-transform` CLI on the server's PATH to keep Atlas room previews within the 100,000-Gaussian conversion target. Large original SPZs can exceed the viewer's existing Gaussian safety limit.
 - Without API keys (`PIPELINE_MODE=auto`), the Upload 3D studio runs a labeled demo simulation through all pipeline stages (`Queued -> Generating -> Downloading -> Converting -> Needs review -> Ready`) and publishes into the live manifest.
@@ -51,7 +53,7 @@ pnpm dev                  # Starts Fastify server (:3001) + Vite web app (:5173)
 
 ## Capture storage (Tiger Data + Vultr Object Storage)
 
-Optional. When `DATABASE_URL` and the `VULTR_S3_*` variables are set, room photos from the Contribute app stop passing through the API:
+Optional. When `DATABASE_URL` and the `VULTR_S3_*` variables are set, room photos from Vantage Contribute stop passing through the API:
 
 1. The phone creates a capture (`POST /api/captures`) and gets short-lived presigned URLs (`POST /api/captures/:id/upload-urls`).
 2. It PUTs each photo and a `frames.json` manifest straight to the private raw bucket, registers the frames (`POST /api/captures/:id/frames`), then calls `POST /api/captures/:id/complete`.
@@ -75,7 +77,7 @@ For production, use the pooled Tiger Data URL as `DATABASE_URL` and the direct o
 
 ## Deploying the web app (Vultr CDN)
 
-The web app is deployed by hand; nothing deploys it automatically. `deploy-web` uploads `web/dist` to a Vultr Object Storage bucket and purges the Vultr CDN pull zone in front of that bucket. Only the web app is deployed: the Fastify server and the Contribute app are not.
+The web app is deployed by hand; nothing deploys it automatically. `deploy-web` uploads `web/dist` to a Vultr Object Storage bucket and purges the Vultr CDN pull zone in front of that bucket. Only the web app is deployed: the Fastify server and Vantage Contribute are not.
 
 ```bash
 pnpm --filter @faresight/web build                    # Set VITE_API_ORIGIN first to point the app at a server

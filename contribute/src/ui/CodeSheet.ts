@@ -29,7 +29,7 @@ export class CodeSheet {
     this.input.autocapitalize = 'none';
     this.input.spellcheck = false;
     this.input.enterKeyHint = 'done';
-    this.input.placeholder = 'Code from your FareSight host';
+    this.input.placeholder = 'Code from your Vantage host';
     this.input.setAttribute('aria-label', 'Upload code');
     this.input.addEventListener('input', () => { this.feedback.textContent = ''; });
     this.feedback.setAttribute('role', 'alert');
@@ -61,8 +61,8 @@ export class CodeSheet {
   ask(reason = ''): Promise<boolean> {
     if (this.dialog.open) this.close(false);
     this.note.textContent = inviteCode.status === 'open'
-      ? 'This FareSight server accepts photos without a code.'
-      : 'Enter the upload code from your FareSight host. This phone remembers it for future scans.';
+      ? 'This Vantage server accepts photos without a code.'
+      : 'Enter the upload code from your Vantage host. This phone remembers it for future scans.';
     this.feedback.textContent = reason;
     this.input.value = inviteCode.current;
     this.forget.hidden = !inviteCode.current;

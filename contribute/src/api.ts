@@ -44,7 +44,7 @@ async function request<T>(path: string, body?: object | FormData, code?: string,
     });
   } catch (error) {
     const timedOut = error instanceof DOMException && error.name === 'TimeoutError';
-    throw new ApiError(timedOut ? 'The server took too long to answer.' : 'Could not reach the FareSight server.', 0);
+    throw new ApiError(timedOut ? 'The server took too long to answer.' : 'Could not reach the Vantage server.', 0);
   }
   if (response.status === 204) return undefined as T;
   const data = await response.json().catch(() => undefined);
@@ -152,7 +152,7 @@ export const api = {
 
   vehicles: () => request<{ vehicles: MbtaVehicle[] }>('/mbta/vehicles'),
 
-  /** Sends a review of a place. The server publishes it once a FareSight admin approves it. */
+  /** Sends a review of a place. The server publishes it once a Vantage admin approves it. */
   review: (placeId: string, review: { author_label: string; text: string; rating: number }) =>
     request<{ id: string; created_at: string }>(`/restaurants/${pathId(placeId)}/reviews`, review),
 };

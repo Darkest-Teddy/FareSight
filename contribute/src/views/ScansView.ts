@@ -24,7 +24,7 @@ interface Card {
   actionsFor?: string;
 }
 
-/** Progress of every scan started on this device, from upload to live in FareSight. */
+/** Progress of every scan started on this device, from upload to live in Vantage. */
 export class ScansView {
   readonly root = el('section', 'view scans-view');
   private readonly list = el('div', 'scans-list');
@@ -128,8 +128,8 @@ export class ScansView {
     card.note.textContent = (
       status === 'missing' ? 'This scan is no longer on the server.'
       : status === 'loading' ? 'Checking on this scan…'
-      : status === 'ready' ? 'Live in FareSight. Riders can now preview it in 3D.'
-      : status === 'needs_review' ? 'Built. A FareSight admin reviews it before it goes live.'
+      : status === 'ready' ? 'Live in Vantage. Riders can now preview it in 3D.'
+      : status === 'needs_review' ? 'Built. A Vantage admin reviews it before it goes live.'
       : status === 'rejected' ? (job?.rejection_reason || job?.error || job?.status_message || 'This scan was rejected during review.')
       : status === 'failed' ? (job?.error || job?.status_message || 'The build stopped before it finished.')
       : `${job?.progress ?? 0}% · ${job?.status_message ?? ''}`

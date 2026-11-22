@@ -1,4 +1,4 @@
-/* FareSight Contribute. Shares the brand tokens of the main app (web/src/styles/tokens.css). */
+/* Vantage Contribute. Shares the brand tokens of the main app (web/src/styles/tokens.css). */
 :root {
   color-scheme: dark;
   font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -82,17 +82,8 @@ button:disabled { cursor: default; }
   pointer-events: none;
 }
 .topbar > * { pointer-events: auto; }
-.wordmark { display: grid; place-items: center; width: 2.9rem; height: 2.9rem; padding: 0; border-radius: 50%; }
-.brand-mark {
-  width: 1.3rem;
-  height: 1.3rem;
-  flex: none;
-  border-radius: .18rem;
-  transform: skewX(-5deg);
-  background:
-    linear-gradient(120deg, var(--accent) 0 25%, transparent 26% 39%, #fff 40% 66%, transparent 67%),
-    linear-gradient(120deg, transparent 70%, var(--accent) 71%);
-}
+.wordmark { display: inline-flex; align-items: center; gap: .45rem; min-height: 2.9rem; padding: 0 .8rem; border-radius: 999px; font-weight: 650; }
+.brand-mark { width: 1.3rem; height: 1.3rem; flex: none; }
 .icon-button { display: grid; place-items: center; width: 2.9rem; height: 2.9rem; padding: 0; border-radius: 50%; }
 .code-button { position: relative; color: var(--muted); }
 .code-button::after {

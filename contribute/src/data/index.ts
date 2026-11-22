@@ -83,7 +83,7 @@ export function categoryLabel(place: Place) {
 /** What people say about a place, boiled down to one rating and one line. */
 export interface ReviewSummary {
   rating?: number;
-  /** Where the rating comes from: FareSight's own reviews, or a public source such as Tripadvisor. */
+  /** Where the rating comes from: Vantage's own reviews, or a public source such as Tripadvisor. */
   source?: string;
   quote?: string;
 }
@@ -95,7 +95,7 @@ export function reviewSummary(place: Place): ReviewSummary {
   const written = place.reviews.filter((review) => !review.sample).at(-1);
   return {
     rating: rated.length ? rated.reduce((sum, review) => sum + review.rating, 0) / rated.length : outside?.rating,
-    source: rated.length ? 'FareSight' : outside?.source,
+    source: rated.length ? 'Vantage' : outside?.source,
     quote: written?.text ?? place.details?.review_highlights[0] ?? place.reviews[0]?.text,
   };
 }

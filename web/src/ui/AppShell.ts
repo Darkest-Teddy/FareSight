@@ -101,10 +101,17 @@ export class AppShell {
   constructor(private readonly root: HTMLElement) {
     root.classList.add('app-shell');
     // The map is the hero. The chrome keeps to the corners: the brand, or a back button once you are
-    // deeper than the map, top-left; a row of icon buttons bottom-left; the budget bottom-right.
-    const mark = element('span', 'brand-mark');
+    // deeper than the map, top-left; a column of icon buttons bottom-left; the budget bottom-right.
+    const mark = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    mark.classList.add('brand-mark');
+    mark.setAttribute('viewBox', '0 0 96 96');
     mark.setAttribute('aria-hidden', 'true');
-    this.brand.append(mark, 'FareSight');
+    mark.setAttribute('fill', 'currentColor');
+    mark.innerHTML = `
+      <path d="M9 78V50C9 32 18 23 35 16L56 8 82 18 61 27C46 33 38 42 38 57V67Z"/>
+      <path d="M48 55C48 45 53 39 63 35L85 26V65L48 87Z"/>
+    `;
+    this.brand.append(mark, 'Vantage');
     this.backNav.setAttribute('aria-label', 'Scene navigation');
     this.backButton = button('', () => this.stepBack(), 'scene-back');
     this.backButton.append(icon('back'), this.backLabel);
@@ -145,7 +152,7 @@ export class AppShell {
       sendText: (text) => this.liveClient.sendText(text),
       opened: () => this.settleOverlays('voice'),
     });
-    this.canvas.setAttribute('aria-label', 'FareSight interactive 3D view');
+    this.canvas.setAttribute('aria-label', 'Vantage interactive 3D view');
     this.canvas.tabIndex = 0;
     this.canvasNotice.replaceChildren(message('Loading 3D viewer…'));
     this.canvasNotice.setAttribute('aria-live', 'polite');

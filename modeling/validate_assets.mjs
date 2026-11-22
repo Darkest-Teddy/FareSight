@@ -67,10 +67,12 @@ const expected = [
 ].sort();
 const generated = readdirSync(dir).filter((n) => /\.(ply|glb|json)$/.test(n)).sort();
 assert.deepEqual(generated, expected);
+const webxrHandAssets = ['vr-hand-left.glb', 'vr-hand-right.glb', 'vr-hands-LICENSE.txt'];
 const published = readdirSync(new URL('../web/public/assets-demo/', import.meta.url))
   .filter((n) => !/^(room-.+-atlas|dish-.+)\.sog$/.test(n))
   .sort();
-assert.deepEqual(published, generated, 'Run pnpm assets:sync to publish the generated assets');
+assert.deepEqual(published, [...generated, ...webxrHandAssets].sort(),
+  'Expected the generated assets from pnpm assets:sync and the vendored WebXR hand assets');
 for (const file of expected) {
   const shipped = readFileSync(new URL('../web/public/assets-demo/' + file, import.meta.url));
   assert.ok(shipped.equals(readFileSync(dir + file)), 'Published asset differs from generator output: ' + file);

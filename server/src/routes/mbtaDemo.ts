@@ -103,7 +103,7 @@ export function demoAlerts(routes: string[], stop?: string): MbtaAlert[] {
   const routeIds = routes.filter((route) => route.startsWith('Green'));
   return routeIds.length ? [{
     id: 'demo-green-platform', header: 'Demo alert: Green Line platform changes',
-    description: 'Example service advisory for the FareSight demonstration.',
+    description: 'Example service advisory for the Vantage demonstration.',
     severity: 3, effect: 'STATION_ISSUE', route_ids: routeIds, stop_ids: ['place-kencl'], url: null,
   }] : [];
 }

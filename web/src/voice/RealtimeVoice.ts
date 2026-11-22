@@ -511,7 +511,7 @@ export class RealtimeVoice {
           result = completed.result;
           label = completed.actionLabel;
         } catch {
-          result = { ok: false, error: 'FareSight could not perform that action. Check the tool and its arguments.' };
+          result = { ok: false, error: 'Vantage could not perform that action. Check the tool and its arguments.' };
         }
         if (!current()) return;
         if (label) this.callbacks.onTranscript({ kind: 'action', text: label });
