@@ -518,10 +518,6 @@ export class MapSculptureScene {
     }
   }
 
-  seekCallouts(progress: number): void {
-    for (const { callout } of this.beacons) this.reveal.seek(callout, progress, jarvisPoints.detail);
-  }
-
   /** Headsets get 3D callouts; flat screens get the HTML labels. */
   setImmersive(active: boolean): void {
     if (this.immersive === active) return;

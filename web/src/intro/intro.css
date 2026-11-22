@@ -1,44 +1,36 @@
 /*
- * Vantage landing page. One paper theme, one accent (the Green Line), one radius rule:
- * interactive things are full pills, nothing else is boxed.
- * Layers, bottom to top: stage 0, shade 1, veil 2, copy 3, bar 4, status 5.
+ * Vantage landing page, in the app's Paper Map look: warm paper, ink for what matters, sunflower
+ * behind whatever is being pointed at. Colors, type, shadows, corner radii and the size of the
+ * corner controls all come from the app's tokens, so the two pages cannot drift apart.
+ * Layers, bottom to top: stage 0, shade 1, station labels then veil and dusk 2, copy and phone 3, bar 4, status 5.
  */
+@import '../styles/tokens.css';
+
 :root {
-  color-scheme: light;
-  /* Same paper, ink and card tones as the app (web/src/styles/tokens.css). */
-  --bg: #FBF9F4;
-  --card: #FFFDF8;
-  --ink: #141413;
-  --dim: rgb(34 37 43 / 78%);
-  --faint: rgb(34 37 43 / 66%);
-  --edge: rgb(34 37 43 / 16%);
-  --accent: #00843D;
-  /* The Green Line darkened until it passes 4.5:1 as small text on paper. */
-  --accent-ink: #006B31;
-  /* Inside the scanned room the scene behind the page is dark, so the bar and that beat's copy
-     turn to paper-on-dark. --interior runs 0 to 1 and is set by main.ts. */
+  /* Side margin of the copy. The top row keeps the app's --gutter, so the brand sits where the app's does. */
+  --inset: clamp(1.25rem, 5.5vw, 5.5rem);
+  /* Where things under the top row start. */
+  --below-bar: calc(max(var(--gutter), env(safe-area-inset-top)) + var(--tap) + .625rem);
+  /* Inside the scanned room the scene behind the page is dark, so that beat's copy is paper on dark.
+     --interior runs 0 to 1 and is set by main.ts. */
   --room: #1A140E;
-  --bar-ink: color-mix(in srgb, var(--ink), var(--card) calc(var(--interior, 0) * 100%));
-  --gutter: clamp(1.25rem, 5.5vw, 5.5rem);
-  --bar: 4rem;
-  font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', Roboto, sans-serif;
   font-synthesis: none;
-  -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  color: var(--ink);
-  background: var(--bg);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
 html { scrollbar-width: thin; scrollbar-color: rgb(34 37 43 / 24%) transparent; }
-body { margin: 0; background: var(--bg); overflow-x: hidden; }
+body { margin: 0; background: var(--paper); overflow-x: hidden; }
 h1, h2, p { margin: 0; }
 a { color: inherit; text-decoration: none; }
 [hidden] { display: none !important; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: .5rem; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: var(--radius-sm); }
 
-/* The scroll track. It is empty: its only job is to be tall. */
-main { height: 860vh; }
+/*
+ * The scroll track. It is empty: its only job is to be tall. 760vh of travel carries the 3D
+ * journey, and the Contribute chapter holds the stage for 46% more (HOLD in main.ts).
+ */
+main { height: 1210vh; }
 
 #stage {
   position: fixed; inset: 0; z-index: 0;
@@ -48,8 +40,30 @@ main { height: 860vh; }
 }
 body[data-state=ready] #stage { opacity: 1; }
 body[data-stage=missing] #stage { display: none; }
-/* The app's flat-screen station labels are not part of the headset view. */
-.map-labels { display: none; }
+/*
+ * Station labels over the map: the pills the app shows on a flat screen (built in xr/MapLabels.ts,
+ * styled like styles/app.css). They sit over the shade, so its haze does not wash them out, and
+ * under the copy. They take no clicks here.
+ */
+.map-labels { position: fixed; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; }
+body:not([data-state=ready]) .map-labels, body[data-stage=missing] .map-labels { display: none; }
+/* They wait for the map to draw itself in. With no end frame, the fade lands on the opacity MapLabels sets. */
+body[data-state=ready] .map-labels { animation: labels-in .7s ease-out .9s backwards; }
+@keyframes labels-in { from { opacity: 0; } }
+.map-label {
+  position: absolute; top: 0; left: 0;
+  display: inline-flex; align-items: center; gap: .4375rem;
+  min-height: 2rem; padding: .3125rem .75rem .3125rem .5625rem;
+  border: 0; border-radius: var(--radius-sm); font: inherit; color: var(--ink);
+  background: var(--surface); box-shadow: var(--shadow-sm);
+  white-space: nowrap; will-change: transform;
+}
+.map-label strong { font-size: .8125rem; font-weight: 650; letter-spacing: -.01em; }
+.map-label-dot { width: .6875rem; height: .6875rem; flex: none; border-radius: 50%; background: var(--line); box-shadow: 0 0 0 2px var(--surface); }
+.map-label-count { color: var(--muted); font-size: .75rem; font-weight: 550; font-variant-numeric: tabular-nums; }
+.map-label-stem { position: absolute; left: 50%; width: 1.5px; margin-left: -.75px; background: rgb(34 37 43 / 55%); }
+.map-label-stem[data-side=below] { top: 100%; }
+.map-label-stem[data-side=above] { bottom: 100%; }
 
 /* Keeps the copy legible over the model without boxing it. */
 .shade {
@@ -65,57 +79,91 @@ body[data-stage=missing] #stage { display: none; }
   background: radial-gradient(ellipse min(37rem, 70vw) 38vh at 50% 50%, var(--room) 10%, transparent 90%);
 }
 
+/* The top row follows the app's corner controls: the brand bare on the paper, white cards for the rest. */
 .bar {
   position: fixed; inset: 0 0 auto; z-index: 4;
-  height: var(--bar); padding: 0 var(--gutter);
-  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 1.5rem;
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: .75rem;
+  padding: max(var(--gutter), env(safe-area-inset-top)) max(var(--gutter), env(safe-area-inset-right)) 0 max(var(--gutter), env(safe-area-inset-left));
+  pointer-events: none;
 }
-.wordmark { display: inline-flex; align-items: center; gap: .4rem; justify-self: start; font-size: 1.06rem; font-weight: 650; letter-spacing: -.02em; color: var(--bar-ink); }
-.wordmark, .chapters a { display: inline-flex; align-items: center; min-height: 44px; }
-.wordmark svg { width: 1.375rem; height: 1.375rem; flex: none; }
-.chapters { display: flex; gap: clamp(1rem, 2.4vw, 2.25rem); font-size: .8rem; letter-spacing: -.005em; white-space: nowrap; }
-.chapters a { padding: .5rem 0; color: color-mix(in srgb, var(--bar-ink) 68%, transparent); transition: color .35s ease; }
-.chapters a:hover { color: color-mix(in srgb, var(--bar-ink) 84%, transparent); }
-.chapters a[aria-current] { color: var(--bar-ink); }
-.bar .pill { justify-self: end; }
+.bar > * { pointer-events: auto; }
+/* The brand sits on the paper on its own, as in the app. It turns to paper over the dark room. */
+.brand {
+  justify-self: start;
+  display: inline-flex; align-items: center; gap: .5rem;
+  min-height: var(--tap);
+  color: color-mix(in srgb, var(--ink), var(--surface) calc(var(--interior, 0) * 100%));
+  font-size: 1.0625rem; font-weight: 800; letter-spacing: -.04em; white-space: nowrap;
+}
+/* The Vantage mark: an SVG drawn in the ink of the name beside it. */
+.brand-mark { width: 1.375rem; height: 1.375rem; flex: none; }
+.bar .action { justify-self: end; }
+/* Reading progress, drawn along the top edge of the page. It turns to paper over the dark room. */
 .meter {
-  position: absolute; inset: auto 0 0; height: 1px;
-  background: var(--accent); transform-origin: 0 50%; transform: scaleX(0);
+  position: fixed; inset: 0 0 auto; height: 2px; pointer-events: none;
+  background: color-mix(in srgb, var(--ink), var(--surface) calc(var(--interior, 0) * 100%));
+  transform-origin: 0 50%; transform: scaleX(0);
 }
 
-.pill {
+/* Actions are the app's buttons: a white card with small corners, or ink for the one that matters. */
+.action {
   display: inline-flex; align-items: center; justify-content: center;
-  height: 44px; padding: 0 .875rem; gap: .375rem;
-  border: 1px solid var(--edge); border-radius: .625rem;
-  font-size: .8rem; font-weight: 550; white-space: nowrap;
-  color: var(--ink); background: rgb(255 253 248 / 72%);
-  box-shadow: 0 4px 14px rgb(80 60 30 / 10%);
-  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
-  transition: background .25s ease, border-color .25s ease;
+  height: var(--tap); padding: 0 1.125rem; gap: .375rem;
+  border-radius: var(--radius);
+  font-size: .875rem; font-weight: 650; letter-spacing: -.01em; white-space: nowrap;
+  color: var(--ink); background: var(--surface); box-shadow: var(--shadow-sm);
+  transition: background-color .15s, box-shadow .15s, transform .15s;
 }
-.pill:hover { background: var(--card); border-color: rgb(34 37 43 / 30%); }
-.pill .icon { width: 1rem; height: 1rem; flex: none; }
-.pill.solid { height: 2.9rem; padding: 0 1.5rem; font-size: .95rem; color: var(--card); background: var(--ink); border-color: var(--ink); }
-.pill.solid:hover { background: #33373F; border-color: #33373F; }
+.action:active { transform: scale(.98); }
+.action .icon { width: 1rem; height: 1rem; flex: none; }
+.action.solid { color: var(--on-ink); background: var(--ink); }
+/* Hover only where a pointer can hover, as in the app: a card gains an ink ring, ink lightens. */
+@media (hover: hover) {
+  .action:hover { box-shadow: 0 0 0 2px var(--ink), var(--shadow); }
+  .action.solid:hover { background: var(--ink-soft); box-shadow: var(--shadow-sm); }
+  .beat-inside .action:hover { background: #fff; box-shadow: var(--shadow); }
+}
 
 /* Copy. Every beat is fixed over the stage; main.ts fades and drifts its .copy. */
 .beat {
   position: fixed; inset: 0; z-index: 3;
-  padding: calc(var(--bar) + 1.5rem) var(--gutter) clamp(2.5rem, 9vh, 6rem);
+  padding: calc(var(--below-bar) + .875rem) var(--inset) clamp(2.5rem, 9vh, 6rem);
   display: grid; pointer-events: none; visibility: hidden;
 }
 .copy { opacity: 0; will-change: opacity, transform; pointer-events: auto; }
-h1, h2 { font-weight: 620; letter-spacing: -.038em; line-height: 1.03; text-wrap: balance; }
-h1 { font-size: clamp(2.6rem, 6.1vw, 5.6rem); max-width: 10.5em; }
-h2 { font-size: clamp(2.1rem, 4.5vw, 4.1rem); }
-.lead { margin-top: 1.15rem; max-width: 33ch; font-size: clamp(1.02rem, 1.28vw, 1.24rem); line-height: 1.42; letter-spacing: -.012em; color: var(--dim); text-wrap: pretty; }
-.note { margin-top: .85rem; max-width: 36ch; font-size: .92rem; line-height: 1.5; color: var(--faint); }
-.line { display: inline-flex; align-items: center; gap: .55rem; margin-bottom: 1rem; font-size: .82rem; font-weight: 550; color: var(--accent-ink); }
-.line::before { content: ''; width: 1.6rem; height: 2px; border-radius: 2px; background: var(--accent); }
+h1, h2 { text-wrap: balance; }
+h1 { font-size: clamp(2.6rem, 6.1vw, 5.6rem); font-weight: 800; letter-spacing: -.05em; line-height: 1; max-width: 10.5em; }
+h2 { font-size: clamp(2.1rem, 4.5vw, 4.1rem); font-weight: 750; letter-spacing: -.045em; line-height: 1.04; }
+.lead { margin-top: 1.15rem; max-width: 33ch; font-size: clamp(1.02rem, 1.28vw, 1.24rem); line-height: 1.45; letter-spacing: -.012em; color: var(--ink-soft); text-wrap: pretty; }
+.note { margin-top: .85rem; max-width: 36ch; font-size: .9375rem; line-height: 1.5; color: var(--muted); }
+/* Sunflower sits behind ink to point at one thing, as it does on the app's map. */
+.hl {
+  display: inline-block; margin: -.08em -.06em; padding: .06em .14em .1em;
+  border-radius: .14em; background: var(--sun); line-height: .92;
+}
+.price { color: var(--price); font-weight: 600; font-variant-numeric: tabular-nums; }
+/* The yellow 3D tag the place plaques carry in the scene. */
+.tag-3d {
+  display: inline-block; padding: .08em .36em; border-radius: .3em;
+  background: var(--sun); color: var(--ink);
+  font-size: .78em; font-weight: 750; letter-spacing: .02em; line-height: 1.15; vertical-align: .08em;
+}
+/* Kickers are the app's map labels: a white card with a dot. Sunflower by default, a line's color for a stop. */
+.line {
+  display: inline-flex; align-items: center; gap: .4375rem;
+  min-height: 2rem; margin-bottom: 1rem; padding: .3125rem .75rem .3125rem .5625rem;
+  border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow-sm);
+  font-size: .8125rem; font-weight: 650; letter-spacing: -.01em; white-space: nowrap;
+}
+.line::before {
+  content: ''; width: .6875rem; height: .6875rem; flex: none; border-radius: 50%;
+  border: 1.5px solid var(--ink); background: var(--sun);
+}
+.line[data-line=green]::before { border-color: var(--live); background: var(--live); }
 .room-tag {
-  width: fit-content; margin: 1.25rem auto 0; padding: .34rem .7rem;
-  border: 1px solid var(--edge); border-radius: .375rem;
-  color: var(--ink); background: rgb(255 253 248 / 82%); font-size: .76rem;
+  width: fit-content; margin: 1.25rem auto 0; padding: .3125rem .625rem;
+  border-radius: var(--radius-xs); background: var(--surface); box-shadow: var(--shadow-sm);
+  color: var(--ink); font-size: .75rem; font-weight: 550;
 }
 
 .beat-hero { align-items: end; justify-items: start; visibility: visible; }
@@ -128,39 +176,135 @@ h2 { font-size: clamp(2.1rem, 4.5vw, 4.1rem); }
 .beat-place .copy { width: min(26rem, 100%); padding-bottom: 2vh; }
 .beat-place h2 { font-size: clamp(2rem, 3.6vw, 3.3rem); }
 .beat-inside { align-items: center; justify-items: center; text-align: center; }
-/* Inside the room the copy is paper on the dark veil. */
-.beat-inside .copy { color: var(--card); text-shadow: 0 2px 15px rgb(20 14 8 / 86%); }
-.beat-inside .lead { color: rgb(255 253 248 / 90%); }
-.beat-inside .room-tag, .beat-inside .pill { text-shadow: none; }
-.beat-inside .pill.solid { color: var(--ink); background: var(--card); border-color: var(--card); }
-.beat-inside .pill.solid:hover { background: #fff; border-color: #fff; }
-.beat-inside .lead { margin-inline: auto; max-width: 38ch; }
-.beat-inside .pill { margin-top: 1.25rem; }
-.look-hint { display: none; margin-top: .9rem; font-size: .8rem; color: var(--dim); }
+/* Inside the room the copy is paper on the dark veil, and the action is a paper card. */
+.beat-inside .copy { color: var(--surface); text-shadow: 0 2px 15px rgb(20 14 8 / 86%); }
+.beat-inside .lead { margin-inline: auto; max-width: 42ch; color: rgb(255 253 248 / 90%); }
+.beat-inside .room-tag, .beat-inside .action { text-shadow: none; }
+.beat-inside .action { height: 3.25rem; margin-top: 1.25rem; padding: 0 1.75rem; font-size: .9375rem; }
+.beat-inside :focus-visible { outline-color: var(--surface); }
+.look-hint { display: none; margin-top: .9rem; font-size: .8125rem; font-weight: 550; color: rgb(255 253 248 / 82%); }
 body[data-room=ready] .look-hint { display: block; }
 /* Inside the room a drag turns the visitor's head. Vertical swipes still scroll the page. */
 :root[data-look] { cursor: grab; touch-action: pan-y pinch-zoom; user-select: none; -webkit-user-select: none; }
 :root[data-look=held] { cursor: grabbing; }
 :root[data-look] a { cursor: pointer; }
 
+/*
+ * The Contribute chapter. The stage dims and one phone floats over it, level with the copy;
+ * main.ts fades and moves the phone and swaps its screen from the home page to the scan.
+ */
+.dusk {
+  position: fixed; inset: 0; z-index: 2; pointer-events: none;
+  opacity: var(--phone, 0);
+  /* Paper, thickest under the copy, so the flag behind it does not compete with the words. */
+  background: linear-gradient(90deg, rgb(251 249 244 / 95%) 0%, rgb(251 249 244 / 92%) 46%, rgb(251 249 244 / 78%) 100%);
+}
+/*
+ * The phone is drawn, not a picture: a brushed metal band, a black bezel, the island, the side keys
+ * and a status bar. Every size is a share of --w, its width, so it scales as one piece.
+ * The status bar and the strip under the screen take the colour of the app screen showing:
+ * the home page's paper and tab bar, or the camera's black once the scan is on (.is-scan).
+ */
+.phone {
+  --w: min(35vh, 20rem);
+  --phone-top: #fbf9f4; --phone-bottom: #f1ede7; --phone-ink: #16181d;
+  position: fixed; top: 52%; left: 70%; z-index: 3;
+  width: var(--w);
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transform: translate(-50%, -50%); will-change: opacity, transform;
+}
+.phone.is-scan { --phone-top: #000; --phone-bottom: #000; --phone-ink: #fff; }
+/* The shadow it casts on the table it floats over. */
+.phone::after {
+  content: ''; position: absolute; z-index: -1;
+  inset: auto 7% calc(var(--w) * -.085);
+  height: calc(var(--w) * .17); border-radius: 50%;
+  background: rgb(60 45 20 / 62%); filter: blur(calc(var(--w) * .065));
+}
+.phone-body {
+  position: relative; z-index: 1;
+  padding: calc(var(--w) * .014); border-radius: calc(var(--w) * .178);
+  /* Light catches the band's two long edges. */
+  background: linear-gradient(100deg, #e4ebf3 0%, #a3b4c8 6%, #74889f 26%, #8395ac 52%, #6a7e96 76%, #b3c2d3 94%, #e8eef5 100%);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 50%),
+    inset 0 0 calc(var(--w) * .012) rgb(20 30 45 / 60%),
+    0 calc(var(--w) * .05) calc(var(--w) * .13) rgb(60 45 20 / 24%);
+}
+.phone-screen {
+  overflow: hidden;
+  /* The bezel is the border, so the screen's corners stay clipped to it. */
+  border: calc(var(--w) * .026) solid #050608; border-radius: calc(var(--w) * .164);
+  background: #050608;
+}
+.phone-key {
+  position: absolute; left: calc(var(--w) * -.009);
+  width: calc(var(--w) * .016); border-radius: calc(var(--w) * .006);
+  background: linear-gradient(90deg, #c5d1de, #7c90a8 40%, #5f7289);
+}
+.phone-key-action { top: 20.5%; height: 4%; }
+.phone-key-up { top: 28.5%; height: 7.4%; }
+.phone-key-down { top: 38%; height: 7.4%; }
+.phone-key-power { top: 32%; left: auto; right: calc(var(--w) * -.009); height: 11.5%; background: linear-gradient(270deg, #c5d1de, #7c90a8 40%, #5f7289); }
+.phone-status {
+  height: calc(var(--w) * .116); padding: calc(var(--w) * .016) calc(var(--w) * .05) 0;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  font-size: calc(var(--w) * .041); font-weight: 600; letter-spacing: -.01em; line-height: 1;
+  color: var(--phone-ink); background: var(--phone-top);
+  transition: color .25s ease, background-color .25s ease;
+}
+.phone-time { justify-self: center; }
+.phone-island {
+  width: calc(var(--w) * .27); height: calc(var(--w) * .078); border-radius: 999px;
+  /* The camera's lens sits at its right end. */
+  background: radial-gradient(circle at 79% 50%, #1c2436 0 5%, #0b0d14 6% 10%, #000 11%);
+}
+.phone-signal { justify-self: center; display: flex; align-items: center; gap: calc(var(--w) * .013); }
+.phone-signal svg { display: block; height: calc(var(--w) * .029); fill: currentColor; }
+.phone-view { position: relative; aspect-ratio: 393 / 760; background: #000; }
+.phone-view > * { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; }
+/* The recording is a little squatter than the screen, so it sits in the camera's black. */
+.phone-scan { opacity: 0; object-fit: contain; background: #000; }
+.phone-grip {
+  height: calc(var(--w) * .052); display: grid; place-items: center;
+  background: var(--phone-bottom); transition: background-color .25s ease;
+}
+.phone-grip span { width: 35%; height: calc(var(--w) * .0125); border-radius: 999px; background: var(--phone-ink); transition: background-color .25s ease; }
+.beat-phone { align-items: center; justify-items: start; }
+.beat-phone .copy { max-width: min(30rem, 42vw); }
+.beat-phone h2 { font-size: clamp(2rem, 3.6vw, 3.3rem); }
+
+/* Loading and failure notes use the app's notice: a white card under the top row. */
 .status {
-  position: fixed; inset: calc(var(--bar) + .8rem) var(--gutter) auto auto; z-index: 5;
-  text-align: right; font-size: .82rem; color: var(--faint); pointer-events: none;
+  position: fixed; inset: var(--below-bar) max(var(--gutter), env(safe-area-inset-right)) auto auto; z-index: 5;
+  display: flex; align-items: center; gap: .5rem;
+  max-width: calc(100vw - 2 * var(--gutter)); padding: .625rem 1rem;
+  border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow);
+  font-size: .8125rem; font-weight: 550; pointer-events: none;
 }
-body[data-state=loading] .status::after {
-  content: ''; display: block; width: 7rem; height: 1px; margin: .9rem auto 0;
-  background: var(--edge);
+body[data-state=loading] .status::before {
+  content: ''; width: .5rem; height: .5rem; flex: none; border-radius: 50%;
+  border: 1.5px solid var(--ink); background: var(--sun);
+  animation: pulse 1.2s ease-in-out infinite;
 }
+@keyframes pulse { 50% { opacity: .3; } }
 
 /* Tall and narrow screens: the model rides high, all copy reads from the bottom left. */
 @media (max-width: 860px) {
-  .bar { grid-template-columns: 1fr auto; }
-  .chapters { display: none; }
+  .map-label { min-height: 1.875rem; padding: .25rem .625rem .25rem .5rem; }
+  .map-label strong { font-size: .75rem; }
+  .map-label-count { display: none; }
   .beat, .beat-stops, .beat-inside { align-items: end; justify-items: start; text-align: left; }
   .beat-stops .lead, .beat-inside .lead { margin-inline: 0; }
   .room-tag { margin-inline: 0; }
-  .beat-place .copy, .beat-station .copy { width: 100%; max-width: 30rem; padding-bottom: 0; }
+  .beat-place .copy, .beat-station .copy, .beat-phone .copy { width: 100%; max-width: 30rem; padding-bottom: 0; }
   .lead { max-width: 30ch; }
+  /* The phone stands above its copy. */
+  .phone { --w: min(23vh, 53vw); top: calc(var(--below-bar) + .375rem + var(--w) * 1.03); left: 50%; }
+  .dusk { background: rgb(251 249 244 / 92%); }
+  .beat-phone h2 { font-size: 1.8rem; }
+  .beat-phone .line { margin-bottom: .6rem; }
+  .beat-phone .note { display: none; }
   .shade {
     background:
       linear-gradient(to top, rgb(251 249 244 / 94%), rgb(251 249 244 / 70%) 30%, transparent 56%),
@@ -169,6 +313,9 @@ body[data-state=loading] .status::after {
   .veil { background: radial-gradient(ellipse 90vw 32vh at 36% 82%, var(--room) 12%, transparent 92%); }
 }
 
-@media (prefers-reduced-transparency: reduce) {
-  .pill { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--card); }
+@media (prefers-reduced-motion: reduce) {
+  #stage { transition: none; }
+  body[data-state=ready] .map-labels { animation: none; }
+  body[data-state=loading] .status::before { animation: none; }
+  .action { transition: none; }
 }
