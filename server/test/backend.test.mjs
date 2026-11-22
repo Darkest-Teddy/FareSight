@@ -805,9 +805,11 @@ test('gpt-live-1.1 broker preserves SDP and retries rejected optional standby an
       assert.equal(body.session.delegation.responses.model, 'gpt-6-luna');
       const { tools, instructions } = body.session.delegation.responses;
       assert.deepEqual(tools.filter(({ type }) => type === 'function').map(({ name }) => name), [
-        'list_places', 'set_filters', 'focus_stop', 'open_venue', 'open_dish', 'navigate_scene',
-        'get_next_trains', 'set_will_we_fit', 'get_place_details', 'get_live_reviews', 'compare_places', 'show_review_card', 'dismiss_review_card',
-        'get_current_view',
+        'list_places', 'recommend_places', 'search_dishes', 'get_station_overview', 'set_filters',
+        'highlight_map_stops', 'focus_stop', 'highlight_station_places', 'open_venue', 'show_menu',
+        'open_dish', 'rotate_dish', 'navigate_scene', 'get_next_trains', 'get_transit_info', 'set_will_we_fit',
+        'get_place_details', 'get_live_reviews', 'get_live_menu_prices', 'compare_places', 'manage_comparison_tray',
+        'show_review_card', 'dismiss_review_card', 'get_current_view', 'control_camera', 'control_ui', 'submit_visit_note',
       ]);
       assert.ok(tools.some(({ type }) => type === 'web_search'));
       assert.deepEqual(tools.find(({ name }) => name === 'get_live_reviews').parameters.required, ['placeId']);
@@ -815,6 +817,7 @@ test('gpt-live-1.1 broker preserves SDP and retries rejected optional standby an
         type: 'object', properties: {}, required: [], additionalProperties: false,
       });
       assert.equal(tools.find(({ name }) => name === 'show_review_card').parameters.properties.sections.items.anyOf.length, 4);
+      assert.match(instructions, /At session start in Boston \(America\/New_York\): \w+, \w+ \d+, \d+(?:,| at) \d+:\d{2} [AP]M E[DS]T/);
       for (const expected of ['Scene: map | Open clipboards: []', 'PLACES & MENU ITEMS:', 'comparePlaceId', 'up to four clipboards', 'A null dish price', 'call get_current_view first']) {
         assert.ok(instructions.includes(expected), `Missing instruction: ${expected}`);
       }

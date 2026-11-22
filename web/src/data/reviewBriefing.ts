@@ -1,7 +1,7 @@
 import { computeTripEstimate, formatDishPrice, type Dish, type LiveReviewItem, type LiveReviewsResponse, type MbtaSource, type Place, type Stop } from '@faresight/shared';
-import { api, type Alert, type Prediction } from '../api/client';
-import { oneWayCost, type Filters } from '../ui/state';
-import { has3D, has3DRoom, hasDishPreview, isSplat } from './preview3D';
+import { api, type Alert, type Prediction } from '../api/client.ts';
+import { oneWayCost, type Filters } from '../ui/state.ts';
+import { has3D, has3DRoom, hasDishPreview, isSplat } from './preview3D.ts';
 
 export interface BriefingFact { label: string; value: string }
 export interface BriefingReview {
@@ -100,7 +100,8 @@ export interface PlaceDecision {
     alertsAvailable: boolean;
   };
   dishes: (Pick<Dish, 'id' | 'name' | 'price'> & { priceLabel: string; portionNote: string; has3D: boolean })[];
-  rooms: { name: string; statedCapacity: number; seating: string; price: number; priceUnit: string; has3D: boolean }[];
+  rooms: { name: string; statedCapacity: number; seating: string; price: number; priceUnit: string; has3D: boolean;
+    floorWidthM: number; floorDepthM: number; measured: boolean }[];
   reviews: ReviewSnapshot[];
   /** Researched public facts: hours note, awards, aggregate ratings and review highlights. */
   details: Place['details'] | null;
@@ -129,17 +130,27 @@ export function formatHours(hours: [string, string] | undefined): string {
   return hours ? `${shortTime(hours[0])}–${shortTime(hours[1])}` : 'Closed';
 }
 
-export function bostonHours(hours: Place['hours'], now: Date) {
+export type Weekday = typeof week[number][0];
+
+export function bostonTime(now: Date) {
   const parts = bostonClock.formatToParts(now);
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? '';
-  const index = week.findIndex(([day]) => day === part('weekday').toLowerCase());
-  const today = hours[week[index][0]];
+  return { day: part('weekday').toLowerCase() as Weekday, time: `${part('hour')}:${part('minute')}`, timeZone: 'America/New_York' };
+}
+
+export function scheduledHours(hours: Place['hours'], { day, time }: { day: Weekday; time: string }) {
+  const index = week.findIndex(([weekday]) => weekday === day);
+  const today = hours[day];
   const previous = hours[week[(index + 6) % 7][0]];
-  const local = Number(part('hour')) * 60 + Number(part('minute'));
+  const local = minutes(time);
   const overnight = previous && minutes(previous[1]) < minutes(previous[0]) && local < minutes(previous[1]);
   const openNow = !!overnight || !!(today && local >= minutes(today[0]) &&
     (minutes(today[1]) <= minutes(today[0]) || local < minutes(today[1])));
   return { openNow, hoursToday: formatHours(overnight ? previous : today) };
+}
+
+export function bostonHours(hours: Place['hours'], now: Date) {
+  return scheduledHours(hours, bostonTime(now));
 }
 
 export function placeDecision(place: Place, stop: Stop, filters: Filters, now = new Date()): PlaceDecision {
@@ -167,6 +178,8 @@ export function placeDecision(place: Place, stop: Stop, filters: Filters, now = 
     rooms: place.rooms.map((room) => ({
       name: room.name, statedCapacity: room.stated_capacity, seating: room.seating, price: room.price,
       priceUnit: room.price_unit, has3D: !!room.asset_id || isSplat(room.asset),
+      floorWidthM: room.floor_width_m, floorDepthM: room.floor_depth_m,
+      measured: room.asset?.scale_status === 'measured' && room.floor_width_m > 0 && room.floor_depth_m > 0,
     })),
     reviews: catalogReviewSnapshots(place),
     details: place.details ?? null,
@@ -176,6 +189,13 @@ export function placeDecision(place: Place, stop: Stop, filters: Filters, now = 
 export async function loadPlaceDecision(place: Place, stop: Stop, filters: Filters): Promise<PlaceDecision> {
   const [fresh, predictions, alerts] = await Promise.allSettled([api.place(place.id), api.predictions(stop.stop_id), api.alerts()]);
   const details = placeDecision(fresh.status === 'fulfilled' ? fresh.value : place, stop, filters);
+  for (const dish of details.dishes) {
+    const price = dish.price ?? place.dishes.find(({ id }) => id === dish.id)?.price;
+    if (price != null && dish.price == null) {
+      dish.price = price;
+      dish.priceLabel = formatDishPrice(price);
+    }
+  }
   details.transit = {
     source: predictions.status === 'fulfilled' ? predictions.value.source : 'unavailable',
     arrivals: predictions.status === 'fulfilled' ? predictions.value.predictions.filter(({ arrival_min }) => arrival_min !== null)

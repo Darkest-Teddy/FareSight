@@ -120,7 +120,6 @@ export class AppShell {
       openDish: (id, dishId) => { void this.openBriefingVenue(id, dishId); },
       compareDishes: (id, dishId, comparePlaceId, compareDishId) => { void this.openBriefingVenue(id, dishId, compareDishId, comparePlaceId); },
       viewOnMap: (stopId) => {
-        this.dismissReviewCard();
         this.showMap();
         this.engine?.focusMapStopCamera(stopId);
       },
@@ -131,19 +130,21 @@ export class AppShell {
         this.liveDock.setState(state, detail);
         this.engine?.setVoiceState(state);
       },
+      onNotice: (detail) => this.liveDock.setNotice(detail),
+      onMicrophone: (hasMic, muted, requesting) => this.liveDock.setMicrophone(hasMic, muted, requesting),
+      onAudioBlocked: (blocked) => this.liveDock.setAudioBlocked(blocked),
+      onPaused: (paused) => this.liveDock.setPaused(paused),
+      onUnsentText: (text) => this.liveDock.restoreDraft(text),
       onTranscript: (entry) => this.liveDock.appendTranscript(entry),
       onModel: (model) => this.liveDock.setModel(model),
       onTool: (name, args, current) => this.liveController.executeRealtime(name, args, current),
       getContext: () => this.liveController.describeContext(),
     });
     this.liveDock = new LiveVoiceDock({
-      toggle: () => this.liveClient.toggle(),
+      startVoice: () => void this.liveClient.start(),
+      enableAudio: () => this.liveClient.enableAudio(),
       stop: () => this.liveClient.stop(),
-      toggleMute: () => {
-        const next = !this.liveClient.isMuted;
-        this.liveClient.setMuted(next);
-        this.liveDock.setMuted(next);
-      },
+      toggleMute: () => this.liveClient.setMuted(!this.liveClient.isMuted),
       sendText: (text) => this.liveClient.sendText(text),
     });
     // Secondary tools live in one menu so the bar keeps a single clear call to action.
@@ -168,6 +169,7 @@ export class AppShell {
     });
     more.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape' || this.moreMenu.hidden) return;
+      event.preventDefault();
       this.setMenuOpen(false);
       this.moreButton.focus();
     });
@@ -186,7 +188,7 @@ export class AppShell {
     this.stationBoard.setAttribute('aria-label', 'Boston stops');
     this.stationBoard.append(boardHead, this.stationList, this.routeFeedback);
 
-    this.filterBar = new FilterBar(this.filters, (patch) => this.updateFilters(patch), () => this.locate(), () => this.setFilterOpen(false));
+    this.filterBar = new FilterBar(this.filters, (patch) => this.updateFilters(patch), () => void this.locate(), () => this.setFilterOpen(false));
     this.drawer = new PlaceDrawer({
       showBriefing: (place) => this.showPlaceBriefing(place),
       toggleComparison: (place) => {
@@ -233,7 +235,10 @@ export class AppShell {
       this.mobileButtons.set(label, tab);
     }
 
-    root.replaceChildren(this.canvas, this.canvasNotice, head, this.stationBoard, this.filterBar.root, this.drawer.root, this.liveDock.root, tabs, this.notice);
+    root.replaceChildren(this.canvas, this.canvasNotice, head, this.stationBoard, this.filterBar.root, this.drawer.root, this.reviewModal.root, this.liveDock.root, tabs, this.notice);
+    document.addEventListener('keydown', (event) => {
+      if (!(event.target instanceof Element && event.target.closest('dialog[open]'))) this.reviewModal.dismissOnEscape(event);
+    });
     this.debug.body.append(this.renderStats, this.debugLogs,
       button('Reset camera', () => this.engine?.resetCamera()),
       button('Send debug logs', () => void this.sendDebugLogs(), 'quiet'));
@@ -412,6 +417,7 @@ export class AppShell {
     this.stationBoard.hidden = this.mode !== 'map';
     const shown = this.drawerOpen && this.mode !== 'map' && !(this.mobile.matches && this.filterOpen);
     this.root.dataset.drawer = String(shown);
+    this.drawer.mountComparison(shown ? undefined : this.stationBoard);
     if (shown) this.renderDrawer();
     else this.drawer.hide();
     this.drawer.expanded(this.sheetExpanded);
@@ -422,9 +428,16 @@ export class AppShell {
 
   private renderDrawer(focus = false) {
     this.drawer.setComparison(this.comparedPlaces, this.comparisonLoading);
+    focus &&= !this.liveDock.root.contains(document.activeElement);
     if (!this.drawerOpen || (this.mobile.matches && this.filterOpen)) return;
     if (this.mode === 'station' && this.stop) {
-      this.drawer.station(this.stop, placesAt(this.filtered, this.stop, this.filters), this.filters, focus, new Set(this.highlightedPlaces));
+      const highlights = new Set(this.highlightedPlaces);
+      const places = placesAt(this.filtered, this.stop, this.filters);
+      const shown = new Set(places.map(({ id }) => id));
+      if (this.xrMode === 'none' && !this.mobile.matches) {
+        places.push(...this.places.filter(({ id, stop_id }) => stop_id === this.stop?.stop_id && highlights.has(id) && !shown.has(id)));
+      }
+      this.drawer.station(this.stop, places, this.filters, focus, highlights);
       this.updateStationDrawer();
     }
     if ((this.mode === 'venue' || this.mode === 'dish') && this.place) {
@@ -466,23 +479,31 @@ export class AppShell {
     if (this.fit && this.inside) this.engine?.setWillWeFit(true, this.filters.groupSize, this.seating);
   }
 
-  private locate() {
-    if (!navigator.geolocation) { this.notify('GPS is unavailable in this browser. Choose your start stop.'); return; }
+  private async locate(current = () => true): Promise<{ ok: boolean; stop?: Stop; message: string }> {
+    const fail = (message: string) => {
+      if (current()) this.notify(message);
+      return { ok: false, message };
+    };
+    if (!current()) return { ok: false, message: 'Location request cancelled.' };
+    if (!navigator.geolocation) return fail('GPS is unavailable in this browser. Choose your start stop.');
     const request = ++this.gpsRequest;
     this.notify('Finding the nearest demo stop…');
-    navigator.geolocation.getCurrentPosition(({ coords }) => {
-      if (request !== this.gpsRequest) return;
-      const distance = (stop: Stop) => haversineMeters(coords.latitude, coords.longitude, stop.lat, stop.lon);
-      const nearest = [...this.stops].sort((a, b) => distance(a) - distance(b))[0];
-      if (!nearest) { this.notify('No stops are available.'); return; }
-      this.filters = { ...this.filters, startStopId: nearest.stop_id };
-      this.origin = { lat: coords.latitude, lon: coords.longitude };
-      this.applyFilters();
-      void this.refreshTrip();
-      this.notify(`Starting from ${nearest.name}, your nearest demo stop.`);
-    }, () => {
-      if (request === this.gpsRequest) this.notify('Could not read your location. Choose a start stop from the list.');
-    }, { timeout: 10_000, maximumAge: 60_000 });
+    const position = await new Promise<GeolocationPosition>((resolve, reject) =>
+      navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10_000, maximumAge: 60_000 }),
+    ).catch(() => undefined);
+    if (request !== this.gpsRequest || !current()) return { ok: false, message: 'Location request cancelled.' };
+    if (!position) return fail('Could not read your location. Choose a start stop from the list.');
+    const { latitude, longitude } = position.coords;
+    const distance = (stop: Stop) => haversineMeters(latitude, longitude, stop.lat, stop.lon);
+    const nearest = [...this.stops].sort((a, b) => distance(a) - distance(b))[0];
+    if (!nearest) return fail('No stops are available.');
+    this.filters = { ...this.filters, startStopId: nearest.stop_id };
+    this.origin = { lat: latitude, lon: longitude };
+    this.applyFilters();
+    void this.refreshTrip();
+    const message = `Starting from ${nearest.name}, your nearest demo stop.`;
+    this.notify(message);
+    return { ok: true, stop: nearest, message };
   }
 
   private navigate(mode: SceneMode) {
@@ -506,8 +527,6 @@ export class AppShell {
   private showStation(stop: Stop) {
     ++this.navigation;
     const changed = this.stop?.stop_id !== stop.stop_id || this.mode !== 'station';
-    // On desktop the station view has no side panel: places are picked from the pins in the 3D diorama.
-    // The phone keeps its bottom sheet, which waits for the 3D dive from the map and slides in as it lands.
     const sheet = this.mobile.matches;
     const arriving = sheet && this.mode === 'map';
     this.drawer.root.classList.toggle('arriving', arriving);
@@ -520,7 +539,7 @@ export class AppShell {
     this.inside = this.fit = false;
     this.mode = 'station';
     this.filterOpen = false;
-    this.drawerOpen = sheet;
+    this.drawerOpen = sheet || (this.xrMode === 'none' && this.comparedPlaces.length > 0);
     this.sheetExpanded = false;
     this.renderBreadcrumbs();
     this.renderPanels();
@@ -572,9 +591,17 @@ export class AppShell {
     }
   }
 
-  private async showVenue(place: Place, options?: { inside?: boolean }) {
-    ++this.navigation;
+  private async showVenue(place: Place, options?: { inside?: boolean; current?: () => boolean }) {
+    const current = options?.current ?? (() => true);
+    if (!current()) return;
     const changed = this.place?.id !== place.id;
+    let prepared: ViewData['manifest'] | undefined;
+    if (options?.current && (changed || !this.manifest.data)) {
+      const requestedFrom = this.navigation;
+      prepared = await this.loadManifest(place);
+      if (!current() || requestedFrom !== this.navigation) return;
+    }
+    ++this.navigation;
     const cameFromDish = this.mode === 'dish';
     if (changed) {
       this.manifest = {};
@@ -586,6 +613,7 @@ export class AppShell {
     } else if (options?.inside !== undefined) {
       this.inside = options.inside;
     }
+    if (prepared) this.manifest = prepared;
     this.place = place;
     this.stop = this.findStop(place.stop_id);
     this.dish = undefined;
@@ -601,8 +629,9 @@ export class AppShell {
     this.renderDrawer(true);
     this.renderScene();
     void this.refreshTrip();
-    if (changed || !this.manifest.data) await this.refreshManifest();
-    void this.refreshMenuPrices(place);
+    const navigation = this.navigation;
+    if (!prepared && (changed || !this.manifest.data)) await this.refreshManifest();
+    if (current() && this.isCurrentVenue(navigation, place.id)) void this.refreshMenuPrices(place);
   }
 
   /**
@@ -614,13 +643,29 @@ export class AppShell {
     const navigation = this.navigation;
     const result = await api.liveMenuPrices(place.id).catch(() => undefined);
     if (!result?.prices.length || !this.isCurrentVenue(navigation, place.id)) return;
-    const prices = new Map(result.prices.map(({ dish_id, price }) => [dish_id, price]));
+    this.applyLiveMenuPrices(place.id, result.prices);
+  }
+
+  private applyLiveMenuPrices(placeId: string, updates: { dish_id: string; price: number }[]) {
+    const prices = new Map(updates.map(({ dish_id, price }) => [dish_id, price]));
     const apply = (dish: Dish) => {
       const price = prices.get(dish.id);
       if (price !== undefined && dish.price == null) dish.price = price;
     };
-    place.dishes.forEach(apply);
-    this.manifest.data?.menu_items.forEach(({ dish }) => apply(dish));
+    this.places.find(({ id }) => id === placeId)?.dishes.forEach(apply);
+    if (this.comparison?.place.id === placeId) {
+      apply(this.comparison.dish);
+      this.comparison = { ...this.comparison };
+    }
+    if (this.place?.id === placeId) {
+      this.place.dishes.forEach(apply);
+      const manifest = this.manifest.data;
+      if (manifest) {
+        manifest.menu_items.forEach(({ dish }) => apply(dish));
+        this.manifest = { ...this.manifest, data: { ...manifest } };
+      }
+      if (this.dish) apply(this.dish);
+    } else if (this.comparison?.place.id !== placeId) return;
     this.renderDrawer();
     if (this.mode === 'venue' || this.mode === 'dish') this.renderScene();
   }
@@ -638,7 +683,13 @@ export class AppShell {
   }
 
   private async loadManifest(place: Place): Promise<ViewData['manifest']> {
-    try { return { data: await api.manifest(place.id) }; }
+    try {
+      const data = await api.manifest(place.id);
+      for (const { dish } of data.menu_items) {
+        dish.price ??= place.dishes.find(({ id }) => id === dish.id)?.price ?? null;
+      }
+      return { data };
+    }
     catch (error) {
       const offline = offlineManifest(place);
       return offline ? { data: offline, offline: true, error: 'Live previews are unavailable.' } : { error: errorText(error) };
@@ -681,7 +732,8 @@ export class AppShell {
     this.renderScene();
   }
 
-  private async showDish(dish: Dish, compareId = '', comparePlaceId?: string): Promise<boolean> {
+  private async showDish(dish: Dish, compareId = '', comparePlaceId?: string, current = () => true): Promise<boolean> {
+    if (!current()) return false;
     const request = ++this.dishRequest;
     const place = this.place;
     const mode = this.mode;
@@ -697,7 +749,7 @@ export class AppShell {
         ? this.places.find((entry) => entry.id === comparePlaceId)
         : inCurrentMenu ? place : this.places.find((entry) => entry.dishes.some((item) => item.id === compareId));
       const manifest = !venue ? undefined : venue.id === place.id ? this.manifest : await this.loadManifest(venue);
-      if (request !== this.dishRequest || !this.isCurrentVenue(navigation, place.id) || this.mode !== mode) return false;
+      if (!current() || request !== this.dishRequest || !this.isCurrentVenue(navigation, place.id) || this.mode !== mode) return false;
       const item = manifest?.data?.menu_items.find((entry) => entry.dish.id === compareId);
       if (!venue || !item || !isSplat(item.dish_asset)) {
         this.notify('The comparison dish does not have a published 3D preview.');
@@ -737,13 +789,13 @@ export class AppShell {
     this.renderDrawer();
   }
 
-  private async openRestaurantComparison(): Promise<void> {
-    if (this.comparedPlaces.length < 2 || this.comparisonLoading) return;
+  private async openRestaurantComparison(current = () => true): Promise<boolean> {
+    if (!current() || this.comparedPlaces.length < 2 || this.comparisonLoading) return false;
     const pairs = this.comparedPlaces.flatMap((place) => {
       const stop = this.findStop(place.stop_id);
       return stop ? [{ place, stop }] : [];
     });
-    if (pairs.length !== this.comparedPlaces.length) return;
+    if (pairs.length !== this.comparedPlaces.length) return false;
     const filters = this.filters;
     const navigation = this.navigation;
     const request = ++this.comparisonRun;
@@ -751,13 +803,15 @@ export class AppShell {
     this.drawer.setComparison(this.comparedPlaces, true);
     try {
       const decisions = await Promise.all(pairs.map(({ place, stop }) => loadPlaceDecision(place, stop, filters)));
-      if (request !== this.comparisonRun || navigation !== this.navigation) return;
+      if (!current() || request !== this.comparisonRun || navigation !== this.navigation) return false;
       const controls = this.createControlSurface();
       controls.setHighlightedStops([...new Set(pairs.map(({ stop }) => stop.stop_id))]);
       controls.setHighlightedPlaces(pairs.map(({ place }) => place.id));
       this.showReviewCard(buildComparisonBriefingCard(decisions, this.findStop(filters.startStopId)?.name ?? 'your start stop'));
+      return true;
     } catch (error) {
-      if (request === this.comparisonRun && navigation === this.navigation) this.notify(errorText(error));
+      if (current() && request === this.comparisonRun && navigation === this.navigation) this.notify(errorText(error));
+      return false;
     } finally {
       if (request === this.comparisonRun) {
         this.comparisonLoading = false;
@@ -814,7 +868,6 @@ export class AppShell {
   private async openBriefingVenue(placeId: string, dishId?: string, compareDishId?: string, comparePlaceId?: string): Promise<void> {
     const place = this.places.find(({ id }) => id === placeId);
     if (!place) return;
-    this.dismissReviewCard();
     const opening = this.showVenue(place, { inside: true });
     const navigation = this.navigation;
     await opening;
@@ -865,17 +918,19 @@ export class AppShell {
     })();
   }
 
-  private async launchVR() {
+  private async launchVR(current = () => true): Promise<boolean> {
     const engine = this.engine;
-    if (!engine || !this.engineReady) { this.notify('The 3D viewer is still starting.'); return; }
+    if (!engine || !this.engineReady) { this.notify('The 3D viewer is still starting.'); return false; }
     if (this.vrButton.dataset.supported !== 'true') {
       engine.resetCamera();
-      return;
+      return false;
     }
     try {
       await engine.enterVR();
+      return true;
     } catch (error) {
-      this.notify('Could not start the XR session. ' + errorText(error));
+      if (current()) this.notify('Could not start the XR session. ' + errorText(error));
+      return false;
     }
   }
 
@@ -1023,6 +1078,8 @@ export class AppShell {
         xrMode: this.xrMode,
         manifest: this.manifest.data,
         trip: this.trip.data,
+        origin: this.origin,
+        comparedPlaces: [...this.comparedPlaces],
         highlightedStops: [...this.highlightedStops],
         highlightedPlaces: [...this.highlightedPlaces],
         highlightedDishId: this.highlightedDishId,
@@ -1031,7 +1088,17 @@ export class AppShell {
       showMap: () => this.showMap(),
       showStation: (stop) => this.showStation(stop),
       showVenue: (place, options) => this.showVenue(place, options),
-      showDish: (dish, compareId, comparePlaceId) => this.showDish(dish, compareId, comparePlaceId),
+      showDish: (dish, compareId, comparePlaceId, current) => this.showDish(dish, compareId, comparePlaceId, current),
+      setComparedPlaces: (places) => {
+        if (places.length && !this.drawerOpen && this.mode !== 'map' && this.xrMode === 'none' && !this.mobile.matches) {
+          this.drawerOpen = true;
+          this.renderPanels();
+        }
+        this.setComparedPlaces(places);
+      },
+      openRestaurantComparison: (current) => this.openRestaurantComparison(current),
+      locateNearestStop: (current) => this.locate(current),
+      applyLiveMenuPrices: (placeId, prices) => this.applyLiveMenuPrices(placeId, prices),
       updateFilters: (patch) => this.updateFilters(patch),
       setHighlightedStops: (stopIds, pulse = true) => {
         this.highlightedStops = [...stopIds];
@@ -1041,7 +1108,12 @@ export class AppShell {
       setHighlightedPlaces: (placeIds) => {
         this.highlightedPlaces = [...placeIds];
         this.engine?.setHighlightedPlaces(this.highlightedPlaces);
-        this.renderDrawer();
+        if (placeIds.length && this.mode === 'station' && this.xrMode === 'none' && !this.mobile.matches && !this.drawerOpen) {
+          this.drawerOpen = true;
+          this.renderPanels();
+        } else {
+          this.renderDrawer();
+        }
       },
       setHighlightedDish: (dishId) => {
         this.highlightedDishId = dishId;
@@ -1110,19 +1182,15 @@ export class AppShell {
         if (sent) this.notify('Trip sent to the paired device.');
         return sent;
       },
-      controlXR: async (action) => {
+      controlXR: async (action, current) => {
         if (action === 'exit_xr') {
           this.engine?.exitXR();
-          return 'Exited XR session';
+          return { ok: true, message: 'Exited XR session' };
         }
         // The AR table has no entry point in the app any more, so only VR can be launched by voice.
-        if (action !== 'enter_vr') return 'The AR table is not available';
-        try {
-          await this.launchVR();
-          return 'Launched VR';
-        } catch (error) {
-          return `XR requires a direct button tap in the browser (${errorText(error)})`;
-        }
+        if (action !== 'enter_vr') return { ok: false, message: 'The AR table is not available' };
+        const ok = await this.launchVR(current);
+        return { ok, message: ok ? 'Launched VR' : 'Could not start VR. Use the Enter VR button on a supported device.' };
       },
       announce: (text) => this.notify(text),
     };

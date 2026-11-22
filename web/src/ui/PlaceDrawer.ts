@@ -198,6 +198,13 @@ export class PlaceDrawer {
     this.root.hidden = true;
   }
 
+  mountComparison(board?: HTMLElement): void {
+    const host = board ?? this.root;
+    if (this.compareTray.parentElement === host) return;
+    if (board) board.insertBefore(this.compareTray, board.children[1] ?? null);
+    else this.content.before(this.compareTray);
+  }
+
   setComparison(places: readonly Place[], loading: boolean) {
     this.comparedPlaces = places;
     const key = JSON.stringify([places.map(({ id, name }) => [id, name]), loading]);
@@ -215,7 +222,8 @@ export class PlaceDrawer {
     const clear = button('Clear', this.actions.clearComparison, 'quiet');
     this.compareTray.replaceChildren(chips, compare, clear);
     this.compareTray.hidden = !places.length;
-    if (focused) (places.length ? (compare.disabled ? clear : compare) : this.title).focus({ preventScroll: true });
+    if (focused) (places.length ? (compare.disabled ? clear : compare)
+      : this.compareTray.parentElement?.querySelector<HTMLElement>('button:not([disabled], [hidden])'))?.focus({ preventScroll: true });
   }
 
   private compareButton(place: Place) {

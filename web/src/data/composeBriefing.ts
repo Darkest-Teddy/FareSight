@@ -1,5 +1,6 @@
 import { STOPS, type Place } from '@faresight/shared';
-import { catalogReviewSnapshots, type BriefingAction, type BriefingCard, type BriefingFact, type BriefingReview, type BriefingSection, type ReviewSnapshot } from './reviewBriefing';
+import { catalogReviewSnapshots, type BriefingAction, type BriefingCard, type BriefingFact, type BriefingReview, type BriefingSection, type ReviewSnapshot } from './reviewBriefing.ts';
+import { hasDishPreview } from './preview3D.ts';
 type Fields = Record<string, unknown>;
 
 function fields(value: unknown): Fields {
@@ -96,6 +97,29 @@ export function composeBriefingCard(id: string, args: Fields, places: readonly P
   });
 
   const actions: BriefingAction[] = [];
+  function preview(placeId: unknown, dishId: unknown) {
+    const place = typeof placeId === 'string' ? catalog.get(placeId) : undefined;
+    const dish = place?.dishes.find(({ id }) => id === dishId);
+    if (!place || !dish || !hasDishPreview(dish)) throw new Error('Dish actions require catalog venues and dishes with published 3D previews.');
+    return { place, dish };
+  }
+  if (args.dishActions !== undefined) {
+    for (const entry of items(args.dishActions, 'dish actions', 0, 4)) {
+      const action = fields(entry);
+      const { place, dish } = preview(action.placeId, action.dishId);
+      actions.push({ kind: 'dish', placeId: place.id, dishId: dish.id,
+        label: optionalText(action.label, 100) ?? `View ${dish.name} in 3D` });
+    }
+  }
+  if (args.compareDishAction !== undefined) {
+    const action = fields(args.compareDishAction);
+    const { place, dish } = preview(action.placeId, action.dishId);
+    const comparison = preview(action.comparePlaceId, action.compareDishId);
+    if (dish.id === comparison.dish.id) throw new Error('A dish comparison requires two distinct dishes.');
+    actions.unshift({ kind: 'compare-dishes', placeId: place.id, dishId: dish.id,
+      comparePlaceId: comparison.place.id, compareDishId: comparison.dish.id,
+      label: optionalText(action.label, 100) ?? 'Compare 3D dishes on table' });
+  }
   if (args.placeIds !== undefined) {
     const selected = new Set(items(args.placeIds, 'venue IDs for quick actions', 1, 3));
     const stops = new Map<string, BriefingAction>();

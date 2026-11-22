@@ -187,7 +187,7 @@ small { color: var(--muted); }
   z-index: 2;
   top: calc(var(--command-height) + 2.3rem);
   left: var(--rail);
-  width: min(19.8rem, 27vw);
+  width: var(--station-board-width);
   max-height: max(12rem, calc(100% - 19.75rem));
   overflow: auto;
   padding: .95rem;
@@ -364,8 +364,25 @@ small { color: var(--muted); }
 }
 .menu-row button { flex: 0 0 auto; max-width: 48%; }
 
-.modal.briefing-modal { width: min(43rem, calc(100% - 2rem)); }
-.briefing-modal .modal-header .quiet { border-color: var(--edge); }
+.app-shell {
+  --station-board-width: min(19.8rem, 27vw);
+  --briefing-width: min(31vw, 30rem);
+  --visible-drawer-width: min(var(--drawer-width), 45vw);
+  --live-overlay-top: calc(var(--command-height) + 3.05rem);
+}
+.modal.briefing-panel {
+  position: absolute;
+  z-index: 3;
+  top: var(--live-overlay-top);
+  left: var(--rail);
+  width: var(--briefing-width);
+  max-height: min(37rem, calc(100% - var(--live-overlay-top) - 10.5rem));
+  display: flex;
+  flex-direction: column;
+}
+[data-scene=map] .briefing-panel { left: calc(var(--station-board-width) + 2 * var(--rail)); }
+.station-board > .restaurant-compare-tray { margin-block: 0 .6rem; }
+.briefing-panel .modal-header .quiet { border-color: var(--edge); }
 .briefing-tabs:not([hidden]) {
   display: flex; gap: .45rem; overflow-x: auto; padding: .55rem .9rem;
   border-bottom: 1px solid var(--edge-soft); background: var(--canvas);
@@ -381,7 +398,7 @@ small { color: var(--muted); }
   border-inline-start: 0; border-start-start-radius: 0; border-end-start-radius: 0;
 }
 .briefing-launch { align-self: start; margin-top: .4rem; }
-.briefing-modal .modal-body { display: grid; gap: 1rem; }
+.briefing-panel .modal-body { display: grid; gap: 1rem; }
 .briefing-kicker { color: var(--accent); font-size: .69rem; font-weight: 700; letter-spacing: .06em; margin-bottom: .25rem; }
 .briefing-subtitle, .briefing-copy, .briefing-review blockquote { line-height: 1.55; white-space: pre-line; }
 .briefing-review header, .briefing-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .55rem; }
@@ -403,7 +420,7 @@ small { color: var(--muted); }
 .briefing-metrics > div { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: .25rem .55rem; margin-bottom: .25rem; }
 .briefing-metrics dd { margin: 0; font-size: .84rem; font-weight: 700; }
 @media (max-width: 560px) {
-  .briefing-modal button { min-height: 44px; }
+  .briefing-panel button { min-height: 44px; }
   .briefing-tab .briefing-tab-close { min-width: 44px; }
 }
 
@@ -440,11 +457,11 @@ small { color: var(--muted); }
 }
 .voice-dock {
   position: absolute;
-  z-index: 4;
-  top: calc(var(--command-height) + 3.05rem);
+  z-index: 3;
+  top: var(--live-overlay-top);
   right: var(--rail);
-  width: min(22.5rem, calc(100% - 2 * var(--rail)));
-  max-height: min(26rem, calc(100% - var(--command-height) - 3.75rem));
+  width: min(22.5rem, 30vw);
+  max-height: min(26rem, calc(100% - var(--live-overlay-top) - 10.5rem));
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -454,7 +471,9 @@ small { color: var(--muted); }
   box-shadow: 0 1.2rem 3rem rgb(4 8 18 / 45%);
 }
 [data-drawer=true] .voice-dock {
-  right: calc(min(var(--drawer-width), 45vw) + 2 * var(--rail));
+  right: calc(var(--visible-drawer-width) + 2 * var(--rail));
+  width: min(22.5rem, 30vw, calc(100% - var(--visible-drawer-width) - var(--briefing-width) - 4 * var(--rail)));
+  max-height: min(26rem, calc(100% - var(--live-overlay-top) - 10.5rem));
 }
 .voice-head {
   display: flex;
@@ -523,6 +542,7 @@ small { color: var(--muted); }
 .notice {
   position: absolute;
   z-index: 5;
+  pointer-events: none;
   inset: calc(var(--command-height) + .75rem) auto auto 50%;
   transform: translateX(-50%);
   width: max-content;
@@ -617,6 +637,10 @@ small { color: var(--muted); }
 @media (min-width: 769px) and (max-width: 1024px) {
   :root { --rail: .7rem; --drawer-width: 332px; }
   :root { --command-height: 5.8rem; }
+  .app-shell { --briefing-width: 27vw; }
+  .modal.briefing-panel, .voice-dock, [data-drawer=true] .voice-dock {
+    max-height: min(26rem, calc(100% - var(--live-overlay-top) - 13rem));
+  }
   .command-bar { grid-template-columns: minmax(0, 1fr) auto; column-gap: .5rem; row-gap: .12rem; padding-bottom: .24rem; }
   .command-actions { grid-row: 1; grid-column: 2; }
   .command-actions button { padding-inline: .36rem; font-size: .73rem; }
@@ -629,6 +653,7 @@ small { color: var(--muted); }
 @media (max-height: 610px) and (min-width: 769px) {
   .station-board { top: calc(var(--command-height) + .75rem); max-height: calc(100% - 16rem); }
   .place-drawer { top: calc(var(--command-height) + .75rem); }
+  .app-shell { --live-overlay-top: calc(var(--command-height) + .75rem); }
 }
 @media (max-width: 768px) {
   :root { --rail: .65rem; --command-height: 5.55rem; }
@@ -730,12 +755,26 @@ small { color: var(--muted); }
   }
   .phone-tab { min-height: 44px; background: transparent; border-color: transparent; font-size: .72rem; padding-inline: .12rem; }
   .notice { inset-block-start: calc(var(--command-height) + env(safe-area-inset-top) + .32rem); }
+  .app-shell {
+    --phone-overlays-space: calc(100% - var(--command-height) - var(--phone-bar) - 1.3rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+  .modal.briefing-panel {
+    inset: auto var(--rail) calc(var(--phone-bar) + env(safe-area-inset-bottom) + .45rem);
+    width: auto;
+    max-height: min(50dvh, var(--phone-overlays-space));
+    z-index: 3;
+  }
+  .app-shell:has(.briefing-panel:not([hidden])) :is(.station-board, .filter, .place-drawer) { visibility: hidden; }
   .voice-dock, [data-drawer=true] .voice-dock {
     top: calc(var(--command-height) + env(safe-area-inset-top) + .45rem);
     left: var(--rail);
     right: var(--rail);
     width: auto;
     max-height: min(56dvh, calc(100% - var(--command-height) - var(--phone-bar) - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+  }
+  .app-shell:has(.voice-dock:not([hidden])) .briefing-panel,
+  .app-shell:has(.briefing-panel:not([hidden])) .voice-dock {
+    max-height: calc(var(--phone-overlays-space) / 2);
   }
   .voice-controls button, .voice-input-row button, .voice-input-row input { min-height: 44px; }
   .modal { width: calc(100% - 1rem); max-height: calc(100dvh - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }

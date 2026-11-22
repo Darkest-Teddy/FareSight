@@ -1,5 +1,5 @@
 import type { BriefingAction, BriefingCard, BriefingFact, BriefingReview, BriefingSection } from '../data/reviewBriefing';
-import { button, element, link, modal, replacePreservingFocus } from './dom';
+import { button, element, link, replacePreservingFocus } from './dom.ts';
 
 interface BriefingActions {
   dismiss(cardId?: string): void;
@@ -82,23 +82,36 @@ function renderSection(section: BriefingSection): HTMLElement {
 }
 
 export class ReviewBriefingModal {
-  private readonly panel = modal('Reviews & Briefing', 'briefing-modal');
-  private readonly title = this.panel.dialog.querySelector('h2')!;
+  readonly root = element('section', 'modal briefing-panel');
+  private readonly body = element('div', 'modal-body');
+  private readonly title = element('h2');
   private readonly kicker = element('p', 'briefing-kicker');
-  private readonly close = this.panel.dialog.querySelector('button')!;
+  private readonly close = button('Dismiss', () => this.actions.dismiss(), 'quiet');
   private readonly tabs = element('div', 'briefing-tabs');
   private cardId?: string;
 
-  constructor(private readonly actions: BriefingActions) {
+  private opener?: HTMLElement;
+
+  private readonly actions: BriefingActions;
+
+  constructor(actions: BriefingActions) {
+    this.actions = actions;
+    this.root.hidden = true;
+    this.title.id = 'fare-briefing-title';
+    this.root.setAttribute('aria-labelledby', this.title.id);
+    const header = element('header', 'modal-header');
     const identity = element('div', 'briefing-identity');
-    this.title.before(identity);
     identity.append(this.kicker, this.title);
+    header.append(identity, this.close);
     this.tabs.setAttribute('role', 'group');
     this.tabs.setAttribute('aria-label', 'Open briefings');
-    this.panel.dialog.prepend(this.tabs);
-    this.panel.dialog.addEventListener('close', () => {
-      if (!this.panel.dialog.open && this.cardId) this.actions.dismiss();
-    });
+    this.root.append(this.tabs, header, this.body);
+  }
+
+  dismissOnEscape(event: KeyboardEvent): void {
+    if (event.key !== 'Escape' || event.defaultPrevented || this.root.hidden) return;
+    event.preventDefault();
+    this.actions.dismiss();
   }
 
   show(cards: readonly BriefingCard[], activeId = this.cardId): void {
@@ -141,10 +154,11 @@ export class ReviewBriefingModal {
       if (card.actions.some(({ kind }) => kind === 'compare-dishes')) body.splice(card.subtitle ? 1 : 0, 0, footer);
       else body.push(footer);
     }
-    replacePreservingFocus(this.panel.body, this.close, ...body);
-    this.panel.open();
+    replacePreservingFocus(this.body, this.close, ...body);
+    if (this.root.hidden && document.activeElement instanceof HTMLElement) this.opener = document.activeElement;
+    this.root.hidden = false;
     activeTab?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    if (changed) this.panel.body.scrollTop = 0;
+    if (changed) this.body.scrollTop = 0;
   }
 
   private activate(action: BriefingAction): void {
@@ -158,6 +172,9 @@ export class ReviewBriefingModal {
 
   hide(): void {
     this.cardId = undefined;
-    if (this.panel.dialog.open) this.panel.dialog.close();
+    const restore = this.root.contains(document.activeElement);
+    this.root.hidden = true;
+    if (restore && this.opener?.isConnected) this.opener.focus({ preventScroll: true });
+    this.opener = undefined;
   }
 }
