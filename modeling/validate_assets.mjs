@@ -256,11 +256,13 @@ const map = models['boston-map-sculpture'];
 // Extent is now set by the track and the buildings, not the ground: the blob is cut to the city
 // and the lines run out past its edge, so the model reaches roughly as far as clipToFootprint
 // allows the rails to go.
+// Extent is set by the track, the buildings, and the ground's faded rim, which reaches a little
+// past the outermost block. The rails themselves are clipped to +/-0.738 x +/-0.513.
 assert.ok(
-  map.bounds.min[0] >= -0.80 && map.bounds.min[0] <= -0.70 &&
-    map.bounds.max[0] <= 0.80 && map.bounds.max[0] >= 0.70 &&
-    map.bounds.min[2] >= -0.60 && map.bounds.min[2] <= -0.48 &&
-    map.bounds.max[2] <= 0.60 && map.bounds.max[2] >= 0.48,
+  map.bounds.min[0] >= -0.90 && map.bounds.min[0] <= -0.70 &&
+    map.bounds.max[0] <= 0.90 && map.bounds.max[0] >= 0.70 &&
+    map.bounds.min[2] >= -0.68 && map.bounds.min[2] <= -0.48 &&
+    map.bounds.max[2] <= 0.68 && map.bounds.max[2] >= 0.48,
   'sculpture footprint ' + reportBounds(map.bounds),
 );
 // Floats above zero now: the lowest geometry is the station skirts, not a deck resting on y=0.

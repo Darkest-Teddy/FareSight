@@ -30,14 +30,22 @@ const SPOKES = 128;
  * How far past the outermost building the solid ground reaches: enough to give the last block a
  * pavement to stand on, no more.
  */
-const SKIRT = 0.045;
+const SKIRT = 0.022;
+
+/**
+ * How many neighbouring directions each building's reach carries to, and how wide the final
+ * smoothing pass is. Both are small on purpose -- they are what decides whether the outline hugs
+ * the last row of buildings or balloons into a smooth blob around the whole network.
+ */
+const DILATE = 3;
+const SMOOTH = 2;
 
 /**
  * How far the rim fades out. Short on purpose: the ground is one blob around the network, not a
  * set of concentric shells. This was 0.42 across two extra rings, which read as two further blobs
  * ringing the first rather than as one shape dissolving.
  */
-const FADE = 0.1;
+const FADE = 0.055;
 
 const mixHex = (a, b, t) =>
   '#' +
@@ -74,28 +82,36 @@ function reaches(sites, centre) {
     raw[bin] = Math.max(raw[bin], Math.hypot(dx, dz) + (radius ?? 0));
   }
 
-  // Fill gaps: a direction with no track still needs ground if its neighbours have some.
+  // Spread each direction's reach over a few neighbours.
+  //
+  // This is what covers the gaps between scattered blocks, and it is deliberately narrow: a wide
+  // window reaches past a lone outlying building and drags the whole edge out with it. Taking the
+  // maximum rather than an average is the point -- it guarantees every building is enclosed
+  // without pulling the outline any further than the furthest one in that direction.
+  const spread = new Array(SPOKES).fill(0);
+  for (let i = 0; i < SPOKES; i++)
+    for (let k = -DILATE; k <= DILATE; k++)
+      spread[i] = Math.max(spread[i], raw[(i + k + SPOKES) % SPOKES]);
+
+  // Directions with nothing at all still need a value, or the outline collapses to the centre.
   for (let i = 0; i < SPOKES; i++) {
-    if (raw[i] > 0) continue;
+    if (spread[i] > 0) continue;
     let back = 0;
     let forward = 0;
-    while (raw[(i - back + SPOKES) % SPOKES] === 0 && back < SPOKES) back++;
-    while (raw[(i + forward) % SPOKES] === 0 && forward < SPOKES) forward++;
-    const a = raw[(i - back + SPOKES) % SPOKES];
-    const b = raw[(i + forward) % SPOKES];
-    raw[i] = (a * forward + b * back) / Math.max(1, back + forward);
+    while (spread[(i - back + SPOKES) % SPOKES] === 0 && back < SPOKES) back++;
+    while (spread[(i + forward) % SPOKES] === 0 && forward < SPOKES) forward++;
+    const a = spread[(i - back + SPOKES) % SPOKES];
+    const b = spread[(i + forward) % SPOKES];
+    spread[i] = (a * forward + b * back) / Math.max(1, back + forward);
   }
 
-  // Circular smoothing, twice, so the outline reads as a coastline and not as a polygon.
-  let smooth = raw;
-  for (let pass = 0; pass < 2; pass++) {
-    const next = new Array(SPOKES);
-    for (let i = 0; i < SPOKES; i++) {
-      let sum = 0;
-      for (let k = -6; k <= 6; k++) sum += smooth[(i + k + SPOKES) % SPOKES];
-      next[i] = sum / 13;
-    }
-    smooth = next;
+  // One light pass, only enough to take the facets off. Heavier smoothing rounded the outline
+  // into an ellipse that bore no relation to where the city actually stopped.
+  const smooth = new Array(SPOKES);
+  for (let i = 0; i < SPOKES; i++) {
+    let sum = 0;
+    for (let k = -SMOOTH; k <= SMOOTH; k++) sum += spread[(i + k + SPOKES) % SPOKES];
+    smooth[i] = sum / (SMOOTH * 2 + 1);
   }
   return smooth;
 }
