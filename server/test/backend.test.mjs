@@ -43,7 +43,7 @@ async function setup(t, overrides = {}) {
   const config = {
     ...getConfig(), database: join(dir, 'faresight.db'), uploads: join(dir, 'uploads'), outputs: join(dir, 'outputs'),
     host: '127.0.0.1', port: 0, mode: 'auto', adminPasscode: 'test-passcode', geminiKey: undefined,
-    atlasKey: undefined, replicateKey: undefined, captures: undefined, autoPublish: false, ...overrides,
+    atlasKey: undefined, replicateKey: undefined, captures: undefined, autoPublish: false, openUploads: false, ...overrides,
   };
   let app;
   let origin;
@@ -935,6 +935,18 @@ test('non-loopback binds fail closed and admin auth throttles before parsing JSO
   const malformed = { method: 'POST', url: '/api/debug/logs', headers: { 'Content-Type': 'application/json' }, payload: '{' };
   for (let attempt = 0; attempt < 12; attempt++) assert.equal((await demo.inject(malformed)).statusCode, 401);
   assert.equal((await demo.inject(malformed)).statusCode, 429);
+});
+
+test('open uploads let contributors in without a code while admin routes stay locked', async (t) => {
+  const server = await setup(t, { host: '0.0.0.0', openUploads: true });
+  await server.start({ worker: false });
+  const body = { filename: 'test.png', mimeType: 'image/png', dataBase64: image.toString('base64'), place_id: placeId };
+  const upload = await server.request('/api/uploads', { passcode: false, body, status: 201 });
+  assert.deepEqual(await server.request('/api/jobs', { passcode: false }), []);
+  await server.request('/api/admin/moderation', { passcode: false, status: 401 });
+  await server.request(`/api/assets/${upload.id}/publish`, { passcode: false, body: {}, status: 401 });
+  // The original photos stay behind a code.
+  await server.request(new URL(upload.url, 'http://localhost').pathname, { passcode: false, status: 401 });
 });
 
 test('missing and symlinked demo assets are omitted independently', async (t) => {

@@ -80,7 +80,7 @@ async function setup(t, overrides = {}) {
   const config = {
     ...getConfig(), database: join(dir, 'faresight.db'), uploads: join(dir, 'uploads'), outputs: join(dir, 'outputs'),
     demoAssets: [demo], host: '127.0.0.1', port: 0, mode: 'demo', adminPasscode: 'test-passcode',
-    atlasKey: undefined, replicateKey: undefined, geminiKey: undefined, autoPublish: false, captures, ...overrides,
+    atlasKey: undefined, replicateKey: undefined, geminiKey: undefined, autoPublish: false, openUploads: false, captures, ...overrides,
   };
   const storage = createObjectStorage(captures);
   await storage.setupBucket(captures.rawBucket, { public: false, origins: ['*'] });
@@ -160,7 +160,7 @@ test('upload names map to keys inside the capture and nothing else', () => {
 test('capture uploads accept the contributor header while listing and deletion require admin', async (t) => {
   const app = Fastify();
   t.after(() => app.close());
-  const config = { ...getConfig(), adminPasscode: 'test-admin', contributorPasscode: 'test-upload' };
+  const config = { ...getConfig(), adminPasscode: 'test-admin', contributorPasscode: 'test-upload', openUploads: false };
   registerCaptures(app, { get: () => ({ id: placeId }) }, config, createPasscodeGuards(config), {
     pool: { query: async () => ({ rows: [{ id: '9b1c0000-0000-4000-8000-000000000000' }] }) },
   }, {});
