@@ -27,12 +27,12 @@ const listings: Listing[][] = [
     ['bu-starbucks-01', 'Starbucks (Warren Towers)', 'study', 42.34908, -71.10358, 290, 7.5, '07:00', '20:00', ['coffee', 'study', 'espresso'], 'Campus coffeehouse at Warren Towers on Commonwealth Ave with espresso bar and study seating.', true],
   ],
   [
-    ['allston-karaoke-01', 'Echo Box Karaoke Lounge', 'event_space', 42.35207, -71.12457, 90, 48, '16:00', '01:00', ['karaoke', 'private room', 'groups'], 'Private karaoke suite with a sofa wall and an open floor.', true, true],
+    ['allston-karaoke-01', 'Echo Box Karaoke Lounge', 'event_space', 42.35183, -71.12428, 60, 48, '16:00', '01:00', ['karaoke', 'private room', 'groups'], 'Private karaoke suite with a sofa wall and an open floor.', true, true],
     ['allston-brownsugar-01', 'Brown Sugar Cafe', 'restaurant', 42.35215, -71.12196, 280, 20, '11:30', '22:00', ['thai', 'curry', 'fried rice'], 'Shared Thai plates in a lively dining room.', true, true],
-    ['allston-bostongoods-01', 'Boston Goods Clothing Co.', 'shop', 42.35712, -71.13269, 1000, 14, '11:00', '19:00', ['thrift', 'vintage', 'clothing'], 'Secondhand and vintage racks with a buy-by-the-pound section.', true],
+    ['allston-groovythrifty-01', 'Groovy Thrifty', 'shop', 42.35237, -71.12829, 290, 14, '12:00', '18:00', ['thrift', 'vintage', 'clothing'], 'Secondhand and vintage racks on Brighton Avenue.', true],
     ['allston-super88-01', 'Super 88 Market & Food Court', 'market', 42.35254, -71.12539, 100, 13, '09:00', '21:00', ['dumplings', 'boba', 'groceries'], 'Grocery aisles and a food court for groups with different cravings.', true],
-    ['allston-coreanos-01', 'Coreanos', 'restaurant', 42.35297, -71.13302, 720, 16, '12:00', '21:00', ['tacos', 'korean', 'fried chicken'], 'Small Korean-Mexican counter serving kimchi rice and tacos.', true, true],
-    ['allston-brightonmusic-01', 'Brighton Music Hall', 'music', 42.35266, -71.13264, 690, 28, '19:00', '23:00', ['live music', 'indie', 'standing room'], 'Standing-room shows with a close view of the stage. Admission varies by event.', false, true],
+    ['allston-shabuzen-01', 'Shabu-Zen', 'restaurant', 42.35237, -71.12908, 350, 30, '11:30', '23:00', ['hot pot', 'shabu-shabu', 'groups'], 'Tabletop hot pot with a pot for every seat.', true, true],
+    ['allston-clearflour-01', 'Clear Flour Bakery', 'study', 42.35002, -71.12614, 260, 8, '08:00', '18:00', ['bakery', 'croissants', 'coffee'], 'Neighborhood bakery with a coffee bar next door.', true],
   ],
   [
     ['kenmore-fenway-01', 'Fenway Park', 'stadium', 42.34646, -71.09710, 380, 38, '10:00', '22:00', ['baseball', 'seat view', 'family outing'], 'Ballpark with a mix of grandstand, box and bleacher seating.', true, true],

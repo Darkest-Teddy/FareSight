@@ -117,6 +117,10 @@ export class Store {
           price_checked_on: hasUploadedPreview ? stored.price_checked_on : place.price_checked_on,
         });
       }
+      // Venues dropped from the catalog because they sit outside their station's model.
+      for (const id of ['allston-bostongoods-01', 'allston-coreanos-01', 'allston-brightonmusic-01']) {
+        this.sqlite.prepare('DELETE FROM places WHERE id = ?').run(id);
+      }
       const reviewed = new Set(this.all('reviews').map(({ place_id }) => place_id));
       for (const place of this.all('places')) {
         if (place.reviews.length || reviewed.has(place.id)) continue;

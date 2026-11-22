@@ -5,14 +5,18 @@ import {
   face,
   loft,
   circle,
+  rect,
   sweep,
   spline,
   norm,
+  rng,
   sub,
   mix,
   mul,
   add,
 } from './geometry.mjs';
+import { cityBlocks } from './city.mjs';
+import { groundBlob } from './ground.mjs';
 
 // Station coordinate snapshot from api-v3.mbta.com/stops, parent stations only.
 const stops = JSON.parse(readFileSync(new URL('stops.json', import.meta.url)));
@@ -49,7 +53,7 @@ const join = (text) =>
     const [name, y] = s.split('@');
     return [name, Number(y)];
   });
-const routes = [
+export const routes = [
   [
     'green-b',
     'Green-B',
@@ -164,42 +168,47 @@ function clipToFootprint(points) {
   return out.map((p) => p.map(Math.fround));
 }
 
-function roundedTube(surface, points, radius, sides) {
-  const first = surface.positions.length / 3;
-  sweep(surface, points, radius, '#ffffff', sides, false);
-  // Reuse the open sweep's end rings so the hemisphere shares its shading and silhouette.
-  for (const end of [0, points.length - 1]) {
-    const center = points[end];
-    const axis = norm(sub(center, points[end === 0 ? 1 : end - 1]));
-    let rim = Array.from({ length: sides }, (_, j) => first + end * sides + j);
-    if (end === 0) rim.reverse();
-    const radial = rim.map((id) => surface.normals.slice(id * 3, id * 3 + 3));
-    for (const angle of [Math.PI / 6, Math.PI / 3]) {
-      const row = radial.map((n) => {
-        const normal = add(mul(n, Math.cos(angle)), mul(axis, Math.sin(angle)));
-        return surface.vertex(
-          add(center, mul(normal, radius)),
-          normal,
-          '#ffffff',
-        );
-      });
-      for (let j = 0; j < sides; j++) {
-        const k = (j + 1) % sides;
-        surface.indices.push(rim[j], rim[k], row[k], rim[j], row[k], row[j]);
-      }
-      rim = row;
-    }
-    const tip = surface.vertex(add(center, mul(axis, radius)), axis, '#ffffff');
-    for (let j = 0; j < sides; j++)
-      surface.indices.push(rim[j], rim[(j + 1) % sides], tip);
-  }
+// Track plates. The network reads as flat roads rather than cylindrical tubes: a wide, thin
+// ribbon following the path, with just enough thickness that its edges catch light and the shape
+// is unmistakably 3D instead of painted on.
+//
+// Each cross-section is a rectangle carried along the path, lofted to the next. Corner order is
+// [+side bottom, +side top, -side top, -side bottom], which makes loft() emit outward normals for
+// the two walls and the top without any extra bookkeeping.
+function flatTrack(surface, points, halfWidth, thickness, color = '#ffffff') {
+  const half = thickness / 2;
+  const rings = points.map((point, i) => {
+    const tangent = norm(
+      sub(points[Math.min(i + 1, points.length - 1)], points[Math.max(i - 1, 0)]),
+    );
+    // Horizontal perpendicular: the plate stays level no matter how the path climbs.
+    const side = norm([-tangent[2], 0, tangent[0]]).map((n) => n * halfWidth);
+    const [x, y, z] = point;
+    return [
+      [x + side[0], y - half, z + side[2]],
+      [x + side[0], y + half, z + side[2]],
+      [x - side[0], y + half, z - side[2]],
+      [x - side[0], y - half, z - side[2]],
+    ];
+  });
+  loft(surface, rings, color);
 }
 
-// Sculpture layout: a grounded slab with the network stacked in three shallow layers.
+// Sculpture layout: the network floats in three shallow layers, with no deck beneath it.
 const slabTop = 0.04;
-const tubeRadius = 0.0058;
-const layerBase = slabTop + 0.011;
-const layerStep = 0.012;
+/**
+ * Half-width of a track plate. Thin: the lines are the diagram, and the station dots have to read
+ * as clearly larger than the line they sit on.
+ */
+const trackHalfWidth = 0.0042;
+/** Plate thickness. Small, but never zero: this is the "flat with a little depth" brief. */
+const trackThickness = 0.0028;
+// The layers exist only so lines sharing a corridor never z-fight; they are not meant to lift the
+// network off the city. At the old spacing the Red and Blue lines sat 0.035 above the building
+// bases -- as tall as a twenty-storey tower -- so the whole network read as floating above Boston
+// rather than running through it. These steps are just enough to separate the layers.
+const layerBase = slabTop + 0.0015;
+const layerStep = 0.0035;
 const layerOf = { Orange: 0, Green: 1, Red: 2, Blue: 2 };
 const puckRise = 0.0075;
 const tubeHeight = (routeId) =>
@@ -226,99 +235,179 @@ function drum(surface, [x, , z], bottom, top, radius, color, sides = 14) {
   );
 }
 
+/**
+ * A handful of iconic Boston landmarks, placed by real coordinates at the sculpture's own scale
+ * (6500 m per unit). Deliberately a short list of silhouettes people recognise rather than an
+ * attempt at a city: the network is still the subject, and these just give it somewhere to be.
+ *
+ * Heights are real metres. At this scale a 230 m tower is ~0.035 units — about three track layers
+ * tall, which is enough to read without competing with the lines.
+ */
+const METRES = 1 / 6500;
+/**
+ * True scale makes landmarks invisible: the Prudential is 229 m, which at 6500 m per unit is
+ * 0.035 units — about three track plates tall and lost against the background. Cartographic
+ * models routinely exaggerate vertical scale for exactly this reason, so landmarks are drawn
+ * 2.6x their real height. Footprints stay true, so each still reads as the right shape.
+ */
+const landmarkLift = 2.6;
+/**
+ * Footprints need the same treatment. A 64 m tower is 0.0098 units wide — narrower than a track
+ * plate (0.015), which is why true-scale landmarks read as slivers rather than buildings. Widened
+ * so they sit sensibly against the network they stand beside.
+ */
+const landmarkWidth = 3.2;
+const landmarkList = [
+  // name,                  lat,      lon,       w,  d,   height(m), form
+  ['Prudential Tower',      42.34725, -71.08215, 64, 64,  229, 'taper'],
+  ['200 Clarendon',         42.34880, -71.07513, 58, 32,  241, 'slab'],
+  ['Custom House Tower',    42.35940, -71.05360, 32, 32,  151, 'clock'],
+  ['Bunker Hill Monument',  42.37635, -71.06082, 15, 15,   67, 'obelisk'],
+  ['Citgo Sign',            42.34875, -71.09540, 26, 10,   58, 'sign'],
+];
+
+function landmarks(surface, accent) {
+  for (const [, lat, lon, w, d, metres, form] of landmarkList) {
+    const [x, , z] = project(lat, lon, 0);
+    const base = slabTop;
+    const h = metres * METRES * landmarkLift;
+    const width = w * METRES * landmarkWidth;
+    const depth = d * METRES * landmarkWidth;
+
+    if (form === 'sign') {
+      // A billboard on a slim gantry: unmistakable at Kenmore, and cheap.
+      const postH = h * 0.45;
+      box(surface, x, base + postH / 2, z, 0.0012, postH, 0.0012, '#8690a3');
+      box(accent, x, base + postH + (h - postH) / 2, z, width, h - postH, 0.0015, '#d2dae6');
+      continue;
+    }
+
+    if (form === 'obelisk') {
+      // Square shaft tapering to a pyramidion.
+      loft(surface, [
+        rect(x, base, z, width, depth),
+        rect(x, base + h * 0.88, z, width * 0.62, depth * 0.62),
+      ], '#ccd3e0');
+      loft(surface, [
+        rect(x, base + h * 0.88, z, width * 0.62, depth * 0.62),
+        rect(x, base + h, z, width * 0.06, depth * 0.06),
+      ], '#dde3ed');
+      continue;
+    }
+
+    if (form === 'clock') {
+      // Stepped base, shaft, then a lighter crown that reads as the clock stage.
+      const shaft = h * 0.68;
+      box(surface, x, base + shaft * 0.18, z, width * 1.5, shaft * 0.36, depth * 1.5, '#9ea8bd');
+      loft(surface, [
+        rect(x, base + shaft * 0.36, z, width, depth),
+        rect(x, base + shaft, z, width * 0.86, depth * 0.86),
+      ], '#b3bccd');
+      box(accent, x, base + shaft + (h - shaft) * 0.4, z, width * 0.74, (h - shaft) * 0.8, depth * 0.74, '#d2dae6');
+      continue;
+    }
+
+    if (form === 'taper') {
+      loft(surface, [
+        rect(x, base, z, width, depth),
+        rect(x, base + h, z, width * 0.78, depth * 0.78),
+      ], '#a8b3c7');
+      continue;
+    }
+
+    // slab: a plain rectangular prism, the Hancock read.
+    box(surface, x, base + h / 2, z, width, h, depth, '#96a8c2');
+  }
+}
+
+/**
+ * A station bead: a white disc with the line's colour inset on top.
+ *
+ * Both discs are raised clear of the plate so neither z-fights with it, and the white ring is
+ * wider than the plate itself, which is what makes a stop legible at map scale.
+ */
+const dotOuter = 0.0068;
+const dotInner = 0.0042;
+
+function stationDot(white, colour, [x, , z], deck, tint) {
+  const base = deck + 0.0004;
+  const lip = base + 0.0014;
+  // White body.
+  loft(white, [circle(x, base, z, dotOuter, 20), circle(x, lip, z, dotOuter, 20)], '#f4f6fa', {
+    bottom: false,
+    top: false,
+  });
+  // The white rim left showing around the coloured centre.
+  const outer = circle(x, lip, z, dotOuter, 20);
+  const inner = circle(x, lip, z, dotInner, 20);
+  for (let j = 0; j < 20; j++) {
+    const k = (j + 1) % 20;
+    face(white, [outer[j], inner[j], inner[k], outer[k]], '#f4f6fa');
+  }
+  // Coloured cap, a hair proud of the white so it never z-fights.
+  const cap = lip + 0.0003;
+  loft(colour, [circle(x, lip, z, dotInner, 20), circle(x, cap, z, dotInner, 20)], tint, {
+    bottom: false,
+  });
+}
+
+// Center and half-width of the Charles, from the Allston bend to the harbor mouth.
+export const riverBanks = [
+  [-0.739, -0.058, 0.028],
+  [-0.63, -0.083, 0.036],
+  [-0.537, -0.166, 0.032],
+  [-0.535, -0.268, 0.033],
+  [-0.459, -0.334, 0.028],
+  [-0.355, -0.309, 0.029],
+  [-0.298, -0.253, 0.027],
+  [-0.266, -0.191, 0.029],
+  [-0.276, -0.12, 0.03],
+  [-0.234, -0.064, 0.03],
+  [-0.165, -0.032, 0.026],
+  [-0.066, -0.014, 0.036],
+  [0.055, -0.033, 0.047],
+  [0.188, -0.084, 0.052],
+  [0.246, -0.145, 0.048],
+  [0.274, -0.196, 0.042],
+  [0.309, -0.235, 0.03],
+  [0.368, -0.258, 0.031],
+  [0.428, -0.29, 0.035],
+  [0.506, -0.302, 0.057],
+  [0.578, -0.27, 0.092],
+  [0.625, -0.179, 0.105],
+  [0.65, -0.065, 0.088],
+  [0.678, 0.038, 0.065],
+  [0.726, 0.112, 0.037],
+];
 export function mapSculpture(dir) {
   const m = new Model();
   const batch = (name, options) => m.surface(m.material(name, options));
-  const base = batch('Map base', { rough: 0.82 });
-  const trim = batch('Base trim', {
-    metal: 0.55,
-    rough: 0.3,
-    color: '#7f8aa3',
-  });
-  const water = batch('Charles River and Boston Harbor', {
-    rough: 0.28,
-    emission: '#0c2a36',
+  const city = batch('City blocks', {
+    rough: 0.74,
+    metal: 0.05,
+    // Slightly self-lit so the mass reads against the void instead of going to silhouette.
+    emission: '#131924',
   });
   const marker = batch('Station markers', {
     rough: 0.35,
     emission: '#6b7078',
   });
+  const stone = batch('Landmark stone', {
+    rough: 0.68,
+    metal: 0.06,
+    // A touch of self-lit warmth so silhouettes separate from the void behind them.
+    emission: '#1a2130',
+  });
+  const glint = batch('Landmark glass', {
+    rough: 0.22,
+    metal: 0.35,
+    emission: '#1d2736',
+  });
+  landmarks(stone, glint);
 
-  box(base, 0, 0.006, 0, 1.5, 0.012, 1.05, '#0d111b', 0.03);
-  box(trim, 0, 0.0135, 0, 1.492, 0.003, 1.042, '#ffffff', 0.03);
-  box(base, 0, 0.0275, 0, 1.484, 0.025, 1.034, '#1a2233', 0.03);
-  // Street grid, inlaid a hair above the deck so it never z-fights.
-  const gridY = slabTop + 0.0002;
-  for (let i = -14; i <= 14; i++) {
-    const x = i * 0.05,
-      w = i % 5 === 0 ? 0.0016 : 0.0008;
-    box(base, x, gridY, 0, w, 0.0002, 1.0, i % 5 === 0 ? '#34405c' : '#283350');
-  }
-  for (let i = -9; i <= 9; i++) {
-    const z = i * 0.05,
-      w = i % 5 === 0 ? 0.0016 : 0.0008;
-    box(base, 0, gridY, z, 1.45, 0.0002, w, i % 5 === 0 ? '#34405c' : '#283350');
-  }
-
-  // Center and half-width of the Charles, from the Allston bend to the harbor mouth.
-  const banks = [
-    [-0.739, -0.058, 0.028],
-    [-0.63, -0.083, 0.036],
-    [-0.537, -0.166, 0.032],
-    [-0.535, -0.268, 0.033],
-    [-0.459, -0.334, 0.028],
-    [-0.355, -0.309, 0.029],
-    [-0.298, -0.253, 0.027],
-    [-0.266, -0.191, 0.029],
-    [-0.276, -0.12, 0.03],
-    [-0.234, -0.064, 0.03],
-    [-0.165, -0.032, 0.026],
-    [-0.066, -0.014, 0.036],
-    [0.055, -0.033, 0.047],
-    [0.188, -0.084, 0.052],
-    [0.246, -0.145, 0.048],
-    [0.274, -0.196, 0.042],
-    [0.309, -0.235, 0.03],
-    [0.368, -0.258, 0.031],
-    [0.428, -0.29, 0.035],
-    [0.506, -0.302, 0.057],
-    [0.578, -0.27, 0.092],
-    [0.625, -0.179, 0.105],
-    [0.65, -0.065, 0.088],
-    [0.678, 0.038, 0.065],
-    [0.726, 0.112, 0.037],
-  ];
-  const stream = spline(
-    banks.map(([x, z, w]) => [x, w, z]),
-    0.011,
-  );
-  const waterY = slabTop + 0.0007;
-  let prev;
-  for (let i = 0; i < stream.length; i++) {
-    const [x, w, z] = stream[i],
-      tangent = norm(
-        sub(
-          stream[Math.min(i + 1, stream.length - 1)],
-          stream[Math.max(0, i - 1)],
-        ),
-      );
-    const row = Array.from({ length: 5 }, (_, j) => {
-      const v = j / 2 - 1;
-      return [
-        Math.max(-0.738, Math.min(0.738, x - tangent[2] * v * w)),
-        waterY,
-        Math.max(-0.513, Math.min(0.513, z + tangent[0] * v * w)),
-      ];
-    });
-    if (prev)
-      for (let j = 0; j < 4; j++)
-        face(
-          water,
-          [prev[j], prev[j + 1], row[j + 1], row[j]],
-          j === 0 || j === 3 ? '#27667c' : '#1b4f64',
-        );
-    prev = row;
-  }
+  // No deck. The brief is a floating network: track plates, stations and a few landmarks, with
+  // nothing underneath them. The slab, its trim, the inlaid street grid and the Charles were all
+  // features of that deck and go with it.
 
   const anchors = {},
     lines = [],
@@ -348,24 +437,7 @@ export function mapSculpture(dir) {
     );
     const points = clipToFootprint(spline(controls, 0.015));
     lines.push({ id, routeId, name, color, points });
-    roundedTube(shell, points, tubeRadius, 14);
-
-    // A soft contact shadow grounds each line on the deck.
-    const shadowY = slabTop + 0.0004;
-    let edge;
-    for (let i = 0; i < points.length; i++) {
-      const t = norm(
-        sub(
-          points[Math.min(i + 1, points.length - 1)],
-          points[Math.max(i - 1, 0)],
-        ),
-      );
-      const side = [-t[2] * 0.0105, 0, t[0] * 0.0105];
-      const p = [points[i][0], shadowY, points[i][2]];
-      const row = [sub(p, side), add(p, side)];
-      if (edge) face(base, [edge[1], edge[0], row[0], row[1]], '#0e131f');
-      edge = row;
-    }
+    flatTrack(shell, points, trackHalfWidth, trackThickness);
 
     const sampleIndex = new Map(points.map((p, i) => [p.join(','), i]));
     for (const [k, [key]] of knots.entries()) {
@@ -379,19 +451,22 @@ export function mapSculpture(dir) {
 
       const focus = focal.find((f) => f[1] === key && f[4] === routeId);
       if (!focus) {
-        // Ordinary stop: a white pin through the tube that reads as a dot from above.
-        drum(marker, p, p[1], p[1] + tubeRadius + 0.0007, 0.0034, '#f4f6fa', 12);
+        // Ordinary stop: a white disc with the route colour inset, deliberately wider than the
+        // track plate (0.0084 across) so every stop reads as a bead on the line rather than a
+        // bump in it.
+        stationDot(marker, enamel, p, p[1] + trackThickness / 2, core);
         continue;
       }
       // Explorable stop: a white-rimmed drum on the deck with the line colour on top.
       const [stationId, , label, areaCode] = focus;
       const [lat, lon] = stops[key];
       const top = p[1] + puckRise;
+      const skirt = Math.max(slabTop - 0.0004, p[1] - trackThickness / 2 - 0.004);
       loft(
         marker,
         [
-          circle(p[0], slabTop, p[2], 0.0185, 40),
-          circle(p[0], slabTop + 0.002, p[2], 0.0165, 40),
+          circle(p[0], skirt, p[2], 0.0185, 40),
+          circle(p[0], skirt + 0.002, p[2], 0.0165, 40),
           circle(p[0], top - 0.0012, p[2], 0.0165, 40),
           circle(p[0], top, p[2], 0.0153, 40),
         ],
@@ -418,13 +493,21 @@ export function mapSculpture(dir) {
       };
     }
   }
+  // Ground first, so it sits behind everything. It shares the city's surface, so the whole
+  // base and all 300 buildings remain a single draw call.
+  groundBlob(city, lines, slabTop - 0.0006);
+
+  // The city goes in last: it needs every centreline so it can avoid building on the tracks.
+  const blocks = cityBlocks(city, lines, slabTop);
+  if (process.env.FARESIGHT_VERBOSE) console.log('city blocks placed:', blocks);
+
   // Transfer posts tie stacked platforms of different lines together.
   for (const platforms of levels.values()) {
     const heights = platforms.map((p) => p[1]);
     const low = Math.min(...heights),
       high = Math.max(...heights);
     if (high - low < 1e-6) continue;
-    drum(marker, platforms[0], low, high + tubeRadius + 0.0012, 0.0046, '#f4f6fa', 16);
+    drum(marker, platforms[0], low, high + trackThickness / 2 + 0.0012, 0.0046, '#f4f6fa', 16);
   }
   m.save(dir + 'boston-map-sculpture.glb');
   json(dir + 'station-anchors.json', anchors);
@@ -497,7 +580,7 @@ export function accessories(dir) {
       0.00002,
       '#fff4bb',
     );
-  t.save(dir + 'mbta-train-capsule.glb');
+  // The shared capsule is retired: every line now has its own model in trains.mjs.
   const m = new Model();
   const walnut = m.surface(m.material('Satin quarter-sawn walnut', { rough: 0.36, metal: 0.04 }));
   const brass = m.surface(m.material('Brushed brass', { rough: 0.28, metal: 0.78 }));

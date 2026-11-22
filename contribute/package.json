@@ -1,0 +1,21 @@
+{
+  "name": "@faresight/contribute",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "dev:https": "node scripts/dev-https.mjs",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview --host 0.0.0.0",
+    "data": "node scripts/build-map-data.mjs"
+  },
+  "dependencies": {
+    "@faresight/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "vite": "^8.3.8"
+  }
+}

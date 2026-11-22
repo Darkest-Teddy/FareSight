@@ -1,0 +1,10 @@
+{
+  "name": "FareSight Contribute",
+  "short_name": "Contribute",
+  "description": "Add photos of Boston places near the T and turn them into 3D previews for FareSight.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b1020",
+  "theme_color": "#0b1020"
+}

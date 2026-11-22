@@ -9,6 +9,8 @@ import { focal } from './transit.mjs';
 const SPANS = [800];
 const SCHEMA = 4; // bump to refetch every crop after changing what is kept from OSM
 const VENUE_MARGIN = 0.9; // venues and the station stay inside this fraction of the half-span
+// Stations whose crop is centred on the stop itself rather than slid toward far venues.
+const STATION_CENTRED = new Set(['place-brico']);
 const stops = JSON.parse(readFileSync(new URL('./stops.json', import.meta.url)));
 
 const OVERPASS_ENDPOINTS = [
@@ -28,11 +30,12 @@ function chooseArea(stopId, stationName, label) {
     .map((p) => [(p.lon - lon0) * metersPerLon(lat0), -(p.lat - lat0) * metersPerLat]);
   let best;
   for (const span of SPANS) {
-    const inner = (span / 2) * VENUE_MARGIN;
+    const inner = STATION_CENTRED.has(stopId) ? 0 : (span / 2) * VENUE_MARGIN;
+    const reach = (span / 2) * VENUE_MARGIN;
     for (let cx = -inner; cx <= inner; cx += 5)
       for (let cz = -inner; cz <= inner; cz += 5) {
         const inside = venues.filter(
-          (v) => Math.abs(v[0] - cx) <= inner && Math.abs(v[1] - cz) <= inner,
+          (v) => Math.abs(v[0] - cx) <= reach && Math.abs(v[1] - cz) <= reach,
         );
         // Prefer the window that centres the station and its in-range venues.
         const pts = [[0, 0], ...inside];
