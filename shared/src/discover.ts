@@ -38,6 +38,15 @@ export interface AggregateRating {
 /** @deprecated Kept so older imports still resolve. Use AggregateRating. */
 export type GoogleRating = AggregateRating;
 
+/** A photograph representing a place, with the source it came from. */
+export interface PlacePhoto {
+  url: string;
+  source: 'website' | 'wikipedia' | 'upload';
+  /** Shown as a credit on the card, because the picture is someone else's. */
+  credit: string;
+  credit_url: string | null;
+}
+
 export interface DiscoverPlace {
   id: string;
   name: string;
@@ -51,6 +60,8 @@ export interface DiscoverPlace {
   price_typical: number | null;
   note: string | null;
   photo_urls: string[];
+  /** The card's picture. Null when nothing could be found, and the tinted initial shows instead. */
+  photo: PlacePhoto | null;
   /** Set once the splat pipeline finishes. Null means the place opens to photographs only. */
   asset_id: string | null;
   /** Pipeline stage while a splat is still building, else null. */

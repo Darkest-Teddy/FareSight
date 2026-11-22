@@ -268,6 +268,27 @@
 .discover-card-media[data-category='museum'] { background: #E6E3DA; }
 .discover-card-media[data-category='hotel'] { background: #E3E6EC; }
 
+/* The picture is someone else's, so the card names its source. Small, bottom-left, over a soft
+   scrim so it stays legible on a bright photograph. */
+.discover-credit {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 1.25rem .625rem .375rem;
+  background: linear-gradient(to top, rgb(34 37 43 / 55%), transparent);
+  color: #fff;
+  font-size: .625rem;
+  font-weight: 500;
+  letter-spacing: .01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.discover-sentinel { height: 1px; }
+
 .discover-card-glyph {
   font-size: 2.5rem;
   font-weight: 750;
@@ -335,21 +356,42 @@
 }
 
 .discover-score {
+  position: relative;
   display: grid;
   place-items: center;
-  width: 2.625rem;
-  height: 2.625rem;
-  border: 2px solid var(--hairline);
-  border-radius: 50%;
-  background: var(--surface);
+  width: 2.75rem;
+  height: 2.75rem;
 }
 
-/* Ink for a strong score, sunflower for a middling one, a plain hairline for a weak one. */
-.discover-score.is-high { border-color: var(--ink); }
-.discover-score.is-mid { border-color: var(--sun); }
-.discover-score.is-low { border-color: var(--hairline); }
+/*
+ * The ring fills in proportion to the score, like a pie chart.
+ *
+ * Rotated so the arc starts at twelve o'clock, since an SVG circle's path begins at three. The
+ * stroke is dashed to the percentage: `r` is chosen to make the circumference exactly 100, so
+ * the dash length is the percentage with no arithmetic in the stylesheet.
+ */
+.score-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  overflow: visible;
+}
 
-.discover-score-value { font-size: .9375rem; font-weight: 700; }
+.score-ring circle { fill: none; stroke-width: 3; }
+.score-ring-track { stroke: var(--hairline); }
+
+.score-ring-fill {
+  stroke-linecap: round;
+  transition: stroke-dasharray 600ms var(--ease);
+}
+
+.score-ring.is-high .score-ring-fill { stroke: var(--score-high); }
+.score-ring.is-mid .score-ring-fill { stroke: var(--score-mid); }
+.score-ring.is-low .score-ring-fill { stroke: var(--score-low); }
+
+.discover-score-value { position: relative; font-size: .875rem; font-weight: 750; }
 .discover-score-count { color: var(--muted); font-size: .65rem; white-space: nowrap; }
 
 .discover-trend {

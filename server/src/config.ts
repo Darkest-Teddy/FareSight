@@ -82,6 +82,7 @@ export function getConfig() {
     port, host: process.env.HOST ?? '0.0.0.0',
     database: process.env.FARESIGHT_DB_PATH ?? resolve(projectRoot, 'server/data/faresight.db'),
     uploads: resolve(storage, 'uploads'), outputs: resolve(storage, 'outputs'),
+    thumbnails: resolve(storage, 'thumbnails'),
     demoAssets: [resolve(projectRoot, 'web/public/assets-demo'), resolve(projectRoot, 'modeling/output')],
     publicBaseUrl,
     adminPasscode: process.env.ADMIN_PASSCODE,

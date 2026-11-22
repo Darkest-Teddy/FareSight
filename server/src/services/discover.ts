@@ -1,6 +1,6 @@
 import type {
   AggregateRating, Category, DiscoverPlace, DiscoverQuery, DiscoverResponse, DiscoverWindow,
-  EngagementKind, Place,
+  EngagementKind, Place, PlacePhoto,
 } from '@faresight/shared';
 import { ENGAGEMENT_WEIGHTS, NEW_FOR_DAYS, STOPS, WINDOW_HOURS, chipCategories } from '@faresight/shared';
 import type { Store } from '../db/database.ts';
@@ -121,6 +121,7 @@ function fromCatalog(place: Place, createdAt: Date): DiscoverPlace {
     price_typical: place.typical_price,
     note: place.vibe,
     photo_urls: place.photos ?? [],
+    photo: null,
     asset_id: place.room_asset_id ?? place.rooms[0]?.asset_id ?? null,
     build_stage: null,
     rating: catalogRating(place),
@@ -146,6 +147,7 @@ function fromContributed(row: ContributedRow): DiscoverPlace {
     price_typical: row.price_typical === null ? null : Number(row.price_typical),
     note: row.note,
     photo_urls: row.photo_urls ?? [],
+    photo: null,
     asset_id: row.asset_id,
     build_stage: row.asset_id ? null : row.build_stage,
     // No Google match means no score at all: the card omits the ring rather than showing a zero
@@ -163,6 +165,14 @@ function fromContributed(row: ContributedRow): DiscoverPlace {
     created_at: row.created_at.toISOString(),
     score: null,
   };
+}
+
+export interface ThumbnailRow {
+  place_id: string;
+  url: string;
+  source: 'website' | 'wikipedia' | 'upload';
+  credit: string;
+  credit_url: string | null;
 }
 
 export interface RatingRow {
@@ -238,6 +248,16 @@ export function createDiscover(accounts: Accounts, store: Store) {
     return byPlace;
   }
 
+  /** Every stored thumbnail, keyed by place. One query per request, like the ratings. */
+  async function thumbnails(): Promise<Map<string, PlacePhoto>> {
+    const { rows } = await accounts.pool.query<ThumbnailRow>(
+      'select place_id, url, source, credit, credit_url from place_thumbnails',
+    );
+    return new Map(rows.map((row) => [row.place_id, {
+      url: row.url, source: row.source, credit: row.credit, credit_url: row.credit_url,
+    }]));
+  }
+
   async function contributed(): Promise<DiscoverPlace[]> {
     const { rows } = await accounts.pool.query<ContributedRow>(
       `select p.*, u.display_name, u.avatar_url,
@@ -268,10 +288,14 @@ export function createDiscover(accounts: Accounts, store: Store) {
   async function list(query: DiscoverQuery): Promise<DiscoverResponse> {
     const sort = query.sort ?? 'new';
     const window = query.window ?? 'today';
-    const limit = Math.min(60, Math.max(1, query.limit ?? 24));
+    // 120 covers the whole catalogue in one page today. The cap exists to bound the response,
+    // not to hide places: the page pages through everything beyond it.
+    const limit = Math.min(120, Math.max(1, query.limit ?? 24));
     const offset = Math.max(0, Number(query.cursor ?? 0) || 0);
 
-    const [contributedPlaces, ratings] = await Promise.all([contributed(), gatheredRatings()]);
+    const [contributedPlaces, ratings, photos] = await Promise.all([
+      contributed(), gatheredRatings(), thumbnails(),
+    ]);
     const places = [
       ...store.all('places').map((place: Place) => fromCatalog(place, catalogEpoch)),
       ...contributedPlaces,
@@ -280,12 +304,18 @@ export function createDiscover(accounts: Accounts, store: Store) {
       // it is both more current and weighted across more reviews. The hand-researched entry stays
       // as the fallback for anything never looked up.
       const gathered = gatheredRating(ratings.get(place.id));
-      return gathered ? { ...place, rating: gathered } : place;
+      const photo = photos.get(place.id) ?? null;
+      return gathered || photo ? { ...place, rating: gathered ?? place.rating, photo } : place;
     });
 
     const categories = new Set(chipCategories(query.chip));
     const needle = query.q?.trim().toLowerCase();
     let filtered = places.filter((place) => {
+      // Discover lists only places with a 3D version, so every card opens into a real room
+      // rather than a dead end. A place whose splat is still building is kept: it is a 3D panel
+      // in progress, and dropping it would make a contributor's upload vanish from the page
+      // until the pipeline finished.
+      if (!place.asset_id && !place.build_stage) return false;
       if (categories.size && !categories.has(place.category)) return false;
       if (query.station && place.station_id !== query.station) return false;
       if (needle) {

@@ -22,6 +22,12 @@
   --sun: #FFC93C;          /* highlight fill, always behind ink text */
   --price: #8A5300;        /* prices as plain text */
   --error: #B3261E;
+
+  /* Score bands. Warm, desaturated enough to sit on paper, and dark enough to pass 3:1 as a
+     2.5px stroke. Red doubles as --error so a poor score and a failure never disagree. */
+  --score-high: #2F7D4F;
+  --score-mid: #C08400;
+  --score-low: #B3261E;
   --live: #00843D;         /* MBTA green, used only for the live status dot */
 
   /* Lines */

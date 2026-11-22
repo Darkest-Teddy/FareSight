@@ -26,6 +26,42 @@ const CATEGORY_LABELS: Record<string, string> = {
 const toTen = (rating: number) => Math.round(rating * 20) / 10;
 
 /**
+ * A ring that fills in proportion to the score, like a pie chart, in green, amber or red.
+ *
+ * Drawn as an SVG circle with a dash pattern rather than a conic gradient, because a stroke can
+ * be rounded at the cap and animates smoothly, and because the arc then starts at twelve o'clock
+ * on every browser without a transform.
+ */
+function scoreRing(score: number): SVGSVGElement {
+  const fraction = Math.max(0, Math.min(1, score / 10));
+  // r = 15.9155 makes the circumference 100, so the dash array is the percentage directly.
+  const RADIUS = 15.9155;
+  const CIRCUMFERENCE = 100;
+  const band = score >= 8 ? 'is-high' : score >= 6 ? 'is-mid' : 'is-low';
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 40 40');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('score-ring', band);
+
+  const track = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  track.setAttribute('class', 'score-ring-track');
+  track.setAttribute('cx', '20');
+  track.setAttribute('cy', '20');
+  track.setAttribute('r', String(RADIUS));
+
+  const fill = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  fill.setAttribute('class', 'score-ring-fill');
+  fill.setAttribute('cx', '20');
+  fill.setAttribute('cy', '20');
+  fill.setAttribute('r', String(RADIUS));
+  fill.setAttribute('stroke-dasharray', `${(fraction * CIRCUMFERENCE).toFixed(2)} ${CIRCUMFERENCE}`);
+
+  svg.append(track, fill);
+  return svg;
+}
+
+/**
  * The Discover page: every place in one list, searchable, filterable and sortable.
  *
  * It is a plain DOM view rather than a scene in the 3D engine. The canvas is hidden while it is
@@ -50,6 +86,7 @@ export class DiscoverView {
   private readonly sortRow = element('div', 'discover-sort');
   private readonly windowRow = element('div', 'discover-window');
   private readonly moreButton: HTMLButtonElement;
+  private readonly sentinel = element('div', 'discover-sentinel');
 
   private chip = 'all';
   private sort: DiscoverSort = 'new';
@@ -59,6 +96,8 @@ export class DiscoverView {
   private loaded: DiscoverPlace[] = [];
   private request = 0;
   private searchTimer?: number;
+  private loadingMore = false;
+  private endWatcher?: IntersectionObserver;
   /** Counts card impressions once each, so scrolling past a card twice is not two events. */
   private readonly seen = new Set<string>();
   private observer?: IntersectionObserver;
@@ -116,7 +155,7 @@ export class DiscoverView {
     const allHeader = element('div', 'discover-section-header');
     allHeader.append(element('h2', 'discover-section-title', 'All places'), this.countLabel);
     this.moreButton = button('Show more', () => void this.loadMore(), 'discover-more');
-    this.allSection.append(allHeader, this.grid, this.moreButton);
+    this.allSection.append(allHeader, this.grid, this.sentinel, this.moreButton);
 
     this.root.append(header, controls, this.statusLine, this.featuredSection, this.allSection);
     this.syncControls();
@@ -125,12 +164,32 @@ export class DiscoverView {
   /** Called when the tab opens. Reloads so arrivals announced since last time are picked up. */
   async activate(): Promise<void> {
     this.observe();
+    this.watchEnd();
     await this.reload();
   }
 
   deactivate(): void {
     this.observer?.disconnect();
     this.observer = undefined;
+    this.endWatcher?.disconnect();
+    this.endWatcher = undefined;
+  }
+
+  /**
+   * Loads the next page as the reader approaches the end of the list.
+   *
+   * The Show more button stays as the fallback: it is what works without IntersectionObserver,
+   * and it is the only affordance a keyboard user can reach, since tabbing never scrolls far
+   * enough to trip the sentinel.
+   */
+  private watchEnd() {
+    if (this.endWatcher || typeof IntersectionObserver === 'undefined') return;
+    // `root` must be the page element, not the viewport: .discover is itself the scrolling box,
+    // so against the default root the sentinel never enters view and nothing ever loads.
+    this.endWatcher = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) void this.loadMore();
+    }, { root: this.root, rootMargin: '600px' });
+    this.endWatcher.observe(this.sentinel);
   }
 
   private syncControls() {
@@ -156,7 +215,24 @@ export class DiscoverView {
   }
 
   private async loadMore() {
-    if (this.cursor) await this.fetch(false);
+    if (!this.cursor || this.loadingMore) return;
+    this.loadingMore = true;
+    try {
+      await this.fetch(false);
+    } finally {
+      this.loadingMore = false;
+      // An IntersectionObserver reports changes, not states. On a short window the sentinel never
+      // leaves view, so it is reported once and never again, and paging stops after one page.
+      // Re-observing asks for a fresh report, which continues until the sentinel is pushed off
+      // screen or there is nothing left to load.
+      this.rearmEndWatcher();
+    }
+  }
+
+  private rearmEndWatcher() {
+    if (!this.endWatcher || !this.cursor) return;
+    this.endWatcher.unobserve(this.sentinel);
+    this.endWatcher.observe(this.sentinel);
   }
 
   private async fetch(replace: boolean) {
@@ -170,7 +246,10 @@ export class DiscoverView {
         sort: this.sort,
         window: this.window,
         cursor: replace ? undefined : this.cursor ?? undefined,
-        limit: 24,
+        // The whole catalogue fits in one request at this size, so every place is on the page
+        // immediately rather than appearing only once somebody scrolls. The paging below still
+        // works and takes over if the catalogue ever outgrows a single page.
+        limit: 120,
       });
       // A slower earlier request must not overwrite a newer one's results.
       if (run !== this.request) return;
@@ -178,6 +257,7 @@ export class DiscoverView {
       this.cursor = response.next_cursor;
       this.render(response.total);
       this.statusLine.hidden = true;
+      if (replace) this.rearmEndWatcher();
     } catch (error) {
       if (run !== this.request) return;
       this.statusLine.hidden = false;
@@ -221,15 +301,29 @@ export class DiscoverView {
     card.setAttribute('aria-label', `${place.name}, ${CATEGORY_LABELS[place.category] ?? place.category}`);
 
     const media = element('div', 'discover-card-media');
-    const photo = place.photo_urls[0];
+    // A gathered photograph first, then anything a contributor uploaded.
+    const photo = place.photo?.url ?? place.photo_urls[0];
     if (photo) {
       const image = element('img', 'discover-card-image');
       image.src = photo;
       image.alt = '';
       image.loading = 'lazy';
-      // A broken photo would otherwise leave a torn icon and alt text in the card.
-      image.addEventListener('error', () => { image.remove(); media.classList.add('is-empty'); });
+      image.decoding = 'async';
+      // A broken photo would otherwise leave a torn icon and alt text where the picture was.
+      image.addEventListener('error', () => {
+        image.remove();
+        media.querySelector('.discover-credit')?.remove();
+        media.classList.add('is-empty');
+        media.dataset.category = place.category;
+        media.append(element('span', 'discover-card-glyph', (place.name[0] ?? '?').toUpperCase()));
+      });
       media.append(image);
+      // The picture belongs to the venue or to Wikipedia, so the card says whose it is.
+      if (place.photo) {
+        const credit = element('span', 'discover-credit', place.photo.credit);
+        credit.title = `Photograph from ${place.photo.credit}`;
+        media.append(credit);
+      }
     } else {
       // Seeded places ship no photographs, so the tile is tinted by category rather than left
       // blank. This is the gap both specifications noted and neither closed.
@@ -271,8 +365,7 @@ export class DiscoverView {
     if (place.rating) {
       const score = toTen(place.rating.rating);
       const ring = element('div', 'discover-score');
-      ring.classList.add(score >= 8.5 ? 'is-high' : score >= 7 ? 'is-mid' : 'is-low');
-      ring.append(element('span', 'discover-score-value', score.toFixed(1)));
+      ring.append(scoreRing(score), element('span', 'discover-score-value', score.toFixed(1)));
       const wrap = element('div', 'discover-score-wrap');
       const count = place.rating.rating_count;
       wrap.append(ring, element('span', 'discover-score-count',
@@ -314,6 +407,6 @@ export class DiscoverView {
         void discover.engage(id, 'card_view');
         this.observer?.unobserve(entry.target);
       }
-    }, { threshold: 0.5 });
+    }, { root: this.root, threshold: 0.5 });
   }
 }

@@ -34,6 +34,7 @@ export async function createApp(config: Config = getConfig(), options: { logger?
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 1024 * 1024 });
   mkdirSync(config.uploads, { recursive: true });
   mkdirSync(config.outputs, { recursive: true });
+  mkdirSync(config.thumbnails, { recursive: true });
   const store = new Store(config.database);
   const guards = createPasscodeGuards(config);
 
@@ -94,6 +95,20 @@ export async function createApp(config: Config = getConfig(), options: { logger?
     return reply.header('Cache-Control', 'no-store').sendFile(basename(path), dirname(path), { cacheControl: false });
   });
 
+  /**
+   * Place thumbnails gathered by `pnpm --filter @faresight/server thumbnails`.
+   *
+   * These are public pictures from a venue's own site or Wikipedia, named by a hash of their
+   * source URL and credited on the card, so they are served to anyone and may be cached. The
+   * filename is resolved through the same guard the other storage routes use, which refuses
+   * anything that is not a plain readable file inside the directory.
+   */
+  app.get<{ Params: { file: string } }>('/storage/thumbnails/:file', async ({ params }, reply) => {
+    const path = findReadableAsset(config.thumbnails, params.file);
+    if (!path) return reply.code(404).send({ error: 'Thumbnail not found' });
+    return reply.header('Cache-Control', 'public, max-age=86400').sendFile(basename(path), dirname(path), { cacheControl: false });
+  });
+
   app.get<{ Params: { file: string } }>('/assets-demo/:file', async ({ params }, reply) => {
     const path = findDemoAsset(config, params.file);
     if (!path) return reply.code(404).send({ error: 'Demo asset not found' });
@@ -106,7 +121,7 @@ export async function createApp(config: Config = getConfig(), options: { logger?
   }));
   registerAuth(app, config, accounts, auth);
   registerDiscover(app, store, config, auth, accounts, discover, discoverEvents, googlePlaces);
-  registerCatalog(app, store, config);
+  registerCatalog(app, store, config, accounts);
   registerAdminAndCommunity(app, store, guards);
   registerPipeline(app, store, config, guards);
   registerCaptures(app, store, config, guards, captures, captureEvents);
