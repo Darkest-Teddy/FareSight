@@ -21,6 +21,7 @@ import { mirrorJobs, openCaptures } from './services/captures.ts';
 import { findDemoAsset, findReadableAsset } from './services/demoAssets.ts';
 import { createPasscodeGuards } from './services/passcodes.ts';
 import { MAX_IMAGE_BYTES } from './services/imagePrep.ts';
+import { startCaptureSync } from './services/captureSync.ts';
 import { startCaptureBridge } from './worker/captureBridge.ts';
 import { startJobWorker } from './worker/jobWorker.ts';
 
@@ -40,6 +41,9 @@ export async function createApp(config: Config = getConfig(), options: { logger?
   });
   const captureEvents = captures && createCaptureEvents(captures, logError);
   const stopMirror = captures && mirrorJobs(store, captures, logError);
+  // Rooms that another machine built from the shared queue are copied into this server's catalog.
+  const captureSync = captures && startCaptureSync(store, captures, logError);
+  if (captureSync) captureEvents?.watchAll(captureSync.sync);
 
   let stopWorker: (() => Promise<void>) | undefined;
   let stopBridge: (() => Promise<void>) | undefined;
@@ -48,6 +52,7 @@ export async function createApp(config: Config = getConfig(), options: { logger?
       await stopBridge?.();
       await stopWorker?.();
       await stopMirror?.();
+      await captureSync?.stop();
       await captureEvents?.close();
       await captures?.close();
     } finally {

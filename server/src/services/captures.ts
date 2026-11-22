@@ -190,6 +190,8 @@ function generationJob(store: Store, config: Config, capture: CaptureRow, job: C
     provider: local?.provider ?? pipelineProvider(config, 'room').provider,
     input_upload_ids: local?.input_upload_ids ?? [], model_tier: job.params.model_tier,
     status_message: job.status_message, error: job.failure_detail,
-    asset_id: local?.asset_id, created_at: job.created_at.toISOString(), updated_at: job.updated_at.toISOString(),
+    // A room built on another machine is imported under its job's id (see captureSync).
+    asset_id: local?.asset_id ?? (job.status === 'ready' && store.get('assets', job.id) ? job.id : undefined),
+    created_at: job.created_at.toISOString(), updated_at: job.updated_at.toISOString(),
   };
 }

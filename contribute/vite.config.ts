@@ -19,6 +19,8 @@ const allowedHosts = ['.localhost', ...(process.env.CONTRIBUTE_HOST ? [process.e
 export default defineConfig({
   plugins: [seoMetadata('VITE_CONTRIBUTE_URL', loadEnv)],
   resolve: { alias: { '@faresight/shared': fileURLToPath(new URL('../shared/src/index.ts', import.meta.url)) } },
+  // The http and https dev servers run side by side, so each keeps its own cache.
+  cacheDir: https ? 'node_modules/.vite-https' : 'node_modules/.vite',
   server: { port: https ? 5181 : 5180, strictPort: true, https, allowedHosts, proxy },
   preview: { port: 4180, strictPort: true, allowedHosts, proxy },
 });

@@ -811,7 +811,9 @@ button:disabled { cursor: default; }
 .sweep-lines { display: grid; gap: .45rem; color: var(--muted); font-size: .88rem; line-height: 1.45; }
 /* Development only: the sensors and camera are replaced by a view that is dragged around. */
 .sweep-dialog[data-simulated=true]::before {
-  content: 'Simulated camera. Drag to look around.';
+  content: 'Simulated camera. Drag to look around.\A' attr(data-simulated-why);
+  white-space: pre-line;
+  right: max(.9rem, env(safe-area-inset-right));
   position: absolute;
   z-index: 1;
   top: calc(max(.7rem, env(safe-area-inset-top)) + 3.4rem);

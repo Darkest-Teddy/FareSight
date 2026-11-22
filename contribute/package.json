@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
+    "dev": "node scripts/dev-https.mjs --with-http",
     "dev:https": "node scripts/dev-https.mjs",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
