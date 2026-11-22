@@ -135,7 +135,7 @@ export class DishTableScene {
     const portion = diameter && diameter > 0
       ? `${asset?.scale_status === 'measured' ? '' : '≈'}${Math.round(diameter * 100)} cm`
       : 'Size unlisted';
-    const scaleAndPrice = `$${dish.price.toFixed(2)}  ·  ${portion}`;
+    const scaleAndPrice = Number.isFinite(dish.price) ? `$${dish.price.toFixed(2)}  ·  ${portion}` : portion;
     setting.caption.draw(JSON.stringify([dish.name, venue, scaleAndPrice]), (ctx, w, h) => {
       ctx.fillStyle = '#f4ecdd';
       ctx.fillRect(0, 0, w, h);

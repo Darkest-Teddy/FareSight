@@ -119,6 +119,8 @@ export interface FareSightSceneEngine {
   init(): Promise<void>;
   destroy(): void;
   resize(): void;
+  /** Width in CSS pixels of UI covering the left edge; the flat-screen view centres in the space beside it. */
+  setViewportInset(left: number): void;
   setScene(mode: SceneMode): Promise<void>;
   setPlaces(places: XRPlaceData[], filteredIds: Set<string>): void;
   setStops(stops: XRStopData[]): void;

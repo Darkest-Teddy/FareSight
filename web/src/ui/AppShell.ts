@@ -12,7 +12,7 @@ import { LiveController, type AppControlSurface } from '../live/LiveController';
 import { RealtimeVoice } from '../voice/RealtimeVoice';
 import { AdminModal } from './AdminModal';
 import { attribution } from './AttributionModal';
-import { button, element, errorText, link, message, modal, previewBadge } from './dom';
+import { button, element, errorText, icon, link, message, modal } from './dom';
 import { FilterBar } from './FilterBar';
 import { LiveVoiceDock } from './LiveVoiceDock';
 import { ReviewBriefingModal } from './ReviewBriefingModal';
@@ -22,16 +22,35 @@ import { initialFilters, matchingPlaces, placesAt, type Filters } from './state'
 import { UploadPipelineModal } from './UploadPipelineModal';
 
 const sceneTitles: Record<SceneMode, string> = { map: 'Map', station: 'Station', venue: 'Venue', dish: 'Dish' };
+const sceneDepth: Record<SceneMode, number> = { map: 0, station: 1, venue: 2, dish: 3 };
+const parentScene = { station: 'map', venue: 'station', dish: 'venue' } as const;
 const pollInterval = 18_000;
+
+function brandMark() {
+  const mark = element('span', 'brand-mark');
+  mark.setAttribute('aria-hidden', 'true');
+  return mark;
+}
+
+function labelAndIcon(control: HTMLButtonElement, label: string, name: Parameters<typeof icon>[0]) {
+  control.replaceChildren(icon(name), element('span', '', label));
+  return control;
+}
 
 export class AppShell {
   private readonly canvas = element('canvas', 'viewport');
   private readonly canvasNotice = element('div', 'canvas-notice');
-  private readonly status = element('span', 'service-status');
-  private readonly xrStatus = element('span', 'xr-status');
-  private readonly notice = element('div', 'notice');
+  private readonly status = element('span', 'service-status surface-quiet');
+  private readonly xrStatus = element('span', 'xr-status surface-quiet');
+  private readonly notice = element('div', 'notice surface');
   private readonly breadcrumbs = element('nav', 'breadcrumbs');
+  private readonly sidebarHead = element('header', 'sidebar-head');
+  private readonly sidebarBrand = element('div', 'sidebar-brand');
+  private readonly sidebarBack = button('', () => this.goBack(), 'quiet sidebar-back');
+  private readonly sidebarBackLabel = element('span');
+  private readonly sidebarHome = button('', () => this.showMap(), 'quiet icon-button sidebar-home');
   private readonly stationBoard = element('section', 'station-board panel');
+  private readonly stationSummary = element('p', 'station-summary');
   private readonly stationList = element('div', 'station-board-list');
   private readonly routeFeedback = element('div');
   private readonly filterBar: FilterBar;
@@ -56,11 +75,14 @@ export class AppShell {
   private readonly arButton: HTMLButtonElement;
   private readonly xrExit: HTMLButtonElement;
   private readonly moreButton: HTMLButtonElement;
-  private readonly moreMenu = element('div', 'command-menu');
+  private readonly moreMenu = element('div', 'command-menu surface');
   private readonly mobileButtons = new Map<string, HTMLButtonElement>();
   private readonly sound = new SoundEngine();
   private readonly logs: string[] = [];
   private readonly mobile = matchMedia('(max-width: 768px)');
+  private readonly reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  private renderedMode?: SceneMode;
+  private panelAnimations: Animation[] = [];
   private engine?: FareSightSceneEngine;
   private engineReady = false;
   private busyScene = false;
@@ -103,19 +125,18 @@ export class AppShell {
 
   constructor(private readonly root: HTMLElement) {
     root.classList.add('app-shell');
-    const head = element('header', 'command-bar');
+    const head = element('header', 'command-bar surface-quiet');
     const brand = button('FareSight', () => this.showMap(), 'wordmark');
-    const mark = element('span', 'brand-mark');
-    mark.setAttribute('aria-hidden', 'true');
-    brand.prepend(mark);
+    brand.prepend(brandMark());
     this.breadcrumbs.setAttribute('aria-label', 'Scene navigation');
     const operations = element('div', 'command-actions');
-    this.vrButton = button('Enter VR', () => void this.launchXR('vr'), 'accent');
-    this.arButton = button('AR Table', () => void this.launchXR('ar'));
+    this.vrButton = button('Enter VR', () => void this.launchXR('vr'), 'accent xr-entry');
+    this.arButton = button('AR Table', () => void this.launchXR('ar'), 'xr-entry');
+    this.vrButton.dataset.supported = this.arButton.dataset.supported = 'false';
     this.xrExit = button('Exit XR', () => this.engine?.exitXR(), 'accent');
     this.xrExit.hidden = true;
-    this.pairButton = button('Pair Quest', () => this.pairing.open(), 'quiet desktop-action');
-    this.audioButton = button('Audio off', () => this.toggleAudio(), 'quiet');
+    this.pairButton = labelAndIcon(button('', () => this.pairing.open(), 'quiet desktop-action'), 'Pair a headset', 'headset');
+    this.audioButton = labelAndIcon(button('', () => this.toggleAudio(), 'quiet'), 'Sound off', 'sound-off');
     this.audioButton.setAttribute('aria-pressed', 'false');
     const admin = new AdminModal(() => void this.loadCatalog());
     this.credits = attribution(() => admin.open());
@@ -149,38 +170,43 @@ export class AppShell {
         this.liveDock.setMuted(next);
       },
       sendText: (text) => this.liveClient.sendText(text),
-    });
-    // Secondary tools live in one menu so the bar keeps a single clear call to action.
+    }, this.mobile);
     this.moreMenu.id = 'command-menu';
     this.moreMenu.hidden = true;
     this.moreMenu.append(
-      button('Upload 3D', () => this.uploader.open(this.place?.id), 'quiet desktop-action'),
-      this.pairButton, this.audioButton, button('Debug', () => this.openDebug(), 'quiet desktop-debug'),
-      button('Credits', this.credits.open, 'quiet'),
+      labelAndIcon(button('', () => this.uploader.open(this.place?.id), 'quiet desktop-action'), 'Upload 3D capture', 'upload'),
+      this.pairButton, this.audioButton,
+      labelAndIcon(button('', this.credits.open, 'quiet'), 'Credits', 'info'),
     );
-    this.moreButton = button('More', () => this.setMenuOpen(this.moreMenu.hidden), 'quiet menu-toggle');
-    this.moreButton.setAttribute('aria-haspopup', 'true');
+    this.moreButton = button('', () => this.setMenuOpen(this.moreMenu.hidden), 'quiet icon-button menu-toggle');
+    this.moreButton.append(icon('more'));
+    this.moreButton.setAttribute('aria-label', 'More');
     this.moreButton.setAttribute('aria-controls', this.moreMenu.id);
     this.moreButton.setAttribute('aria-expanded', 'false');
-    const more = element('div', 'command-more');
-    more.append(this.moreButton, this.moreMenu);
     this.moreMenu.addEventListener('click', (event) => {
-      if (event.target instanceof HTMLButtonElement && event.target !== this.audioButton) this.setMenuOpen(false);
-    });
+      const item = (event.target as Element).closest('button');
+      if (item && item !== this.audioButton) {
+        this.setMenuOpen(false);
+        this.moreButton.focus();
+      }
+    }, { capture: true });
     document.addEventListener('pointerdown', (event) => {
-      if (!this.moreMenu.hidden && !more.contains(event.target as Node)) this.setMenuOpen(false);
+      const target = event.target as Node;
+      if (!this.moreMenu.hidden && !this.moreButton.contains(target) && !this.moreMenu.contains(target)) this.setMenuOpen(false);
     });
-    more.addEventListener('keydown', (event) => {
-      if (event.key !== 'Escape' || this.moreMenu.hidden) return;
-      this.setMenuOpen(false);
-      this.moreButton.focus();
-    });
-    operations.append(this.liveDock.trigger, this.vrButton, this.arButton, this.xrExit, more);
+    operations.append(this.liveDock.trigger, this.vrButton, this.arButton, this.xrExit, this.moreButton);
     head.append(brand, this.breadcrumbs, operations);
 
     this.status.setAttribute('role', 'status');
+    this.xrStatus.hidden = true;
     const indicators = element('div', 'indicators');
-    indicators.append(this.status, this.xrStatus);
+    const reset = button('', () => this.engine?.resetCamera(), 'quiet icon-button map-reset surface-quiet');
+    reset.append(icon('reset'));
+    reset.setAttribute('aria-label', 'Reset view');
+    reset.title = 'Reset view';
+    const mapControls = element('div', 'map-controls');
+    mapControls.append(this.status, this.xrStatus, reset);
+    indicators.append(mapControls);
     this.canvas.setAttribute('aria-label', 'FareSight interactive 3D view');
     this.canvas.tabIndex = 0;
     this.canvasNotice.replaceChildren(message('Loading 3D viewer…'));
@@ -189,7 +215,7 @@ export class AppShell {
     this.notice.setAttribute('role', 'status');
 
     const boardHead = element('header', 'station-board-heading');
-    boardHead.append(element('p', 'board-kicker', 'BOSTON BY TRAIN'), element('h1', '', 'Explore by stop'));
+    boardHead.append(element('h1', '', 'Explore by stop'), this.stationSummary);
     this.stationBoard.setAttribute('aria-label', 'Boston stops');
     this.stationBoard.append(boardHead, this.stationList, this.routeFeedback);
 
@@ -218,9 +244,11 @@ export class AppShell {
       retryTrip: () => void this.refreshTrip(),
       retryManifest: () => void this.refreshManifest(),
     });
+    this.drawer.setXrCapable(false);
     this.pairing = new PairingModal((data) => void this.receivePair(data), (paired) => {
-      this.pairButton.textContent = paired ? 'Paired' : 'Pair Quest';
+      labelAndIcon(this.pairButton, paired ? 'Paired' : 'Pair a headset', 'headset');
       this.mobileButtons.get('Pair')?.setAttribute('aria-label', paired ? 'Paired devices' : 'Pair device');
+      this.drawer.setPaired(paired);
     });
     this.uploader = new UploadPipelineModal({
       places: () => this.places,
@@ -240,11 +268,40 @@ export class AppShell {
       this.mobileButtons.set(label, tab);
     }
 
-    root.replaceChildren(this.canvas, this.canvasNotice, head, indicators, this.stationBoard, this.filterBar.root, this.drawer.root, this.liveDock.root, tabs, this.notice);
+    const sidebar = element('aside', 'sidebar surface');
+    sidebar.setAttribute('aria-label', 'Explore FareSight');
+    this.sidebarBrand.append(brandMark(), element('span', 'sidebar-name', 'FareSight'));
+    this.sidebarBack.append(icon('back'), this.sidebarBackLabel);
+    this.sidebarHome.append(brandMark());
+    this.sidebarHome.setAttribute('aria-label', 'Return to the map');
+    this.sidebarHome.title = 'Return to the map';
+    this.sidebarHead.append(this.sidebarBrand, this.sidebarBack, this.sidebarHome);
+    sidebar.append(this.sidebarHead, this.filterBar.root, this.stationBoard, this.drawer.root);
+    root.replaceChildren(this.canvas, this.canvasNotice, head, this.moreMenu, this.liveDock.root, indicators, sidebar, tabs, this.notice);
     this.debug.body.append(this.renderStats, this.debugLogs,
       button('Reset camera', () => this.engine?.resetCamera()),
       button('Send debug logs', () => void this.sendDebugLogs(), 'quiet'));
     this.mobile.addEventListener('change', () => this.renderPanels());
+    document.addEventListener('keydown', (event) => {
+      if (event.defaultPrevented) return;
+      if (!this.mobile.matches && event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && event.key.toLowerCase() === 'd') {
+        if (event.target instanceof Element && event.target.closest('input, select, textarea, [contenteditable]')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat && !document.querySelector('dialog[open]')) this.openDebug();
+        return;
+      }
+      if (event.key !== 'Escape') return;
+      if (document.querySelector('dialog[open]')) return;
+      if (!this.moreMenu.hidden) {
+        this.setMenuOpen(false);
+        this.moreButton.focus();
+        return;
+      }
+      if (this.mobile.matches || this.mode === 'map') return;
+      if (event.target instanceof Element && event.target.closest('input, select, textarea, dialog, [contenteditable]')) return;
+      this.goBack();
+    });
     this.sound.setMuted(true);
     this.filterBar.setStops(this.stops);
     this.renderBreadcrumbs();
@@ -296,10 +353,12 @@ export class AppShell {
           this.arButton.title = state.arSupported ? 'Open an immersive AR table' : 'Open the virtual table on this device';
           this.arButton.dataset.supported = String(state.arSupported);
           this.vrButton.dataset.supported = String(state.vrSupported);
+          const xrCapable = state.vrSupported || state.arSupported;
+          this.drawer.setXrCapable(xrCapable);
+          this.xrStatus.hidden = !xrCapable && this.xrMode === 'none';
           this.xrStatus.textContent = state.activeMode === 'ar' ? 'AR table active'
             : state.activeMode === 'vr' ? 'VR active'
-              : /Quest|OculusBrowser/i.test(navigator.userAgent) ? 'Quest browser'
-                : state.vrSupported || state.arSupported ? 'WebXR available' : 'Desktop 3D';
+              : xrCapable ? 'WebXR available' : '';
           if (changed) this.renderReviewCards();
         },
         onStatsUpdate: (stats) => {
@@ -309,6 +368,12 @@ export class AppShell {
       });
       await this.engine.init();
       this.engineReady = true;
+      // On desktop the 3D view centres in the space right of the floating sidebar.
+      const sidebar = this.root.querySelector<HTMLElement>('.sidebar');
+      const syncInset = () => this.engine?.setViewportInset(!this.mobile.matches && sidebar ? sidebar.getBoundingClientRect().right : 0);
+      if (sidebar) new ResizeObserver(syncInset).observe(sidebar);
+      this.mobile.addEventListener('change', syncInset);
+      syncInset();
       this.engine.setVoiceState(this.liveClient.state);
       this.canvasNotice.hidden = true;
       this.engine.setStops(this.stops);
@@ -328,6 +393,7 @@ export class AppShell {
   }
 
   private setMenuOpen(open: boolean) {
+    if (open) this.liveDock.setOpen(false);
     this.moreMenu.hidden = !open;
     this.moreButton.setAttribute('aria-expanded', String(open));
   }
@@ -395,23 +461,38 @@ export class AppShell {
       return node;
     });
     this.breadcrumbs.replaceChildren(...nodes);
+    const atMap = this.mode === 'map';
+    this.sidebarBrand.hidden = !atMap;
+    this.sidebarBack.hidden = this.sidebarHome.hidden = atMap;
+    if (!atMap) {
+      const parent = this.mode === 'station' ? 'Stops' : names[sceneDepth[this.mode] - 1];
+      this.sidebarBackLabel.textContent = parent;
+      this.sidebarBack.setAttribute('aria-label', `Back to ${parent}`);
+    }
   }
 
   private renderStationBoard(matched: ReadonlySet<string>) {
     const counts = countPreviewsByStop(this.places, matched);
-    const key = JSON.stringify([this.filters.familyVisit, this.highlightedStops, ...this.stops.map((stop) => [stop.stop_id, counts.get(stop.stop_id)])]);
+    const key = JSON.stringify([this.filters.familyVisit, this.highlightedStops, ...this.stops.map((stop) => [stop.stop_id, stop.name, stop.lines, stop.primary_color, counts.get(stop.stop_id)])]);
     if (this.stationList.dataset.summary === key) return;
     this.stationList.dataset.summary = key;
     this.stationList.replaceChildren();
     const highlighted = new Set(this.highlightedStops);
+    let totalPlaces = 0;
+    let totalStops = 0;
     for (const stop of this.stops) {
       const previews = counts.get(stop.stop_id);
       const count = previews?.matching ?? 0;
       if (this.filters.familyVisit && count === 0) continue;
+      totalPlaces += count;
+      totalStops++;
       const row = button('', () => this.showStation(stop), 'station-row');
       const name = element('strong', '', stop.name);
-      if (previews?.published3D) name.append(previewBadge());
-      row.append(lineDots(stop), name, element('span', 'station-count', String(count)));
+      const chevron = icon('chevron-right');
+      chevron.classList.add('station-chevron');
+      const countText = element('span', 'station-count', String(count));
+      countText.append(element('span', 'station-count-unit', count === 1 ? ' place' : ' places'));
+      row.append(lineDots(stop), name, countText, chevron);
       row.setAttribute('aria-label', `${stop.name}, ${count} matching ${count === 1 ? 'place' : 'places'}${describe3DCount(previews)}`);
       row.dataset.stop = stop.stop_id;
       row.dataset.highlighted = String(highlighted.has(stop.stop_id));
@@ -420,16 +501,20 @@ export class AppShell {
       for (const type of ['pointerleave', 'blur']) row.addEventListener(type, () => this.engine?.setHoveredStop(undefined));
       this.stationList.append(row);
     }
+    this.stationSummary.textContent = `${totalPlaces} ${totalPlaces === 1 ? 'place' : 'places'} across ${totalStops} ${totalStops === 1 ? 'stop' : 'stops'}`;
     if (this.filters.familyVisit && !this.stationList.children.length) {
       this.stationList.append(message('No stops match the family visit filters.'));
     }
   }
 
   private renderPanels() {
+    const previous = this.renderedMode;
+    this.renderedMode = this.mode;
     this.root.dataset.filterOpen = String(this.filterOpen);
     this.root.dataset.scene = this.mode;
     this.stationBoard.hidden = this.mode !== 'map';
-    const shown = this.drawerOpen && this.mode !== 'map' && !(this.mobile.matches && this.filterOpen);
+    this.filterBar.setCompact(!this.mobile.matches && this.mode !== 'map');
+    const shown = this.isDrawerOpen() && !(this.mobile.matches && this.filterOpen);
     this.root.dataset.drawer = String(shown);
     if (shown) this.renderDrawer();
     else this.drawer.hide();
@@ -437,11 +522,37 @@ export class AppShell {
     this.mobileButtons.get('Explore')?.setAttribute('aria-pressed', String(!this.filterOpen && this.mode === 'map'));
     this.mobileButtons.get('Filters')?.setAttribute('aria-pressed', String(this.filterOpen));
     this.mobileButtons.get('Venue')?.setAttribute('aria-pressed', String(shown));
+    if (!this.mobile.matches && previous !== this.mode) this.animatePanel(previous);
+  }
+
+  private animatePanel(previous?: SceneMode) {
+    for (const animation of this.panelAnimations) animation.cancel();
+    this.panelAnimations = [];
+    const reduced = this.reducedMotion.matches;
+    const easing = getComputedStyle(this.sidebarHead).getPropertyValue('--ease-out').trim();
+    if (previous) {
+      const forward = sceneDepth[this.mode] > sceneDepth[previous];
+      const panel = this.mode === 'map' ? [this.stationBoard] : this.drawer.root.querySelectorAll('.drawer-heading, .drawer-scroll');
+      const from = reduced ? { opacity: 0 } : { opacity: 0, transform: `translateX(${forward ? 24 : -24}px)` };
+      for (const node of panel) this.panelAnimations.push(node.animate([from, { opacity: 1 }], { duration: reduced ? 120 : 220, easing }));
+      const heading = this.mode === 'map' ? this.sidebarBrand : this.sidebarBackLabel;
+      this.panelAnimations.push(heading.animate([{ opacity: .4 }, { opacity: 1 }], { duration: 120, easing }));
+    }
+    if (this.mode === 'map' && !reduced) {
+      const rows = [...this.stationList.querySelectorAll('.station-row')].slice(0, 8);
+      for (const [index, row] of rows.entries()) {
+        this.panelAnimations.push(row.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160, delay: index * 24, easing, fill: 'backwards' }));
+      }
+    }
+  }
+
+  private isDrawerOpen() {
+    return this.mode !== 'map' && (!this.mobile.matches || this.drawerOpen);
   }
 
   private renderDrawer(focus = false) {
     this.drawer.setComparison(this.comparedPlaces, this.comparisonLoading);
-    if (!this.drawerOpen || (this.mobile.matches && this.filterOpen)) return;
+    if (!this.isDrawerOpen() || (this.mobile.matches && this.filterOpen)) return;
     if (this.mode === 'station' && this.stop) {
       this.drawer.station(this.stop, placesAt(this.filtered, this.stop, this.filters), this.filters, focus, new Set(this.highlightedPlaces));
       this.updateStationDrawer();
@@ -505,21 +616,31 @@ export class AppShell {
     if (mode === 'dish' && this.dish) void this.showDish(this.dish, this.comparison?.dish.id, this.comparison?.place.id);
   }
 
+  private goBack() {
+    if (this.mode !== 'map') this.navigate(parentScene[this.mode]);
+  }
+
   private showMap() {
+    const restoreFocus = !this.mobile.matches && this.mode !== 'map' && this.sidebarHead.parentElement?.contains(document.activeElement);
     if (this.mode !== 'map') this.sound.playBack();
     this.mode = 'map';
     this.filterOpen = false;
     this.drawerOpen = false;
     this.renderBreadcrumbs();
     this.renderPanels();
+    if (restoreFocus) {
+      const row = [...this.stationList.querySelectorAll<HTMLButtonElement>('.station-row')].find((entry) => entry.dataset.stop === this.stop?.stop_id);
+      const heading = this.stationBoard.querySelector('h1');
+      if (heading) heading.tabIndex = -1;
+      (row ?? heading)?.focus({ preventScroll: true });
+    }
     this.renderScene();
     this.syncLiveContext();
   }
 
   private showStation(stop: Stop) {
     const changed = this.stop?.stop_id !== stop.stop_id || this.mode !== 'station';
-    // Coming from the map, the drawer waits for the 3D dive and slides in as it lands.
-    const arriving = this.mode === 'map';
+    const arriving = this.mobile.matches && this.mode === 'map';
     this.drawer.root.classList.toggle('arriving', arriving);
     if (arriving) this.drawer.root.addEventListener('animationend', () => this.drawer.root.classList.remove('arriving'), { once: true });
     this.stop = stop;
@@ -872,7 +993,7 @@ export class AppShell {
     this.sound.setMuted(this.muted);
     this.sound.toggleAmbientHum(!this.muted);
     if (!this.muted) void this.sound.unlock().then(() => this.sound.playSelect()).catch((error) => this.log(errorText(error)));
-    this.audioButton.textContent = this.muted ? 'Audio off' : 'Audio on';
+    labelAndIcon(this.audioButton, this.muted ? 'Sound off' : 'Sound on', this.muted ? 'sound-off' : 'sound');
     this.audioButton.setAttribute('aria-pressed', String(!this.muted));
   }
 
@@ -974,7 +1095,7 @@ export class AppShell {
         rotation: this.rotation,
         virtualTable: this.virtualTable,
         muted: this.muted,
-        drawerOpen: this.drawerOpen,
+        drawerOpen: this.isDrawerOpen(),
         sheetExpanded: this.sheetExpanded,
         filterOpen: this.filterOpen,
         xrMode: this.xrMode,

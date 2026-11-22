@@ -1,5 +1,5 @@
 import type { VoiceState, VoiceTranscript } from '../voice/RealtimeVoice';
-import { button, element } from './dom';
+import { button, element, icon } from './dom';
 
 export interface LiveVoiceDockActions {
   toggle(): void;
@@ -9,14 +9,14 @@ export interface LiveVoiceDockActions {
 }
 
 const stateLabels: Record<VoiceState, string> = {
-  idle: 'GPT Live', connecting: 'Connecting…', listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking', error: 'GPT Live',
+  idle: 'Ask FareSight', connecting: 'Connecting…', listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking', error: 'Ask FareSight',
 };
 
 export class LiveVoiceDock {
   readonly trigger: HTMLButtonElement;
   readonly root = element('section', 'voice-dock panel');
   private readonly triggerDot = element('span', 'voice-dot');
-  private readonly triggerLabel = element('span', '', 'GPT Live');
+  private readonly triggerLabel = element('span', '', stateLabels.idle);
   private readonly statusBadge = element('span', 'voice-state', 'Ready');
   private readonly modelMeta = element('span', 'voice-model', 'gpt-realtime');
   private readonly errorNote = element('p', 'message error');
@@ -31,28 +31,29 @@ export class LiveVoiceDock {
   private state: VoiceState = 'idle';
   private hasTranscript = false;
 
-  constructor(private readonly actions: LiveVoiceDockActions) {
+  constructor(private readonly actions: LiveVoiceDockActions, private readonly mobile: MediaQueryList) {
     this.trigger = button('', () => this.handleTriggerClick(), 'voice-trigger');
     this.trigger.setAttribute('aria-expanded', 'false');
     this.trigger.setAttribute('aria-controls', 'faresight-voice-dock');
-    this.trigger.setAttribute('aria-pressed', 'false');
     this.triggerDot.setAttribute('aria-hidden', 'true');
-    this.trigger.append(this.triggerDot, this.triggerLabel);
+    this.trigger.append(icon('mic'), this.triggerDot, this.triggerLabel);
 
     this.root.id = 'faresight-voice-dock';
-    this.root.setAttribute('aria-label', 'FareSight Live Voice Assistant');
+    this.root.setAttribute('aria-label', 'Ask FareSight');
     this.root.hidden = true;
 
     const head = element('header', 'voice-head');
     const titleWrap = element('div', 'voice-title-wrap');
-    titleWrap.append(this.statusBadge, this.modelMeta);
-    this.closeBtn = button('Hide', () => this.setOpen(false), 'quiet');
+    titleWrap.append(element('h2', '', 'Ask FareSight'), this.modelMeta);
+    this.closeBtn = button('', () => this.dismiss(), 'quiet icon-button');
+    this.closeBtn.setAttribute('aria-label', 'Hide voice controls');
+    this.closeBtn.append(icon('close'));
     head.append(titleWrap, this.closeBtn);
     this.statusBadge.setAttribute('role', 'status');
     this.errorNote.setAttribute('role', 'alert');
     this.errorNote.hidden = true;
 
-    this.connectBtn = button('Start GPT Live', () => this.actions.toggle(), 'accent');
+    this.connectBtn = button('Start voice', () => this.actions.toggle(), 'accent');
     this.muteBtn = button('Mute mic', () => this.actions.toggleMute());
     this.muteBtn.setAttribute('aria-pressed', 'false');
     this.endBtn = button('End session', () => this.actions.stop(), 'quiet');
@@ -60,14 +61,14 @@ export class LiveVoiceDock {
     this.endBtn.hidden = true;
 
     const controls = element('div', 'voice-controls');
-    controls.append(this.connectBtn, this.muteBtn, this.endBtn);
+    controls.append(this.statusBadge, this.connectBtn, this.muteBtn, this.endBtn);
 
     this.feed.setAttribute('role', 'log');
     this.feed.setAttribute('aria-live', 'polite');
 
     this.input.type = 'text';
     this.input.placeholder = 'Or type a command while live…';
-    this.input.setAttribute('aria-label', 'Send text command to Live AI');
+    this.input.setAttribute('aria-label', 'Send a message to FareSight');
     this.sendBtn = element('button', '', 'Send');
     this.sendBtn.type = 'submit';
     this.form.append(this.input, this.sendBtn);
@@ -81,8 +82,8 @@ export class LiveVoiceDock {
 
     this.root.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
-        this.setOpen(false);
-        this.trigger.focus();
+        event.stopPropagation();
+        this.dismiss();
       }
     });
 
@@ -91,8 +92,20 @@ export class LiveVoiceDock {
   }
 
   private handleTriggerClick(): void {
-    this.setOpen(this.state === 'idle' || this.state === 'error');
-    this.actions.toggle();
+    if (this.mobile.matches) {
+      this.setOpen(this.state === 'idle' || this.state === 'error');
+      this.actions.toggle();
+    } else if (this.root.hidden) {
+      this.setOpen(true);
+      (this.connectBtn.hidden ? this.closeBtn : this.connectBtn).focus();
+    } else {
+      this.dismiss();
+    }
+  }
+
+  private dismiss(): void {
+    this.setOpen(false);
+    this.trigger.focus();
   }
 
   setOpen(open: boolean): void {
@@ -101,28 +114,31 @@ export class LiveVoiceDock {
   }
 
   setState(state: VoiceState, detail?: string): void {
+    const focus = document.activeElement;
     this.state = state;
     this.root.dataset.state = state;
     this.trigger.dataset.state = state;
     const live = state === 'listening' || state === 'thinking' || state === 'speaking';
     const started = live || state === 'connecting';
     this.connectBtn.hidden = started;
-    this.connectBtn.textContent = state === 'error' ? 'Retry GPT Live' : 'Start GPT Live';
+    this.connectBtn.textContent = state === 'error' ? 'Retry voice' : 'Start voice';
     this.muteBtn.hidden = !live;
     this.endBtn.hidden = !started;
     this.endBtn.textContent = state === 'connecting' ? 'Cancel' : 'End session';
     this.form.hidden = !live;
-    this.trigger.setAttribute('aria-pressed', String(started));
     this.triggerLabel.textContent = stateLabels[state];
-    this.statusBadge.textContent = state === 'error' ? 'Connection error' : stateLabels[state];
+    this.statusBadge.textContent = state === 'error' ? 'Connection error' : state === 'idle' ? 'Ready' : stateLabels[state];
     this.errorNote.textContent = detail ?? '';
     this.errorNote.hidden = !detail;
     if (state === 'error') {
       this.setOpen(true);
+      if (focus === this.endBtn || focus === this.muteBtn) this.connectBtn.focus();
     } else if (state === 'connecting') {
       this.renderEmptyFeed();
+      if (focus === this.connectBtn) this.endBtn.focus();
     } else if (state === 'idle') {
-      this.setOpen(false);
+      if (this.root.contains(focus)) this.dismiss();
+      else this.setOpen(false);
     }
   }
 

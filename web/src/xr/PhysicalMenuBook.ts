@@ -511,7 +511,7 @@ export class PhysicalMenuBook {
         ctx.strokeRect(rowLeft + 5, top + 5, rowPixels - 10, height - 10);
       }
     }
-    const price = `$${dish.price.toFixed(2)}`;
+    const price = Number.isFinite(dish.price) ? `$${dish.price.toFixed(2)}` : 'Price n/a';
     ctx.font = '400 31px "Courier New", monospace';
     const priceWidth = ctx.measureText(price).width;
     ctx.fillStyle = ink;

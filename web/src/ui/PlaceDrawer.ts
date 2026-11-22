@@ -77,14 +77,41 @@ function breakdown(rows: [string, string][]) {
 }
 
 const ratingCount = new Intl.NumberFormat('en-US');
+const bostonClock = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: 'numeric', hourCycle: 'h23',
+});
+const desktop = matchMedia('(min-width: 769px)');
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+
+function formatMinutes(value: number) {
+  return value > 0 && value < 1 ? '<1 min' : `${Math.round(value)} min`;
+}
+
+function stationCaption(stop: Stop) {
+  const branches = stop.lines.filter((line) => line.startsWith('Green-')).map((line) => line.slice(6));
+  const lines = stop.lines.filter((line) => !line.startsWith('Green-')).map((line) => `${line} Line`);
+  if (branches.length) lines.unshift(`Green Line · ${branches.join(' ')}`);
+  return lines.join(' · ');
+}
 
 function venueFacts(place: Place): HTMLElement[] {
   const details = place.details;
   const nodes: HTMLElement[] = [];
-  const hours = section('Hours');
-  const { openNow } = bostonHours(place.hours, new Date());
-  hours.append(element('p', openNow ? 'open-now' : 'muted', openNow ? 'Open now' : 'Closed now'));
-  const today = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short' }).format(new Date()).toLowerCase();
+  const hours = element('details', 'detail-section drawer-disclosure');
+  const now = new Date();
+  const { openNow, hoursToday } = bostonHours(place.hours, now);
+  const parts = bostonClock.formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? '';
+  const today = part('weekday').toLowerCase();
+  const [opening, closing] = hoursToday.split('–');
+  const localMinutes = Number(part('hour')) * 60 + Number(part('minute'));
+  const todayHours = place.hours[today];
+  const [openHour, openMinute] = todayHours?.[0].split(':').map(Number) ?? [];
+  const opensLater = todayHours && localMinutes < openHour * 60 + openMinute;
+  const status = openNow ? `Open now · until ${closing}` : opensLater ? `Closed · opens ${opening}` : 'Closed';
+  const hoursSummary = element('summary');
+  hoursSummary.append(element('span', 'drawer-section-label', 'Hours'), element('span', openNow ? 'open-now' : '', status));
+  hours.append(hoursSummary);
   const list = breakdown(week.map(([day, label]) => [label, formatHours(place.hours[day])]));
   list.querySelectorAll('dt').forEach((term, index) => {
     if (week[index][0] !== today) return;
@@ -97,19 +124,6 @@ function venueFacts(place: Place): HTMLElement[] {
   nodes.push(hours);
   if (!details) return nodes;
 
-  if (details.awards.length) {
-    const awards = section('Recognition');
-    const items = element('ul', 'award-list');
-    for (const award of details.awards) {
-      const item = element('li');
-      const title = [award.title, award.year].filter(Boolean).join(', ');
-      item.append(award.url ? link(title, award.url) : element('span', '', title), element('small', '', award.org));
-      items.append(item);
-    }
-    awards.append(items);
-    nodes.push(awards);
-  }
-
   if (details.ratings.length || details.review_highlights.length) {
     const reviews = section('What reviewers say');
     if (details.ratings.length) {
@@ -121,8 +135,20 @@ function venueFacts(place: Place): HTMLElement[] {
       for (const text of details.review_highlights) items.append(element('li', '', text));
       reviews.append(items);
     }
-    reviews.append(element('p', 'muted', `Summarized from public reviews · checked ${details.checked_on}`));
     nodes.push(reviews);
+  }
+
+  if (details.awards.length) {
+    const awards = section('Recognition');
+    const items = element('ul', 'award-list');
+    for (const award of details.awards) {
+      const item = element('li');
+      const title = [award.title, award.year].filter(Boolean).join(', ');
+      item.append(award.url ? link(title, award.url) : element('span', '', title), element('small', '', award.org));
+      items.append(item);
+    }
+    awards.append(items);
+    nodes.push(awards);
   }
 
   if (details.address || details.website || details.phone) {
@@ -139,14 +165,6 @@ function venueFacts(place: Place): HTMLElement[] {
   return nodes;
 }
 
-function badgeAsset(asset: Asset, node: HTMLElement) {
-  const badges = element('div', 'badges');
-  badges.append(element('span', 'badge', asset.provenance_label));
-  if (asset.captured_on) badges.append(element('span', 'badge', 'Captured on ' + asset.captured_on.slice(0, 10)));
-  badges.append(element('span', 'badge', asset.scale_label || 'Size not verified'));
-  node.append(badges);
-}
-
 export class PlaceDrawer {
   readonly root = element('aside', 'place-drawer panel');
   private readonly title = element('h2');
@@ -154,16 +172,25 @@ export class PlaceDrawer {
   private readonly content = element('div', 'drawer-scroll');
   private readonly compareTray = element('div', 'restaurant-compare-tray');
   private readonly venueComparison = element('span');
+  private readonly venueActions = element('div', 'venue-actions');
+  private readonly oneWay = element('dd', 'price');
+  private readonly doorToDoor = element('dd');
+  private readonly openStatus = element('dd');
+  private readonly venueStats = element('dl', 'venue-stats');
   private comparedPlaces: readonly Place[] = [];
   private comparisonKey = '';
-  private readonly stationDetails = element('div');
+  private readonly arrivals = element('div');
+  private readonly alerts = element('details', 'detail-section drawer-disclosure station-alerts');
+  private readonly alertSummary = element('summary');
+  private readonly alertText = element('div', 'station-alert-text');
   private readonly stationList = element('div');
   private readonly tripDetails = element('div');
   private readonly costDetails = element('div');
   private readonly modelDetails = element('div');
-  private readonly pairingDetails = element('div', 'button-row detail-section');
+  private readonly pairingDetails = element('div', 'button-row detail-section pairing-actions');
   private readonly grip: HTMLButtonElement;
   private viewKey = '';
+  private actionKey = '';
   private modelKey = '';
   private modelManifest?: RestaurantManifest;
   private modelPlace?: Place;
@@ -171,6 +198,8 @@ export class PlaceDrawer {
   private modelCatalog?: readonly Place[];
   private reviewsNode?: HTMLElement;
   private reviewsKey = '';
+  private facts: HTMLElement[] = [];
+  private detailsPlaceId?: string;
 
   constructor(private readonly actions: DrawerActions) {
     this.root.setAttribute('aria-labelledby', 'detail-title');
@@ -190,7 +219,13 @@ export class PlaceDrawer {
       }
       touchY = undefined;
     });
-    heading.append(label, button('Close', actions.close, 'quiet'));
+    heading.append(label, button('Close', actions.close, 'quiet drawer-close'));
+    this.alerts.append(this.alertSummary, this.alertText);
+    for (const [label, value] of [['One way', this.oneWay], ['Door to door', this.doorToDoor], ['Now', this.openStatus]] as const) {
+      const stat = element('div');
+      stat.append(element('dt', 'drawer-section-label', label), value);
+      this.venueStats.append(stat);
+    }
     this.pairingDetails.append(button('Send to paired device', actions.sendPlace), button('Send trip', actions.sendTrip, 'quiet'));
     this.compareTray.hidden = true;
     this.root.append(this.grip, heading, this.compareTray, this.content);
@@ -217,9 +252,13 @@ export class PlaceDrawer {
     if (focused) (places.length ? (compare.disabled ? clear : compare) : this.title).focus({ preventScroll: true });
   }
 
-  private compareButton(place: Place) {
+  private compareButton(place: Place, compact = false) {
     const selected = this.comparedPlaces.some(({ id }) => id === place.id);
-    const toggle = button(selected ? 'Comparing ✓' : '+ Compare', () => this.actions.toggleComparison(place), 'quiet compare-place');
+    const symbol = selected ? '✓' : '+';
+    const label = selected ? 'Comparing' : 'Compare';
+    const toggle = button('', () => this.actions.toggleComparison(place), 'quiet compare-place');
+    toggle.append(element('span', 'compare-symbol', symbol), element('span', 'compare-label', label));
+    if (compact) toggle.classList.add('compare-compact');
     toggle.dataset.compareVenue = place.id;
     toggle.setAttribute('aria-label', `${selected ? 'Remove from comparison' : 'Compare'} ${place.name}`);
     toggle.setAttribute('aria-pressed', String(selected));
@@ -233,43 +272,57 @@ export class PlaceDrawer {
   }
 
   station(stop: Stop, places: Place[], filters: Filters, focus = false, highlightedPlaces?: ReadonlySet<string>) {
-    const compareFocus = (document.activeElement as HTMLElement | null)?.dataset.compareVenue;
+    const active = document.activeElement as HTMLElement | null;
+    const focusedPlace = this.stationList.contains(active) ? active?.dataset.place : undefined;
+    const compareFocus = this.stationList.contains(active) ? active?.dataset.compareVenue : undefined;
     const key = 'station:' + stop.stop_id;
+    const isNewView = this.viewKey !== key;
     this.root.hidden = false;
-    if (this.viewKey !== key) {
+    if (isNewView) {
       this.viewKey = key;
-      this.caption.textContent = stop.area_code;
+      this.caption.textContent = stationCaption(stop);
       this.title.textContent = stop.name;
-      this.stationDetails.replaceChildren();
-      this.content.replaceChildren(lineDots(stop), this.stationDetails, this.stationList);
+      this.arrivals.replaceChildren();
+      this.alerts.open = false;
+      this.alertSummary.textContent = 'Checking service alerts…';
+      this.alertText.replaceChildren();
+      this.content.replaceChildren(this.stationList, this.arrivals, this.alerts);
       this.content.scrollTop = 0;
     }
     const list = section('Places near the stop');
+    list.classList.add('station-places');
     if (!places.length) {
       list.append(message('No places at this stop match your filters.'), button('Clear filters', this.actions.clearFilters));
     }
     let firstHighlighted: HTMLButtonElement | undefined;
     for (const place of places) {
       const item = button('', () => this.actions.showPlace(place), 'place-row');
+      item.dataset.place = place.id;
       if (highlightedPlaces?.has(place.id)) {
         item.dataset.highlighted = 'true';
         if (!firstHighlighted) firstHighlighted = item;
       }
-      const label = element('span', '', place.name);
+      const label = element('span', 'place-label');
+      const name = element('span', 'place-name', place.name);
       const room = has3DRoom(place);
       const dishes = has3DDish(place);
-      if (room || dishes) label.append(previewBadge());
+      if (room || dishes) name.append(previewBadge());
       const preview = room && dishes ? ' · 3D room & dishes' : room ? ' · 3D room' : dishes ? ' · 3D dishes' : '';
-      label.append(element('small', '', `${place.walk_from_stop_m} m from station${preview}`));
+      const walk = Math.max(1, Math.round(place.walk_from_stop_m / 80));
+      label.append(name, element('small', '', `${walk} min walk${preview}`));
       item.append(label, element('strong', 'price', money(oneWayCost(place, filters.startStopId, filters.groupSize))));
       const row = element('div', 'place-compare-row');
-      row.append(item, this.compareButton(place));
+      row.append(item, this.compareButton(place, true));
       list.append(row);
     }
     this.stationList.replaceChildren(list);
-    if (compareFocus) [...list.querySelectorAll<HTMLButtonElement>('.compare-place')]
-      .find((toggle) => toggle.dataset.compareVenue === compareFocus)?.focus({ preventScroll: true });
-    if (firstHighlighted) firstHighlighted.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (compareFocus || focusedPlace) {
+      [...list.querySelectorAll<HTMLButtonElement>('.place-row, .compare-place')].find((item) =>
+        (compareFocus && item.dataset.compareVenue === compareFocus) || (focusedPlace && item.dataset.place === focusedPlace),
+      )?.focus({ preventScroll: true });
+    }
+    if (firstHighlighted) firstHighlighted.scrollIntoView({ block: 'nearest', behavior: reducedMotion.matches ? 'instant' : 'smooth' });
+    if (isNewView) this.animateView('.station-places > .place-compare-row, .station-places > .message, .station-arrivals, .station-alerts');
     if (focus) {
       this.title.tabIndex = -1;
       this.title.focus({ preventScroll: true });
@@ -278,51 +331,78 @@ export class PlaceDrawer {
 
   updateStation(stop: Stop, data: StationData, campusMinutes?: number) {
     if (this.viewKey !== 'station:' + stop.stop_id) return;
-    const arrivals = section('Next trains');
-    if (campusMinutes !== undefined) arrivals.append(element('p', 'readout', `${campusMinutes} min from BU Central · estimate`));
+    const arrivals = element('section', 'detail-section station-arrivals');
+    const heading = element('header', 'station-arrivals-heading');
+    heading.append(element('h3', '', 'Next trains'));
+    arrivals.append(heading);
+    if (campusMinutes !== undefined) arrivals.append(element('p', 'muted', `${formatMinutes(campusMinutes)} from BU Central · estimate`));
     if (data.predictions.data) {
       const { predictions, source } = data.predictions.data;
-      const timed = predictions.filter((entry) => entry.arrival_min !== null).sort((a, b) => a.arrival_min! - b.arrival_min!);
-      arrivals.append(element('p', 'muted', source === 'live' ? 'Live MBTA predictions' : 'Simulated train times'));
-      if (timed.length) {
-        arrivals.append(breakdown(timed.slice(0, 5).map((entry) => [
-          [entry.route_id, entry.direction].filter((value) => value !== null && value !== undefined).join(' · '),
-          entry.arrival_min === 0 ? 'Due' : `${entry.arrival_min} min`,
-        ])));
-      } else arrivals.append(message('No timed arrivals for this stop. Check the MBTA trip planner.'));
+      const timed = predictions.filter((entry): entry is Prediction & { arrival_min: number } => entry.arrival_min !== null)
+        .sort((a, b) => a.arrival_min - b.arrival_min).slice(0, 4);
+      if (source === 'simulated') heading.append(element('small', '', 'Simulated'));
+      const list = element('ul', 'arrival-list');
+      for (const train of timed) {
+        const row = element('li', 'arrival-row');
+        const dot = element('span', 'route-dot');
+        dot.style.backgroundColor = ROUTE_COLORS[train.route_id] ?? stop.primary_color;
+        const route = element('strong', 'arrival-route', train.route_id.replace('-', ' '));
+        const headsign = element('span', 'arrival-headsign', String(train.direction ?? ''));
+        const value = element('span', 'arrival-value');
+        if (train.arrival_min === 0) value.textContent = 'Due';
+        else {
+          const [minutes, unit] = formatMinutes(train.arrival_min).split(' ');
+          value.append(minutes, ' ', element('small', '', unit));
+        }
+        row.append(dot, route, headsign, value);
+        list.append(row);
+      }
+      arrivals.append(timed.length ? list : message('No timed arrivals for this stop. Check the MBTA trip planner.'));
     } else {
       arrivals.append(message(data.predictions.error ?? 'Checking next trains…', Boolean(data.predictions.error)));
       if (data.predictions.error) arrivals.append(button('Retry arrivals', this.actions.retryStation));
     }
 
-    const alerts = section('Service alerts');
     if (data.alerts.data) {
       const applicable = data.alerts.data.filter((alert) => alert.stop_ids.includes(stop.stop_id)
         || alert.route_ids.some((route) => stop.lines.includes(route))
         || (!alert.stop_ids.length && !alert.route_ids.length));
-      if (applicable.length) alerts.append(...applicable.map((alert) => element('p', '', alert.header)));
-      else alerts.append(message('No active alerts for this stop.'));
-    } else alerts.append(message(data.alerts.error ?? 'Checking service alerts…', Boolean(data.alerts.error)));
-    this.stationDetails.replaceChildren(arrivals, alerts);
+      this.alertSummary.textContent = applicable.length ? `${applicable.length} service ${applicable.length === 1 ? 'alert' : 'alerts'}` : 'No alerts for this stop';
+      this.alertText.replaceChildren(...applicable.map((alert) => element('p', '', alert.header)));
+    } else {
+      this.alertSummary.textContent = data.alerts.error ? 'Service alerts unavailable' : 'Checking service alerts…';
+      this.alertText.replaceChildren(message(data.alerts.error ?? 'Checking service alerts…', Boolean(data.alerts.error)));
+    }
+    const restoreRetry = this.arrivals.contains(document.activeElement) && document.activeElement?.tagName === 'BUTTON';
+    this.arrivals.replaceChildren(arrivals);
+    if (restoreRetry) arrivals.querySelector('button')?.focus({ preventScroll: true });
   }
 
   venue(data: ViewData, focus = false) {
     const { place, stop, dish } = data;
-    const key = 'venue:' + place.id;
+    const key = dish ? `dish:${place.id}:${dish.id}` : `venue:${place.id}`;
+    const isNewView = this.viewKey !== key;
     this.root.hidden = false;
-    if (this.viewKey !== key) {
+    if (isNewView) {
+      const fromStation = this.viewKey.startsWith('station:');
       this.viewKey = key;
       const summary = element('div', 'venue-intro');
       summary.append(element('p', '', place.vibe));
-      if (stop) summary.append(lineDots(stop));
-      summary.append(button('Reviews & Briefing', () => this.actions.showBriefing(place), 'quiet briefing-launch'));
-      summary.append(this.venueComparison);
-      this.reviewsNode = element('div');
-      this.reviewsKey = '';
-      this.content.replaceChildren(summary, ...venueFacts(place), this.costDetails, this.tripDetails, this.modelDetails, this.pairingDetails, this.reviewsNode);
+      if (!dish) summary.append(this.venueStats);
+      if (!this.reviewsNode || fromStation || this.detailsPlaceId !== place.id) {
+        this.detailsPlaceId = place.id;
+        this.facts = venueFacts(place);
+        this.reviewsNode = element('div');
+        this.reviewsKey = '';
+      }
+      summary.append(this.venueActions);
+      this.actionKey = '';
+      this.content.replaceChildren(summary, this.modelDetails, this.tripDetails, this.costDetails,
+        ...this.facts, this.pairingDetails, this.reviewsNode);
       this.content.scrollTop = 0;
       this.modelKey = '';
     }
+    this.updateVenueActions(data);
     const selected = this.comparedPlaces.some(({ id }) => id === place.id);
     if (this.venueComparison.firstElementChild?.getAttribute('aria-pressed') !== String(selected)
         || (this.venueComparison.firstElementChild as HTMLElement | null)?.dataset.compareVenue !== place.id) {
@@ -331,8 +411,11 @@ export class PlaceDrawer {
       this.venueComparison.replaceChildren(toggle);
       if (restore) toggle.focus({ preventScroll: true });
     }
-    this.caption.textContent = dish ? place.name : [stop?.name, stop?.area_code].filter(Boolean).join(' · ');
+    this.caption.textContent = dish ? place.name : [stop?.name, place.category.replaceAll('_', ' ')].filter(Boolean).join(' · ');
     this.title.textContent = (dish?.name ?? place.name).replaceAll('—', '–');
+    const { openNow } = bostonHours(place.hours, new Date());
+    this.openStatus.textContent = openNow ? 'Open' : 'Closed';
+    this.openStatus.classList.toggle('open-now', openNow);
     this.updateCost(data);
     this.updateTrip(data);
     this.updateModels(data);
@@ -341,45 +424,90 @@ export class PlaceDrawer {
       this.reviewsKey = reviewsKey;
       this.reviewsNode?.replaceChildren(this.reviews(place));
     }
+    if (isNewView) this.animateView('.venue-intro, .detail-section');
     if (focus) {
       this.title.tabIndex = -1;
       this.title.focus({ preventScroll: true });
     }
   }
 
+  private updateVenueActions({ place, dish, manifest, inside }: ViewData) {
+    const canEnterRoom = !dish && !inside && Boolean(manifest.data?.room_asset);
+    const hasDishes = !dish && manifest.data?.menu_items.some(({ dish_asset }) => isSplat(dish_asset));
+    const action = canEnterRoom ? 'Step inside 3D room' : hasDishes ? 'View dishes in 3D' : 'Reviews & briefing';
+    if (action === this.actionKey) return;
+    this.actionKey = action;
+    const focused = this.venueActions.contains(document.activeElement);
+    const focusedBriefing = (document.activeElement as HTMLElement | null)?.classList.contains('briefing-launch');
+    const focusedCompare = this.venueComparison.contains(document.activeElement);
+    const briefing = button('Reviews & briefing', () => this.actions.showBriefing(place), 'quiet briefing-launch');
+    const primary = canEnterRoom ? button(action, this.actions.enterRoom, 'accent')
+      : hasDishes ? button(action, () => this.focusMenu(), 'accent') : briefing;
+    if (canEnterRoom) primary.dataset.control = 'room';
+    if (primary === briefing && !dish) primary.classList.replace('quiet', 'accent');
+    this.venueActions.replaceChildren(primary, ...(primary === briefing ? [] : [briefing]), this.venueComparison);
+    if (focused) {
+      const target = focusedCompare ? this.venueComparison.querySelector('button') : focusedBriefing ? briefing : primary;
+      target?.focus({ preventScroll: true });
+    }
+  }
+
+  private animateView(selector: string) {
+    const key = this.viewKey;
+    requestAnimationFrame(() => {
+      if (!desktop.matches || this.root.hidden || this.viewKey !== key) return;
+      const noMotion = reducedMotion.matches;
+      const easing = getComputedStyle(this.root).getPropertyValue('--ease-out').trim() || 'cubic-bezier(.2,.8,.2,1)';
+      const frames = noMotion ? [{ opacity: 0 }, { opacity: 1 }]
+        : [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }];
+      [...this.content.querySelectorAll<HTMLElement>(selector)].filter((item) => item.offsetHeight).slice(0, 8)
+        .forEach((item, index) => item.animate(frames, {
+          easing, duration: noMotion ? 120 : 220, delay: noMotion ? 0 : index * 24, fill: 'backwards',
+        }));
+    });
+  }
+
   private updateCost({ place, filters, trip, dish }: ViewData) {
-    const node = section('Total cost');
+    const node = section('Cost breakdown');
     const group = filters.groupSize;
     const roomPrice = !dish && place.rooms.find((room) => /hour/i.test(room.price_unit));
-    const price = dish?.price ?? place.typical_price;
+    const dishPrice = dish && Number.isFinite(dish.price) ? dish.price : undefined;
+    const price = dishPrice ?? place.typical_price;
     const fare = trip.data?.fare ?? (filters.startStopId === place.stop_id ? 0 : MBTA_SUBWAY_FARE);
     const roundTrip = trip.data?.round_trip_fare ?? fare * 2;
     const food = roomPrice ? roomPrice.price / group : price;
-    node.append(element('p', 'cost-total price', `${money(food + fare)} ${group > 1 ? 'per person' : 'one way'}`));
-    node.append(breakdown([
-      [roomPrice ? 'Room hire' : dish || place.category === 'restaurant' ? 'Food' : 'Typical venue spend', roomPrice ? `${money(roomPrice.price)} / hour` : money(price)],
+    const total = money(food + fare);
+    const pending = !trip.data && !trip.error;
+    this.oneWay.toggleAttribute('data-loading', pending);
+    this.oneWay.textContent = pending ? 'Calculating' : total;
+    const rows: [string, string][] = [
+      [roomPrice ? 'Room hire' : dishPrice !== undefined || (!dish && place.category === 'restaurant') ? 'Food' : 'Typical venue spend',
+        roomPrice ? `${money(roomPrice.price)} / hour` : money(price)],
       ['T fare, one way', money(fare)],
       ['T fare, round trip', money(roundTrip)],
       [group > 1 ? 'Round trip per person' : 'Total with round trip', money(food + roundTrip)],
       ...(group > 1 ? [['Group total, one way', money((food + fare) * group)] as [string, string]] : []),
-    ]));
-    node.append(element('p', 'muted', place.price_checked_on ? `Price checked ${place.price_checked_on}` : 'Planning price estimate. Check with the venue.'));
+    ];
+    if (dish || !desktop.matches) rows.unshift([group > 1 ? 'One way per person' : 'Total one way', total]);
+    node.append(breakdown(rows));
     this.costDetails.replaceChildren(node);
   }
 
   private updateTrip({ place, stop, trip, originName }: ViewData) {
-    const node = section('Trip estimate');
+    const node = section('Trip breakdown');
+    this.doorToDoor.toggleAttribute('data-loading', !trip.data && !trip.error);
+    this.doorToDoor.toggleAttribute('data-unavailable', !trip.data && Boolean(trip.error));
+    this.doorToDoor.textContent = trip.data ? formatMinutes(trip.data.total_min) : trip.error ? 'Unavailable' : 'Calculating';
     if (trip.data) {
       const data = trip.data;
       const live = data.prediction_source === 'live';
       const usesTrain = data.from_stop_id !== data.to_stop_id;
-      const source = !usesTrain ? 'Walk from the selected stop' : live ? 'Live MBTA wait' : data.prediction_source === 'simulated' ? 'Simulated train wait' : 'Scheduled planning estimate';
-      node.append(element('p', 'muted', [originName ? `From ${originName}` : '', source].filter(Boolean).join(' · ')));
-      node.append(breakdown([
-        ['Walk to stop', `${data.walk_to_station_min} min`], [live ? 'Next live train' : 'Train wait', `${data.wait_min} min`],
-        ['Ride', `${data.ride_min} min`], ['Transfers', `${data.transfer_min} min`], ['Walk to venue', `${data.walk_to_venue_min} min`],
-        ['Total', `${data.total_min} min`],
-      ]));
+      const rows: [string, number][] = [
+        ['Walk to stop', data.walk_to_station_min], [live ? 'Next live train' : 'Train wait', data.wait_min],
+        ['Ride', data.ride_min], ['Transfers', data.transfer_min], ['Walk to venue', data.walk_to_venue_min],
+        ['Total', data.total_min],
+      ];
+      node.append(breakdown(rows.filter(([, minutes]) => minutes > 0).map(([label, minutes]) => [label, formatMinutes(minutes)])));
       if (trip.offline) node.append(message('Live trip data is unavailable. Showing an offline estimate.'));
       if (place.evening_venue && usesTrain) {
         node.append(element('p', 'badge', data.last_train_time ? `Last train home · ${formatTrainTime(data.last_train_time)}` : 'Last train home · check MBTA schedules'));
@@ -395,8 +523,8 @@ export class PlaceDrawer {
   }
 
   private updateModels(data: ViewData) {
-    const { place, manifest, dish, comparison, inside, filters, fit, seating, table, highlightedDishId } = data;
-    const key = JSON.stringify([place.id, dish?.id, inside, filters.groupSize, fit, seating, table,
+    const { place, manifest, dish, comparison, filters, fit, seating, table, highlightedDishId } = data;
+    const key = JSON.stringify([place.id, dish?.id, filters.groupSize, fit, seating, table, data.rotation,
       manifest.error, manifest.offline, highlightedDishId]);
     if (this.modelKey === key && this.modelManifest === manifest.data && this.modelPlace === place
         && this.modelComparison === comparison && this.modelCatalog === data.places) return;
@@ -406,24 +534,15 @@ export class PlaceDrawer {
     this.modelPlace = place;
     this.modelComparison = comparison;
     this.modelCatalog = data.places;
-    const node = section(dish ? 'On the table' : '3D previews');
+    const dataManifest = manifest.data;
+    const hasDishes = dataManifest?.menu_items.some(({ dish_asset }) => isSplat(dish_asset));
+    const node = section(dish ? 'On the table' : hasDishes ? 'Menu in 3D' : '3D previews');
     if (manifest.offline) node.append(message('Showing bundled demo previews.'));
     if (manifest.error) node.append(message(manifest.error, true), button('Reload previews', this.actions.retryManifest));
-    const dataManifest = manifest.data;
     if (!dataManifest && !manifest.error) node.append(message('Loading room and menu previews…'));
     if (dataManifest) {
       const menu = dataManifest.menu_items;
-      if (!dish) {
-        if (dataManifest.room_asset) {
-          badgeAsset(dataManifest.room_asset, node);
-          const roomButton = button(inside ? 'Reset room view' : 'Step inside 3D room', this.actions.enterRoom, 'accent');
-          roomButton.dataset.control = 'room';
-          node.append(roomButton);
-        } else node.append(message('The venue has no published room preview. Add one in Upload 3D.'));
-      }
       if (dish) {
-        const active = menu.find((entry) => entry.dish.id === dish.id)?.dish_asset;
-        if (active) badgeAsset(active, node);
         if (dish.portion_note) node.append(element('p', '', dish.portion_note));
 
         const compare = element('select');
@@ -448,14 +567,7 @@ export class PlaceDrawer {
         compare.addEventListener('change', () => this.actions.openDish(dish, compare.value, compare.selectedOptions[0]?.dataset.placeId));
         node.append(field('Compare side-by-side', compare));
         if (compare.disabled) node.append(message('No other published 3D dish previews are available.'));
-        if (comparison) {
-          node.append(element('p', '', `${comparison.dish.name} · ${comparison.place.name}`));
-          badgeAsset(comparison.asset, node);
-          if (comparison.offline) node.append(message('The comparison uses a bundled preview.'));
-          if (active?.scale_status !== 'measured' || comparison.asset.scale_status !== 'measured') {
-            node.append(message('Relative size is approximate. One or both dishes use an unverified scale.'));
-          }
-        }
+        if (comparison) node.append(element('p', '', `${comparison.dish.name} · ${comparison.place.name}`));
         const slider = element('input');
         slider.type = 'range';
         slider.min = '0';
@@ -463,17 +575,29 @@ export class PlaceDrawer {
         slider.value = String(data.rotation);
         slider.dataset.control = 'rotation';
         const degrees = element('output', 'muted', slider.value + '°');
-        slider.addEventListener('input', () => {
+        const updateRotation = () => {
           degrees.value = slider.value + '°';
+          slider.style.setProperty('--fill', `${slider.valueAsNumber / Number(slider.max) * 100}%`);
+        };
+        updateRotation();
+        slider.addEventListener('input', () => {
+          updateRotation();
           this.actions.rotate(Number(slider.value));
         });
-        node.append(field('Turntable rotation', slider), degrees);
+        const rotation = field('Turntable rotation', slider);
+        rotation.classList.add('rotation-field');
+        slider.id = 'dish-turntable';
+        rotation.htmlFor = slider.id;
+        rotation.firstElementChild?.append(degrees);
+        node.append(rotation);
         const tableMode = element('select');
         tableMode.dataset.control = 'table';
         tableMode.append(option('virtual', 'Virtual table (VR)'), option('passthrough', 'Passthrough (AR)'));
         tableMode.value = table;
         tableMode.addEventListener('change', () => this.actions.table(tableMode.value === 'virtual'));
-        node.append(field('Table background', tableMode));
+        const tableField = field('Table background', tableMode);
+        tableField.classList.add('table-background-field');
+        node.append(tableField);
       }
 
       if (!dish && dataManifest.rooms.length) {
@@ -507,6 +631,7 @@ export class PlaceDrawer {
       }
 
       if (!menu.length) node.append(message('No menu previews have been published.'));
+      const menuRows = element('div', 'venue-menu');
       for (const entry of menu) {
         if (entry.dish.id === dish?.id) continue;
         const row = element('div', 'menu-row');
@@ -514,13 +639,20 @@ export class PlaceDrawer {
         if (highlightedDishId && entry.dish.id === highlightedDishId) row.dataset.highlighted = 'true';
         const label = element('div');
         const name = element('strong', '', entry.dish.name);
-        if (hasDishPreview(entry.dish) || isSplat(entry.dish_asset)) name.append(previewBadge());
-        label.append(name, element('p', 'price', money(entry.dish.price)));
+        const hasPreview = isSplat(entry.dish_asset);
+        if (hasPreview) name.append(previewBadge());
+        const price = entry.dish.price;
+        label.append(name);
+        if (Number.isFinite(price)) label.append(element('p', 'price', money(price)));
         row.append(label);
-        if (entry.dish_asset) row.append(button('View dish on table', () => this.actions.openDish(entry.dish)));
-        else row.append(element('span', 'muted', 'No 3D preview'));
-        node.append(row);
+        if (hasPreview) {
+          const view = button('View on table', () => this.actions.openDish(entry.dish), 'quiet menu-preview');
+          view.setAttribute('aria-label', `View dish on table: ${entry.dish.name}`);
+          row.append(view);
+        }
+        menuRows.append(row);
       }
+      if (menuRows.children.length) node.append(menuRows);
     }
     this.modelDetails.replaceChildren(node);
     if (previousFocus) node.querySelector<HTMLElement>(`[data-control="${previousFocus}"]`)?.focus({ preventScroll: true });
@@ -532,11 +664,12 @@ export class PlaceDrawer {
     for (const review of place.reviews) {
       const item = element('article', 'visit-note');
       item.append(element('strong', '', review.author));
-      if (review.sample) item.append(element('span', 'briefing-sample', 'Sample diner note'));
       item.append(element('p', '', review.text));
       node.append(item);
     }
     const form = element('form', 'form-stack');
+    form.id = 'visit-note-form';
+    form.hidden = true;
     const name = element('input');
     name.required = true;
     name.maxLength = 80;
@@ -563,19 +696,26 @@ export class PlaceDrawer {
         feedback.classList.add('error');
       } finally { submit.disabled = false; }
     });
-    node.append(form);
+    const add = button('Add a visit note', () => {
+      add.hidden = true;
+      form.hidden = false;
+      name.focus();
+    }, 'quiet');
+    add.setAttribute('aria-controls', form.id);
+    node.append(add, form);
     return node;
   }
 
   focusMenu(dishId?: string) {
+    const behavior = reducedMotion.matches ? 'instant' : 'smooth';
     if (dishId) {
       const match = this.modelDetails.querySelector<HTMLElement>(`.menu-row[data-dish-id="${CSS.escape(dishId)}"]`);
       if (match) {
-        match.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        match.scrollIntoView({ block: 'center', behavior });
         return;
       }
     }
-    this.modelDetails.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    (this.modelDetails.querySelector('.venue-menu') ?? this.modelDetails).scrollIntoView({ block: 'start', behavior });
   }
 
   /** Shows the send-to-device actions only while a headset or phone is paired. */
@@ -584,7 +724,10 @@ export class PlaceDrawer {
   /** Hides headset-only controls (passthrough table) on devices without WebXR. */
   setXrCapable(capable: boolean) { this.root.dataset.xrCapable = String(capable); }
 
-  hide() { this.root.hidden = true; }
+  hide() {
+    this.root.hidden = true;
+    if (desktop.matches) this.viewKey = '';
+  }
 }
 
 function formatTrainTime(value: string) {

@@ -55,9 +55,8 @@ const xrDishDistance = 0.62;
 const mapClearance = 0.006;
 const cartridgeDepth = 0.430;
 const dishClearance = 0.002;
-// On a flat screen the neighbourhood rests up and to the left of the map centre, clear of the
-// drawer and filter bar, so the camera never has to move to frame it.
-const stationHome: XYZ = [-0.3, 0, -0.2];
+// On a flat screen the neighbourhood rests to the right of centre, clear of the left sidebar.
+const stationHome: XYZ = [0.3, 0, -0.2];
 const standbyScale = 0.0004;
 
 export class PlayCanvasApp implements FareSightSceneEngine {
@@ -91,6 +90,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private surfaceMatches = new Map<SurfaceScene, SurfaceMatch>();
   private manualPlacement = new Set<SurfaceScene>();
   private resizeObserver?: ResizeObserver;
+  private insetLeft = 0;
   private picker = new ScenePicker();
   private ray = new pc.Ray();
   private rayEnd = new pc.Vec3();
@@ -255,7 +255,21 @@ export class PlayCanvasApp implements FareSightSceneEngine {
     const device = this.app.graphicsDevice;
     device.maxPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
     device.resizeCanvas(width, height);
-    this.lens.fov = clamp(48 + (1 - width / height) * 38, 48, 74);
+    // Widen the view a little when a sidebar covers the left edge so the whole network still fits beside it.
+    const visible = Math.max(1, width - this.insetLeft);
+    const base = clamp(48 + (1 - width / height) * 38, 48, 74) * Math.PI / 360;
+    const widen = Math.min(1.45, (width / visible) * 1.06);
+    this.lens.fov = clamp(Math.atan(Math.tan(base) * widen) * 360 / Math.PI, 48, 80);
+    // A negative x offset moves the image centre right by half the inset; picking and labels use the same matrix.
+    // 0.85 rather than 1: the network's east end (Chinatown) carries a label that hangs to the right of its stop.
+    this.lens.projectionOffset = new pc.Vec2(-0.85 * this.insetLeft / width, 0);
+  }
+
+  setViewportInset(left: number): void {
+    const inset = Math.max(0, Math.round(left));
+    if (inset === this.insetLeft) return;
+    this.insetLeft = inset;
+    this.resize();
   }
 
   setStops(stops: XRStopData[]): void {
