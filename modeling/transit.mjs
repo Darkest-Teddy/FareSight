@@ -500,13 +500,12 @@ export function mapSculpture(dir) {
       };
     }
   }
-  // Ground first, so it sits behind everything. It shares the city's surface, so the whole
-  // base and all 300 buildings remain a single draw call.
-  groundBlob(city, lines, slabTop - 0.0006);
-
-  // The city goes in last: it needs every centreline so it can avoid building on the tracks.
+  // The city is placed first now, because the ground is cut to fit it rather than to the rails.
+  // Both share one surface, so the ground and all 200-odd buildings stay a single draw call and
+  // the order between them does not matter to the renderer.
   const blocks = cityBlocks(city, lines, slabTop);
-  if (process.env.FARESIGHT_VERBOSE) console.log('city blocks placed:', blocks);
+  groundBlob(city, blocks.sites, slabTop - 0.0006);
+  if (process.env.FARESIGHT_VERBOSE) console.log('city blocks placed:', blocks.count);
 
   // Transfer posts tie stacked platforms of different lines together.
   for (const platforms of levels.values()) {

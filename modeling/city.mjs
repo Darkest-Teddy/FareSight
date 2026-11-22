@@ -461,6 +461,8 @@ export function cityBlocks(surface, lines, slabTop) {
   };
 
   let count = 0;
+  /** Where a building actually went, so the ground can be drawn to exactly this extent. */
+  const sites = [];
   for (const line of lines) {
     const pts = line.points;
     // Cumulative distance along the track, so placement can tell how near a line's end it is.
@@ -533,10 +535,11 @@ export function cityBlocks(surface, lines, slabTop) {
           const k = bucket(x, z);
           if (!placed.has(k)) placed.set(k, []);
           placed.get(k).push([x, z, reach]);
+          sites.push([x, z, reach]);
           count++;
         }
     }
   }
 
-  return count;
+  return { count, sites };
 }

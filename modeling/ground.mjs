@@ -27,10 +27,10 @@ const GROUND = '#1e2432';
 const SPOKES = 128;
 
 /**
- * How far past the outermost track the solid ground reaches. The city is placed in four bands out
- * to roughly 0.22 units from a line, so this clears the buildings before the fade starts.
+ * How far past the outermost building the solid ground reaches: enough to give the last block a
+ * pavement to stand on, no more.
  */
-const SKIRT = 0.3;
+const SKIRT = 0.045;
 
 /**
  * How far the rim fades out. Short on purpose: the ground is one blob around the network, not a
@@ -52,22 +52,27 @@ const mixHex = (a, b, t) =>
     .join('');
 
 /**
- * Reach per direction, from the track geometry.
+ * Reach per direction, from where the city actually got built.
  *
- * Bins every centreline sample by bearing and keeps the furthest in each bin. Empty bins are
- * filled by walking out to the nearest neighbour that has a value, then the whole ring is
- * smoothed circularly so the outline curves instead of stepping.
+ * Taken from building sites rather than from the track, because the two no longer agree: the last
+ * stretch of every line is deliberately left unbuilt, and ground drawn to the rails would run out
+ * past the final block into country that has nothing on it. Driving it from the buildings means
+ * the blob ends where they do, and the lines carry on beyond its edge.
+ *
+ * Each site is binned by bearing from the centre and the furthest in each bin wins. Empty bins are
+ * filled by walking out to the nearest neighbour that has a value, then the whole ring is smoothed
+ * circularly so the outline curves instead of stepping.
  */
-function reaches(lines, centre) {
+function reaches(sites, centre) {
   const raw = new Array(SPOKES).fill(0);
-  for (const line of lines)
-    for (const p of line.points) {
-      const dx = p[0] - centre[0];
-      const dz = p[2] - centre[1];
-      const bin =
-        (Math.round((Math.atan2(dz, dx) / (Math.PI * 2)) * SPOKES) + SPOKES) % SPOKES;
-      raw[bin] = Math.max(raw[bin], Math.hypot(dx, dz));
-    }
+  for (const [sx, sz, radius] of sites) {
+    const dx = sx - centre[0];
+    const dz = sz - centre[1];
+    const bin =
+      (Math.round((Math.atan2(dz, dx) / (Math.PI * 2)) * SPOKES) + SPOKES) % SPOKES;
+    // Reach to the far side of the building, not its centre, so nothing overhangs the edge.
+    raw[bin] = Math.max(raw[bin], Math.hypot(dx, dz) + (radius ?? 0));
+  }
 
   // Fill gaps: a direction with no track still needs ground if its neighbours have some.
   for (let i = 0; i < SPOKES; i++) {
@@ -126,9 +131,9 @@ function quad(surface, points, colours) {
   surface.indices.push(ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]);
 }
 
-export function groundBlob(surface, lines, y) {
+export function groundBlob(surface, sites, y) {
   const centre = [0.02, 0];
-  const reach = reaches(lines, centre);
+  const reach = reaches(sites, centre);
 
   // Radius and colour at ring `u` (0 at the centre, 1 at the outer rim) along spoke `i`.
   const radiusAt = (u, i) => {
