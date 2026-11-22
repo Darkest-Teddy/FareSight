@@ -49,6 +49,8 @@ interface Pointer {
   lastPokeTarget: HitTarget | null;
   flashUntil: number;
   selectConsumed: boolean;
+  selectConfirmed?: boolean;
+  selectEndedAt?: number;
   selectTarget: HitTarget | null;
   scenePinch?: { turntable: pc.Entity; start: pc.Vec3; lostSince?: number };
   snapHeld: boolean;
@@ -301,17 +303,18 @@ export class XRPresence {
     const reviews = this.actions.reviews();
     const menu = this.actions.menu();
     const dishes = this.actions.dishes();
-    const prop = this.picker.raycast(this.ray, [...reviews.flatMap(({ gripBounds }) => gripBounds), ...(menu?.gripBounds ?? []),
-      ...dishes.map(({ bounds }) => bounds)], pointerRange);
+    const clipboardAndDishBounds = [...reviews.flatMap(({ gripBounds }) => gripBounds), ...dishes.map(({ bounds }) => bounds)];
+    const prop = this.picker.raycast(this.ray, [...clipboardAndDishBounds, ...(menu?.gripBounds ?? [])], pointerRange);
     const usesDeck = source.handedness === pc.XRHAND_RIGHT;
     const deck = usesDeck ? this.picker.raycast(this.ray, [this.actions.deck], pointerRange) : null;
     const eligible = grip && menu ? targets.filter((target) => !menu.targets.includes(target)) : targets;
     const hit = this.picker.raycast(this.ray, usesDeck ? [...this.actions.buttons, ...eligible] : eligible, pointerRange);
     const review = hit && reviews.find(({ targets }) => targets.includes(hit.target));
-    const control = hit && (this.actions.buttons.includes(hit.target) || review
-      ? !prop || prop.target.entity === review?.entity || hit.distance <= prop.distance
-      : this.isHardwareControl(hit.target) || ((!deck || hit.distance < deck.distance) && (!prop || hit.distance < prop.distance))) ? hit : null;
-    const handheld = prop && this.handheldTarget(prop.target, menu, dishes);
+    const menuRow = hit && menu?.targets.includes(hit.target);
+    const blocker = menuRow ? this.picker.raycast(this.ray, clipboardAndDishBounds, pointerRange) : prop;
+    const control = hit && (this.actions.buttons.includes(hit.target) || !deck || hit.distance < deck.distance) &&
+      (!blocker || hit.distance <= blocker.distance || (review && blocker.target.entity === review.entity)) ? hit : null;
+    const handheld = prop && (!deck || prop.distance < deck.distance) ? this.handheldTarget(prop.target, menu, dishes) : null;
     return { control, deck, prop, handheld };
   }
 
@@ -354,6 +357,8 @@ export class XRPresence {
   private selectStart(source: pc.XrInputSource): void {
     const pointer = this.pointers.get(source);
     if (!this.interactive || !pointer) return;
+    if (pointer.selectEndedAt !== undefined) this.finishSelect(source, pointer, false);
+    pointer.selectConfirmed = false;
     pointer.selectConsumed = this.isHolding(source);
     pointer.selectTarget = null;
     pointer.scenePinch = undefined;
@@ -366,7 +371,11 @@ export class XRPresence {
     pointer.selectTarget = direct ?? control?.target ?? null;
     if (!pointer.selectTarget) {
       const prop = (hasPosition ? this.nearHandheld(source, this.anchor) : null) ?? handheld;
-      if (prop && this.beginHandheld(source, 'select', prop)) return;
+      if (prop) {
+        pointer.selectConsumed = true;
+        this.beginHandheld(source, 'select', prop);
+        return;
+      }
       if (deck || (hasPosition && source.handedness === pc.XRHAND_RIGHT && this.picker.nearPanel(this.anchor, [this.actions.deck], 0.025))) {
         pointer.selectConsumed = true;
         return;
@@ -398,7 +407,8 @@ export class XRPresence {
 
   private select(source: pc.XrInputSource): void {
     const pointer = this.pointers.get(source);
-    if (this.interactive && pointer?.scenePinch) {
+    if (pointer) pointer.selectConfirmed = true;
+    if (this.interactive && pointer?.scenePinch && (!source.hand || source.hand.tracking)) {
       this.updateScenePinch(source, pointer, performance.now());
       const picked = pointer.scenePinch && pointer.selectTarget;
       this.clearScenePinch(pointer);
@@ -423,9 +433,20 @@ export class XRPresence {
 
   private selectEnd(source: pc.XrInputSource): void {
     const pointer = this.pointers.get(source);
-    if (pointer?.scenePinch) this.clearScenePinch(pointer);
-    if (this.handhelds.get(source)?.kind === 'select') this.releaseHandheld(source, true);
-    if (this.grab?.inputs.some((input) => input.source === source && input.kind === 'select')) this.releaseGrab(source, true);
+    if (!pointer) return;
+    if (source.hand && !source.hand.tracking) {
+      pointer.selectEndedAt ??= performance.now();
+      return;
+    }
+    this.finishSelect(source, pointer, !!pointer.selectConfirmed);
+  }
+
+  private finishSelect(source: pc.XrInputSource, pointer: Pointer, deliberate: boolean): void {
+    pointer.selectEndedAt = undefined;
+    pointer.selectConfirmed = false;
+    this.clearScenePinch(pointer);
+    if (this.handhelds.get(source)?.kind === 'select') this.releaseHandheld(source, deliberate);
+    if (this.grab?.inputs.some((input) => input.source === source && input.kind === 'select')) this.releaseGrab(source, deliberate);
   }
 
   private clearScenePinch(pointer: Pointer): void {
@@ -472,7 +493,7 @@ export class XRPresence {
     if (this.nearControl(source, this.anchor, true) || control) return;
     const near = this.nearHandheld(source, this.anchor);
     const prop = handheld?.menu && near?.entity !== handheld.entity ? handheld : near ?? handheld;
-    if (prop && this.beginHandheld(source, 'grip', prop)) return;
+    if (prop) { this.beginHandheld(source, 'grip', prop); return; }
     if (deck || (source.handedness === pc.XRHAND_RIGHT && this.picker.nearPanel(this.anchor, [this.actions.deck], 0.025))) return;
     const turntable = this.actions.turntable();
     if (turntable) {
@@ -504,18 +525,16 @@ export class XRPresence {
       !this.handRotation(source, this.handOrientation)) return false;
 
     const { entity } = target;
+    for (const held of this.handhelds.values()) if (held.entity === entity) return false;
     const inverse = this.handOrientation.invert();
     const offset = entity.getPosition().clone().sub(this.anchor);
     const rotation = new pc.Quat().mul2(inverse, entity.getRotation());
     const reach = !target.direct && offset.length() > inspectionDistance ? { from: offset.clone(), elapsed: 0 } : undefined;
     if (reach) offset.copy(inspectionOffset);
     else inverse.transformVector(offset, offset);
-    for (const [owner, held] of this.handhelds) {
-      if (held.entity === entity) this.handhelds.delete(owner);
-    }
     target.dish?.setHeld(true);
     target.menu?.markMoved();
-    const motion = target.dish ? new DishGrabMotion() : undefined;
+    const motion = target.dish ? new DishGrabMotion(target.dish.centerOffset) : undefined;
     motion?.reset(entity.getPosition(), entity.getRotation());
     this.handhelds.set(source, { ...target, kind, offset, rotation, reach, menuVenue: target.menu?.venueId,
       position: entity.getPosition().clone(), orientation: entity.getRotation().clone(), motion });
@@ -594,7 +613,7 @@ export class XRPresence {
     const surface = (dish || menu) && this.actions.snapSurface(entity, at);
     motion?.release();
     const settling = menu ? menu.release(this.actions.menuTabletop(menu, at), surface?.y)
-      : dish?.onRelease(surface?.y, motion?.velocity, motion?.angularVelocity);
+      : dish?.onRelease(surface ? surface.surface : undefined, motion?.velocity, motion?.angularVelocity);
     this.pulse(source, settling ? 0.28 : 0.18, 18);
   }
 
@@ -846,7 +865,13 @@ export class XRPresence {
       return false;
     }
     const now = performance.now();
-    for (const [source, pointer] of this.pointers) this.updateScenePinch(source, pointer, now);
+    for (const [source, pointer] of this.pointers) {
+      if (pointer.selectEndedAt !== undefined) {
+        const expired = now - pointer.selectEndedAt >= trackingGraceMs;
+        if (expired || source.hand?.tracking) this.finishSelect(source, pointer, !expired && !!pointer.selectConfirmed);
+      }
+      this.updateScenePinch(source, pointer, now);
+    }
     if (this.grab) this.updateGrab(now, dt);
     let turned = false;
     let movedRig = false;

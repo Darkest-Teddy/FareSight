@@ -6,17 +6,27 @@ export class SoundEngine {
   private ambient = false;
   private muted = false;
 
+  onStateChange?: () => void;
+
+  get running(): boolean { return this.context?.state === 'running'; }
+
   async unlock(): Promise<void> {
     if (!this.context) {
       if (typeof AudioContext === 'undefined') return;
       if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
-      this.context = new AudioContext();
+      const context = this.context = new AudioContext();
+      context.onstatechange = () => {
+        if (this.context !== context) return;
+        this.toggleAmbientHum(this.ambient);
+        this.onStateChange?.();
+      };
       this.output = this.context.createGain();
       this.output.gain.value = this.muted ? 0 : 0.42;
       this.output.connect(this.context.destination);
     }
-    if (this.context.state === 'suspended') await this.context.resume().catch(() => {});
+    if (!this.running) await this.context.resume();
     this.toggleAmbientHum(this.ambient);
+    this.onStateChange?.();
   }
 
   private notes(frequencies: number[], step: number, length: number, volume: number): void {
@@ -77,9 +87,11 @@ export class SoundEngine {
     this.drone?.stop();
     this.drone = undefined;
     this.droneGain = undefined;
+    if (this.context) this.context.onstatechange = null;
     void this.context?.close().catch(() => {});
     this.context = undefined;
     this.output = undefined;
+    this.onStateChange?.();
   }
 }
 

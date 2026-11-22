@@ -76,32 +76,27 @@ const byId = (id: string) => demoPlaces.find((place) => place.id === id)!;
 export const demoAssets: Asset[] = [];
 
 type DemoAssetInput = Pick<Asset, 'id' | 'kind' | 'scale_status' | 'scale_label'> &
-  Partial<Pick<Asset, 'gaussian_count' | 'provenance' | 'provenance_label' | 'spawn_point' | 'plate_diameter_m'>> &
+  Partial<Pick<Asset, 'gaussian_count' | 'provenance' | 'provenance_label' | 'spawn_point' | 'plate_diameter_m' | 'source_photos'>> &
   { file: string };
 
 function addDemoAsset(input: DemoAssetInput): Asset {
   const { file, gaussian_count = 0, provenance = 'demo_splat',
-    provenance_label = 'Procedural demo room splat', ...fields } = input;
+    provenance_label = 'Procedural demo room splat', source_photos = [], ...fields } = input;
   const extension = file.split('.').at(-1);
   if (extension !== 'ply' && extension !== 'sog' && extension !== 'spz') throw new Error(`Unsupported demo asset: ${file}`);
   const url = `/assets-demo/${file}`;
   const asset: Asset = {
     ...fields, format: extension, url, captured_on: demoDate, gaussian_count, provenance, provenance_label,
-    scale_factor: 1, status: 'ready', source_photos: [], backend: 'prebuilt-demo',
+    scale_factor: 1, status: 'ready', source_photos, backend: 'prebuilt-demo',
     ...(extension === 'ply' ? { original_ply_url: url } : {}),
   };
   demoAssets.push(asset);
   return asset;
 }
 
-function markDemo(place: Place): void {
-  place.seed_status = 'demo_venue';
-  place.price_checked_on = demoDate;
-}
-
 function flagship(id: string, roomFile: string, spawn_point: Vector3, measured = false): Place {
   const place = byId(id);
-  markDemo(place);
+  place.seed_status = 'demo_venue';
   place.room_asset_id = addDemoAsset({
     id: `${id}-room`, kind: 'room', file: roomFile, spawn_point,
     scale_status: measured ? 'measured' : 'approximate',
@@ -112,7 +107,7 @@ function flagship(id: string, roomFile: string, spawn_point: Vector3, measured =
 
 function atlasRoom(id: string, file: string, gaussian_count: number): void {
   const place = byId(id);
-  markDemo(place);
+  place.seed_status = 'demo_venue';
   place.room_asset_id = addDemoAsset({
     id: `${id}-room`, kind: 'room', file, gaussian_count, spawn_point: [0, 1.55, 2],
     scale_status: 'approximate', scale_label: 'Approximate room size',
@@ -137,13 +132,14 @@ atlasRoom('bu-starbucks-01', 'room-starbucks-atlas.sog', 349_990);
 function addDish(
   place: Place, id: string, name: string, price: Dish['price'], diameter: number,
   file: string, portion_note: string,
-  preview: { vessel: string } | { splats: number },
+  preview: { vessel: string } | { splats: number; photoUrl: string },
 ): void {
   const size = `${Number((diameter * 100).toFixed(1))} cm`;
   const photo = 'splats' in preview;
   const asset = addDemoAsset({
     id: `${id}-splat`, kind: 'dish', file, plate_diameter_m: diameter,
     gaussian_count: photo ? preview.splats : undefined,
+    source_photos: photo ? [preview.photoUrl] : [],
     scale_status: photo ? 'approximate' : 'measured',
     scale_label: photo ? `Approximate size (~${size} wide)` : `Actual size (${size} ${preview.vessel})`,
     provenance: photo ? 'ai_spatial_preview' : 'demo_splat',
@@ -159,10 +155,11 @@ addDish(ramen, 'bu-ramen-katsu', 'Crispy Pork Katsu Curry', 15.75, 0.26, 'dish-k
 addDish(cafe, 'harvard-matcha-tiramisu', 'Ceremonial Matcha Tiramisu + Latte', 9.25, 0.18,
   'dish-matcha-tiramisu.ply', 'One slice of matcha tiramisu and a latte.', { vessel: 'plate' });
 
-for (const { venueId, dishes } of restaurantDishMenus) {
+for (const { venueId, pricingUrl, dishes } of restaurantDishMenus) {
   const place = byId(venueId);
-  for (const { id, name, price, diameter, file, portion, splats } of dishes) {
-    addDish(place, id, name, price, diameter, file, portion, { splats });
+  if (pricingUrl && dishes.some(({ price }) => price !== null)) place.price_checked_on = demoDate;
+  for (const { id, name, price, diameter, file, portion, splats, photoUrl } of dishes) {
+    addDish(place, id, name, price, diameter, file, portion, { splats, photoUrl });
   }
 }
 

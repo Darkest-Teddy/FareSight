@@ -10,6 +10,12 @@ for (const name of ['.env.local', '.env']) {
 
 export function getConfig() {
   const port = Number(process.env.PORT ?? 3001);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be an integer from 1 to 65535');
+  const publicBaseUrl = process.env.PUBLIC_BASE_URL ?? `http://localhost:${port}`;
+  const parsedBase = URL.parse(publicBaseUrl);
+  if (!/^https?:\/\//i.test(publicBaseUrl) || !parsedBase || !['http:', 'https:'].includes(parsedBase.protocol)) {
+    throw new Error('PUBLIC_BASE_URL must be an absolute HTTP(S) URL');
+  }
   const storage = resolve(process.env.FARESIGHT_STORAGE_DIR ?? resolve(projectRoot, 'server/storage'));
   const mode = process.env.PIPELINE_MODE ?? 'auto';
   if (mode !== 'auto' && mode !== 'demo' && mode !== 'live') throw new Error('PIPELINE_MODE must be auto, demo, or live');
@@ -18,8 +24,10 @@ export function getConfig() {
     database: process.env.FARESIGHT_DB_PATH ?? resolve(projectRoot, 'server/data/faresight.db'),
     uploads: resolve(storage, 'uploads'), outputs: resolve(storage, 'outputs'),
     demoAssets: [resolve(projectRoot, 'web/public/assets-demo'), resolve(projectRoot, 'modeling/output')],
-    publicBaseUrl: process.env.PUBLIC_BASE_URL ?? `http://localhost:${port}`,
+    publicBaseUrl,
     adminPasscode: process.env.ADMIN_PASSCODE,
+    contributorPasscode: process.env.CONTRIBUTOR_PASSCODE,
+    allowUnauthenticatedDemo: process.env.ALLOW_UNAUTHENTICATED_DEMO === '1',
     geminiKey: process.env.GEMINI_API_KEY,
     openaiKey: process.env.OPENAI_API_KEY,
     openaiBaseUrl: (process.env.OPENAI_API_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, ''),

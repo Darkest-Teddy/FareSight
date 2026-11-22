@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync } from 'node:fs';
-import { copyFile, rename } from 'node:fs/promises';
+import { existsSync, mkdirSync, renameSync } from 'node:fs';
+import { copyFile, rm } from 'node:fs/promises';
 import { basename, extname, resolve } from 'node:path';
 import type { Asset, Vector3 } from '@faresight/shared';
 import type { Config } from '../config.ts';
-import type { JobRecord, Store, Upload } from '../db/database.ts';
+import { WorkerLeaseLost, type JobRecord, type Store, type Upload, type WorkerLease } from '../db/database.ts';
 import { downloadAtlasSplat, pollAtlasPose, pollAtlasSplats, submitAtlasPose, submitAtlasSplats, uploadAtlasImage } from '../services/atlasClient.ts';
 import { findDemoAsset } from '../services/demoAssets.ts';
-import { downloadFile, ProviderHttpError } from '../services/providerHttp.ts';
+import { MAX_IMAGE_BYTES } from '../services/imagePrep.ts';
+import { downloadFile, ProviderHttpError, TerminalProviderError, type CommitFile } from '../services/providerHttp.ts';
 import { convertSplat, measureScale } from '../services/splatProcessor.ts';
 import { pollTrellis, submitTrellis } from '../services/trellisClient.ts';
 
@@ -32,18 +33,28 @@ function description(job: JobRecord, live: string): string {
   return job.provider === 'demo-sim' ? `Demo simulation · ${live}` : live;
 }
 
-async function copyAtomically(source: string, destination: string): Promise<string> {
-  await copyFile(source, `${destination}.part`);
-  await rename(`${destination}.part`, destination);
-  return destination;
+async function copyAtomically(source: string, destination: string, commit: CommitFile): Promise<string> {
+  const temporary = `${destination}.${randomUUID()}.part`;
+  try {
+    await copyFile(source, temporary);
+    await commit(temporary, destination);
+    return destination;
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
-async function advance(store: Store, config: Config, initialJob: JobRecord) {
+async function advance(store: Store, config: Config, initialJob: JobRecord, lease: WorkerLease) {
   let job = initialJob;
-  const set = (changes: Partial<JobRecord>) => { job = store.updateJob(job, changes); };
+  const assertCurrent = () => store.assertWorker(lease);
+  const commit: CommitFile = (temporary, destination) => store.transaction(() => {
+    assertCurrent();
+    renameSync(temporary, destination);
+  });
+  const set = (changes: Partial<JobRecord>) => { job = store.updateJob(job, changes, lease); };
   const inputs = (): Upload[] => {
     const uploads = store.uploadsForPlace(job.place_id, job.input_upload_ids);
-    if (!uploads?.length) throw new Error('Job uploads are missing');
+    if (!uploads?.length) throw new TerminalProviderError('Job uploads are missing');
     return uploads;
   };
   const next = (status: keyof typeof progress, message: string, fields: Partial<JobRecord> = {}) => {
@@ -51,6 +62,7 @@ async function advance(store: Store, config: Config, initialJob: JobRecord) {
   };
 
   try {
+    if (!store.get('places', job.place_id)) throw new TerminalProviderError('The job venue is no longer in the catalog');
     if (String(job.provider) === 'marble-1.1') throw new Error('This Marble job used a retired API. Create a new Atlas room job.');
     if (job.status === 'queued') {
       next('generating', 'Generating spatial preview', job.provider === 'demo-sim' ? { provider_task_id: `demo-${job.id}` } : {});
@@ -66,9 +78,10 @@ async function advance(store: Store, config: Config, initialJob: JobRecord) {
         if (!job.pose_operation_id) {
           const assetIds = [...(job.atlas_input_asset_ids ?? [])];
           for (const upload of inputs().slice(assetIds.length)) {
-            assetIds.push(await uploadAtlasImage(config, upload));
+            assetIds.push(await uploadAtlasImage(config, upload, assertCurrent));
             set({ atlas_input_asset_ids: [...assetIds] });
           }
+          assertCurrent();
           const pose_operation_id = await submitAtlasPose(config, job.id, assetIds);
           set({ pose_operation_id, progress: 25, status_message: 'Atlas is estimating camera poses and depth' });
           return;
@@ -80,6 +93,7 @@ async function advance(store: Store, config: Config, initialJob: JobRecord) {
         }
         const refine = job.model_tier === 'atlas-refined';
         if (!job.provider_task_id) {
+          assertCurrent();
           const provider_task_id = await submitAtlasSplats(config, job.id, job.posed_frames, refine);
           set({ provider_task_id, progress: 50, status_message: `Atlas is generating the ${refine ? 'refined' : 'draft'} splat` });
           return;
@@ -93,7 +107,7 @@ async function advance(store: Store, config: Config, initialJob: JobRecord) {
       } else {
         if (!job.provider_task_id) {
           if (job.submission_pending) throw new Error(failedSubmission);
-          const provider_task_id = await submitTrellis(config, inputs()[0], () => set({ submission_pending: true }));
+          const provider_task_id = await submitTrellis(config, inputs()[0], assertCurrent, () => set({ submission_pending: true }));
           set({ provider_task_id, submission_pending: false, progress: 25 });
           return;
         }
@@ -114,21 +128,21 @@ async function advance(store: Store, config: Config, initialJob: JobRecord) {
         const file = demoFilename(job);
         const source = findDemoAsset(config, file);
         if (!source) throw new Error(`Demo asset ${file} has not been generated yet`);
-        await copyAtomically(source, original);
+        await copyAtomically(source, original, commit);
         set({ original_ply_path: original });
         if (job.kind === 'dish') await useReferencePreview();
       } else if (job.provider === 'atlas-v2') {
         const spz = resolve(config.outputs, `${job.id}-original.spz`);
         if (!existsSync(spz)) {
-          if (!job.provider_task_id) throw new Error('Atlas splat operation ID is missing');
+          if (!job.provider_task_id) throw new TerminalProviderError('Atlas splat operation ID is missing');
           const atlas_splat = job.atlas_splat ?? await pollAtlasSplats(config, job.provider_task_id, job.model_tier === 'atlas-refined');
           if (!atlas_splat) return;
           if (!job.atlas_splat) set({ atlas_splat });
-          await downloadAtlasSplat(config, atlas_splat, spz);
+          await downloadAtlasSplat(config, atlas_splat, spz, commit);
         }
         set({ original_spz_path: spz });
       } else {
-        if (!job.provider_task_id) throw new Error('Replicate prediction ID is missing');
+        if (!job.provider_task_id) throw new TerminalProviderError('Replicate prediction ID is missing');
         const preview = savedPreview();
         if (existsSync(original) && (!job.preview_download_pending || preview)) {
           set({ original_ply_path: original, preview_image_path: preview ?? null, preview_download_pending: false });
@@ -147,8 +161,8 @@ async function advance(store: Store, config: Config, initialJob: JobRecord) {
 
     if (job.status === 'converting') {
       const original = job.original_spz_path ?? job.original_ply_path;
-      if (!original) throw new Error('Original splat checkpoint is missing');
-      const converted = await convertSplat(config, job.id, job.kind, original);
+      if (!original) throw new TerminalProviderError('Original splat checkpoint is missing');
+      const converted = await convertSplat(config, job.id, job.kind, original, commit);
       const scale = measureScale(job.plate_diameter_m, converted.metadata.measured_width);
       const spawn_point: Vector3 | null = job.kind === 'room' ? [0, 1.55, 2] : null;
       const asset: Asset = {
@@ -171,20 +185,27 @@ async function advance(store: Store, config: Config, initialJob: JobRecord) {
       });
     }
   } catch (error) {
+    if (error instanceof WorkerLeaseLost) return;
     const definiteRejection = error instanceof ProviderHttpError && error.status >= 400 && error.status < 500
-      && ![408, 409].includes(error.status);
-    const submission_pending = job.submission_pending && !definiteRejection;
-    set({
-      status: 'failed', submission_pending, status_message: description(job, `Failed during ${job.status}`),
-      error: submission_pending ? failedSubmission : error instanceof Error ? error.message : 'Job failed',
-    });
+      && ![408, 409, 425, 429].includes(error.status);
+    const submission_pending = job.submission_pending && !definiteRejection
+      && !(error instanceof ProviderHttpError && error.status === 429);
+    const terminal_failure = error instanceof TerminalProviderError || (definiteRejection && Boolean(job.provider_task_id || job.pose_operation_id));
+    try {
+      set({
+        status: 'failed', submission_pending, terminal_failure, status_message: description(job, `Failed during ${job.status}`),
+        error: submission_pending ? failedSubmission : error instanceof Error ? error.message : 'Job failed',
+      });
+    } catch (failure) {
+      if (!(failure instanceof WorkerLeaseLost)) throw failure;
+    }
   }
 
   async function useReferencePreview() {
     if (job.preview_image_path && existsSync(job.preview_image_path)) return;
     const upload = inputs()[0];
     const file = resolve(config.outputs, `${job.id}-preview${extname(upload.file)}`);
-    const preview_image_path = await copyAtomically(resolve(config.uploads, upload.file), file);
+    const preview_image_path = await copyAtomically(resolve(config.uploads, upload.file), file, commit);
     set({ preview_image_path, preview_download_pending: false });
   }
 
@@ -196,7 +217,7 @@ async function advance(store: Store, config: Config, initialJob: JobRecord) {
     const original = resolve(config.outputs, `${job.id}-original.ply`);
     const transfers: Promise<void>[] = [];
     if (!job.original_ply_path || !existsSync(job.original_ply_path)) {
-      transfers.push((existsSync(original) ? Promise.resolve(original) : downloadFile(result.ply, () => original))
+      transfers.push((existsSync(original) ? Promise.resolve(original) : downloadFile(result.ply, () => original, 'trellis', commit))
         .then((original_ply_path) => set({ original_ply_path })));
     }
     if (!job.preview_image_path || !existsSync(job.preview_image_path)) {
@@ -206,9 +227,9 @@ async function advance(store: Store, config: Config, initialJob: JobRecord) {
         transfers.push(downloadFile(result.preview, (mime) => {
           const extension = mime === 'image/jpeg' ? 'jpg' : mime === 'image/webp' ? 'webp' : 'png';
           return resolve(config.outputs, `${job.id}-preview.${extension}`);
-        }).then((preview_image_path) => set({ preview_image_path, preview_download_pending: false })));
+        }, 'trellis', commit, MAX_IMAGE_BYTES).then((preview_image_path) => set({ preview_image_path, preview_download_pending: false })));
       } else if (job.preview_download_pending) {
-        transfers.push(Promise.reject(new Error('Replicate no longer exposes the foreground preview')));
+        transfers.push(Promise.reject(new TerminalProviderError('Replicate no longer exposes the foreground preview')));
       }
     }
     const outcomes = await Promise.allSettled(transfers);
@@ -226,10 +247,11 @@ export function startJobWorker(store: Store, config: Config, onError: (error: un
   let running: Promise<void> | undefined;
   const tick = () => {
     try {
-      if (!store.claimWorker(owner) || running) return;
+      const lease = store.claimWorker(owner);
+      if (!lease || running) return;
       const job = store.nextJob();
       if (job) {
-        running = advance(store, config, job).catch(onError).finally(() => { running = undefined; });
+        running = advance(store, config, job, lease).catch(onError).finally(() => { running = undefined; });
       }
     } catch (error) {
       onError(error);

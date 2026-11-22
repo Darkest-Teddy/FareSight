@@ -1,10 +1,22 @@
 import { createHash } from 'node:crypto';
 import { STOPS, type LiveReviewItem, type LiveReviewsResponse, type Place } from '@faresight/shared';
 import type { Config } from '../config.ts';
+import { ipRateLimit } from './requestLimits.ts';
 
 const liveTtl = 30 * 60_000;
 const fallbackTtl = 60_000;
-const cache = new WeakMap<Config, Map<string, { result: Promise<LiveReviewsResponse>; expires: number }>>();
+interface CachedReviews {
+  result: Promise<LiveReviewsResponse>;
+  expires: number;
+  lastLive?: LiveReviewsResponse;
+}
+const cache = new WeakMap<Config, Map<string, CachedReviews>>();
+const requests = ipRateLimit(20, 60_000);
+let active = 0;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+const records = (value: unknown) => Array.isArray(value) ? value.filter(isRecord) : [];
 const string = { type: 'string' };
 const nullableString = { type: ['string', 'null'] };
 const nullableNumber = { type: ['number', 'null'] };
@@ -17,16 +29,6 @@ const schema = object({
   highlights: array(object({ text: string, url: string })),
   reviews: array(object({ author: string, source: string, text: string, rating: nullableNumber, date_label: nullableString, url: string })),
 });
-
-type Citation = { type?: string; url?: string };
-interface SearchResponse {
-  status?: string;
-  output?: {
-    type?: string;
-    action?: { sources?: Citation[]; url?: string };
-    content?: { type?: string; text?: string; annotations?: Citation[] }[];
-  }[];
-}
 
 function sourceUrl(value: unknown): string | undefined {
   if (typeof value !== 'string') return;
@@ -74,43 +76,46 @@ async function searchReviews(place: Place, config: Config): Promise<LiveReviewsR
     }),
   });
   if (!response.ok) return;
-  const result = await response.json() as SearchResponse;
-  if (result.status !== 'completed' || !result.output?.some(({ type }) => type === 'web_search_call')) return;
-  const parts = result.output.flatMap(({ content }) => content ?? []).filter(({ type }) => type === 'output_text');
+  const result: unknown = await response.json();
+  if (!isRecord(result) || result.status !== 'completed' || !Array.isArray(result.output)) return;
+  const entries = records(result.output);
+  const calls = entries.filter(({ type }) => type === 'web_search_call');
+  if (!calls.length) return;
+  const parts = entries.flatMap(({ content }) => records(content))
+    .filter(({ type, text }) => type === 'output_text' && typeof text === 'string');
   const sources = new Set([
-    ...result.output.filter(({ type }) => type === 'web_search_call').flatMap(({ action }) => [
-      action?.url, ...(action?.sources ?? []).map(({ url }) => url),
-    ]),
-    ...parts.flatMap(({ annotations }) => (annotations ?? []).filter(({ type }) => type === 'url_citation').map(({ url }) => url)),
+    ...calls.flatMap(({ action }) => isRecord(action) ? [
+      action.url, ...records(action.sources).map(({ url }) => url),
+    ] : []),
+    ...parts.flatMap(({ annotations }) => records(annotations).filter(({ type }) => type === 'url_citation').map(({ url }) => url)),
   ].map(sourceUrl));
   const cited = (value: unknown) => {
     const url = sourceUrl(value);
     return url && sources.has(url) ? url : undefined;
   };
-  const output = JSON.parse(parts.map((part) => part.text).join('')) as {
-    ratings: Record<string, unknown>[];
-    highlights: Record<string, unknown>[];
-    reviews: Record<string, unknown>[];
-  };
-  const ratings = output.ratings.flatMap((item) => {
+  const output: unknown = JSON.parse(parts.map((part) => part.text).join(''));
+  if (!isRecord(output) || !Array.isArray(output.ratings) || !Array.isArray(output.highlights) || !Array.isArray(output.reviews)) return;
+  const ratings = records(output.ratings).flatMap((item) => {
     const source = text(item.source, 60);
     const value = rating(item.rating);
     const url = cited(item.url);
-    const count = typeof item.count === 'number' && Number.isSafeInteger(item.count) && item.count >= 0 ? item.count : null;
+    const count = item.count;
+    if (count !== null && !(typeof count === 'number' && Number.isSafeInteger(count) && count >= 0)) return [];
     return source && value !== undefined && url ? [{ source, rating: value, count, url }] : [];
   }).slice(0, 5);
-  const highlights = output.highlights.flatMap((item) => {
+  const highlights = records(output.highlights).flatMap((item) => {
     const highlight = text(item.text, 220);
     return highlight && cited(item.url) ? [highlight] : [];
   }).slice(0, 3);
   const reviews = new Map<string, LiveReviewItem>();
   const wordsBySource = new Map<string, number>();
-  for (const item of output.reviews) {
+  for (const item of records(output.reviews)) {
     const author = text(item.author, 80);
     const source = text(item.source, 60);
     const quote = text(item.text, 180);
     const url = cited(item.url);
-    if (!author || !source || !quote || !url) continue;
+    if (!author || !source || !quote || !url || (item.rating !== null && rating(item.rating) === undefined)
+      || (item.date_label !== null && !text(item.date_label, 60))) continue;
     const words = (wordsBySource.get(url) ?? 0) + quote.split(/\s+/).length;
     const id = 'live-' + createHash('sha256').update(JSON.stringify([place.id, url, author, quote])).digest('hex').slice(0, 20);
     if (words > 18 || reviews.has(id)) continue;
@@ -125,7 +130,7 @@ async function searchReviews(place: Place, config: Config): Promise<LiveReviewsR
   return { place_id: place.id, live: true, fetched_at: new Date().toISOString(), ratings, highlights, reviews: [...reviews.values()] };
 }
 
-export async function fetchLiveReviews(place: Place, config: Config): Promise<LiveReviewsResponse> {
+export async function fetchLiveReviews(place: Place, config: Config, ip: string): Promise<LiveReviewsResponse> {
   const fallback = (): LiveReviewsResponse => ({
     place_id: place.id, live: false, fetched_at: new Date().toISOString(),
     ratings: place.details?.ratings ?? [], highlights: place.details?.review_highlights ?? [], reviews: [],
@@ -135,10 +140,17 @@ export async function fetchLiveReviews(place: Place, config: Config): Promise<Li
   if (!byPlace) cache.set(config, byPlace = new Map());
   const cached = byPlace.get(place.id);
   if (cached && cached.expires > Date.now()) return cached.result;
-  const result = searchReviews(place, config).catch(() => undefined).then((value) => value ?? fallback());
-  const pending = { result, expires: Infinity };
+  const lastLive = cached?.lastLive;
+  const staleOrFallback = () => lastLive && Date.now() - Date.parse(lastLive.fetched_at) < 24 * 3600_000 ? lastLive : fallback();
+  if (active >= 4 || !requests.take(ip)) return staleOrFallback();
+
+  active++;
+  const result = searchReviews(place, config).catch(() => undefined).then((value) => {
+    if (value) pending.lastLive = value;
+    pending.expires = Date.now() + (value ? liveTtl : fallbackTtl);
+    return value ?? staleOrFallback();
+  }).finally(() => { active--; });
+  const pending = { result, expires: Infinity, lastLive };
   byPlace.set(place.id, pending);
-  const response = await result;
-  pending.expires = Date.now() + (response.live ? liveTtl : fallbackTtl);
-  return response;
+  return result;
 }

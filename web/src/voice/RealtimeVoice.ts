@@ -9,7 +9,7 @@ type Speaker = Exclude<VoiceTranscript['kind'], 'action'>;
 interface VoiceCallbacks {
   onState: (state: VoiceState, detail?: string) => void;
   onModel: (model: string) => void;
-  onTool: (name: RealtimeToolName, args: Record<string, unknown>) => Promise<{ result: Record<string, unknown>; actionLabel?: string }>;
+  onTool: (name: RealtimeToolName, args: Record<string, unknown>, current: () => boolean) => Promise<{ result: Record<string, unknown>; actionLabel?: string }>;
   onTranscript: (entry: VoiceTranscript) => void;
   getContext: () => string;
 }
@@ -23,10 +23,14 @@ interface VoiceSession {
   timer?: number;
   reconnectTimer?: number;
   audioMeterTimer?: number;
-  hasOutputBufferEvents?: boolean;
+  pauseTimer?: number;
+  playbackTimer?: number;
+  paused: boolean;
+  pausedBatches: Set<ToolBatch>;
+  audioArmed: boolean;
+  rejectedResponses: Set<string>;
   responding: boolean;
   playing: boolean;
-  tools: Promise<void>;
   handled: Map<string, ToolBatch>;
   batches: Set<ToolBatch>;
   drafts: Partial<Record<Speaker, TranscriptDraft>>;
@@ -36,8 +40,8 @@ interface VoiceSession {
 interface ToolBatch {
   responseId?: string;
   delegationId?: string;
-  pending: number;
   completed: boolean;
+  calls: FunctionCall[];
 }
 
 interface TranscriptDraft {
@@ -59,6 +63,7 @@ interface LiveError {
   code?: string;
   message?: string;
   client_event_id?: string;
+  event_id?: string;
 }
 
 interface LiveEvent extends FunctionCall {
@@ -120,7 +125,8 @@ export class RealtimeVoice {
     if (this.session) return;
     const session: VoiceSession = {
       cancel: new AbortController(), responding: false, playing: false,
-      tools: Promise.resolve(), handled: new Map(), batches: new Set(), drafts: {},
+      handled: new Map(), batches: new Set(), drafts: {},
+      paused: false, pausedBatches: new Set(), audioArmed: true, rejectedResponses: new Set(),
     };
     this.session = session;
     this.setState('connecting');
@@ -206,12 +212,11 @@ export class RealtimeVoice {
         break;
       case 'session.started':
       case 'session.resumed':
+        session.paused = false;
         this.refreshState(session);
         break;
       case 'session.paused':
-        session.pendingResponseId = undefined;
-        session.responding = session.playing = false;
-        this.refreshState(session);
+        this.pause(session);
         break;
       case 'session.closed':
       case 'session.ended':
@@ -222,27 +227,30 @@ export class RealtimeVoice {
         delete session.drafts.user;
         delete session.drafts.assistant;
         session.pendingResponseId = undefined;
-        session.responding = session.playing = false;
-        this.setState('listening');
+        session.responding = false;
+        this.stopPlayback(session);
         break;
       case 'input_audio_buffer.speech_stopped':
+        session.audioArmed = true;
         session.responding = true;
         this.refreshState(session);
         break;
       case 'response.created':
-        if (!delegationId) delete session.drafts.assistant;
+        if (!delegationId) {
+          delete session.drafts.assistant;
+          session.audioArmed = true;
+        }
         session.pendingResponseId = undefined;
         session.responding = true;
         this.refreshState(session);
         break;
       case 'output_audio_buffer.started':
-        session.hasOutputBufferEvents = true;
-        this.setPlayback(session, true);
+        session.audioArmed = true;
+        this.noteAudio(session);
         break;
       case 'output_audio_buffer.stopped':
       case 'output_audio_buffer.cleared':
-        session.hasOutputBufferEvents = true;
-        this.setPlayback(session, false);
+        this.stopPlayback(session);
         break;
       case 'response.output_item.done':
         if (event.item?.type === 'function_call') this.queueTool(session, event.item, event, delegationId);
@@ -252,6 +260,8 @@ export class RealtimeVoice {
         break;
       case 'response.done':
       case 'response.completed':
+      case 'response.cancelled':
+      case 'response.failed':
         this.completeResponse(session, event, delegationId);
         break;
       case 'session.input_transcript.delta':
@@ -276,22 +286,62 @@ export class RealtimeVoice {
     }
   }
 
+  private pause(session: VoiceSession): void {
+    session.paused = true;
+    session.pendingResponseId = undefined;
+    session.responding = false;
+    this.stopPlayback(session);
+    for (const batch of session.batches) session.pausedBatches.add(batch);
+    this.schedulePauseExpiry(session);
+  }
+
+  private schedulePauseExpiry(session: VoiceSession): void {
+    if (session.pauseTimer !== undefined) return;
+    session.pauseTimer = window.setTimeout(() => {
+      if (this.session !== session) return;
+      session.pauseTimer = undefined;
+      for (const batch of session.pausedBatches) {
+        if (session.batches.delete(batch)) this.rejectBatch(session, batch.responseId ?? batch.delegationId);
+      }
+      session.pausedBatches.clear();
+      if (session.paused && !session.pendingResponseId) session.responding = false;
+      this.refreshState(session);
+    }, 8_000);
+  }
+
   private watchRemoteAudio(session: VoiceSession, receiver: RTCRtpReceiver): void {
-    // Live can send speech over RTP without any output buffer events on the data channel.
-    let lastAudibleAt = -Infinity;
+    let energy: number | undefined;
+    let duration: number | undefined;
     const sample = async () => {
-      if (this.session !== session || session.hasOutputBufferEvents) return;
+      if (this.session !== session) return;
       const stats = await receiver.getStats().catch(() => undefined);
-      if (this.session !== session || session.hasOutputBufferEvents) return;
+      if (this.session !== session) return;
       stats?.forEach((report) => {
-        if (report.type === 'inbound-rtp' && report.audioLevel >= 0.004) lastAudibleAt = performance.now();
+        if (report.type !== 'inbound-rtp' || (report.kind && report.kind !== 'audio')) return;
+        const nextEnergy = report.totalAudioEnergy;
+        const nextDuration = report.totalSamplesDuration;
+        const rms = energy !== undefined && duration !== undefined && nextDuration > duration
+          ? Math.sqrt(Math.max(0, nextEnergy - energy) / (nextDuration - duration)) : 0;
+        energy = nextEnergy;
+        duration = nextDuration;
+        if (session.audioArmed && Math.max(report.audioLevel ?? 0, rms) >= 0.004) this.noteAudio(session);
       });
-      const playing = performance.now() - lastAudibleAt < 320;
-      if (playing !== session.playing) this.setPlayback(session, playing);
       session.audioMeterTimer = window.setTimeout(sample, 100);
     };
     window.clearTimeout(session.audioMeterTimer);
     void sample();
+  }
+
+  private noteAudio(session: VoiceSession): void {
+    if (!session.playing) this.setPlayback(session, true);
+    window.clearTimeout(session.playbackTimer);
+    session.playbackTimer = window.setTimeout(() => this.setPlayback(session, false), 1_100);
+  }
+
+  private stopPlayback(session: VoiceSession): void {
+    session.audioArmed = false;
+    window.clearTimeout(session.playbackTimer);
+    this.setPlayback(session, false);
   }
 
   private setPlayback(session: VoiceSession, playing: boolean): void {
@@ -309,7 +359,7 @@ export class RealtimeVoice {
       this.fail(session, 'GPT Live session ended. Start it again to continue.');
       return;
     }
-    if (session.pendingResponseId && error?.client_event_id === session.pendingResponseId) {
+    if (session.pendingResponseId && [error?.event_id, error?.client_event_id].includes(session.pendingResponseId)) {
       session.pendingResponseId = undefined;
       session.responding = false;
     }
@@ -346,39 +396,64 @@ export class RealtimeVoice {
 
   private queueTool(session: VoiceSession, call: FunctionCall, event: LiveEvent, delegationId?: string, existing?: ToolBatch): ToolBatch | undefined {
     const callId = call.call_id;
-    if (typeof callId !== 'string' || !callId || session.handled.has(callId)) return;
-    const batch = existing ?? this.findBatch(session, event, delegationId) ?? { pending: 0, completed: false };
-    batch.responseId ??= event.response_id ?? event.response?.id;
+    const responseId = event.response_id ?? event.response?.id;
+    if (existing?.completed || typeof callId !== 'string' || !callId || session.handled.has(callId) ||
+      session.rejectedResponses.has(responseId ?? delegationId ?? '')) return;
+    const batch = existing ?? this.findBatch(session, event, delegationId) ?? { completed: false, calls: [] };
+    if (batch.completed) return;
+    batch.responseId ??= responseId;
     batch.delegationId ??= delegationId;
     session.batches.add(batch);
+    if (session.paused) {
+      session.pausedBatches.add(batch);
+      this.schedulePauseExpiry(session);
+    }
     session.handled.set(callId, batch);
-    batch.pending++;
+    batch.calls.push(call);
     this.refreshState(session);
-    session.tools = session.tools.then(async () => {
-      if (this.session !== session || !session.batches.has(batch)) return;
-      const tool = realtimeTools.find(({ name }) => name === call.name);
-      let result: Record<string, unknown>;
-      let label: string | undefined;
-      try {
-        if (!tool) throw new Error('Unknown tool');
-        const completed = await this.callbacks.onTool(tool.name, parseArguments(call.arguments));
-        result = completed.result;
-        label = completed.actionLabel;
-      } catch {
-        result = { ok: false, error: 'FareSight could not perform that action. Check the tool and its arguments.' };
-      }
-      if (this.session !== session || !session.batches.has(batch)) return;
-      if (label) this.callbacks.onTranscript({ kind: 'action', text: label });
-      const output = JSON.stringify({ ...result, currentView: this.callbacks.getContext() });
-      if (!this.send(session, { type: 'response.item.create', item: { type: 'function_call_output', call_id: callId, output } })) return;
-      batch.pending--;
-      this.resumeAfterTools(session, batch);
-    }).catch(() => this.fail(session, 'GPT Live could not return the app action.'));
     return batch;
   }
 
+  private async runTools(session: VoiceSession, batch: ToolBatch): Promise<void> {
+    const current = () => this.session === session && session.batches.has(batch);
+    try {
+      for (const call of batch.calls) {
+        if (!current()) return;
+        const tool = realtimeTools.find(({ name }) => name === call.name);
+        let result: Record<string, unknown>;
+        let label: string | undefined;
+        try {
+          if (!tool) throw new Error('Unknown tool');
+          const completed = await this.callbacks.onTool(tool.name, parseArguments(call.arguments), current);
+          result = completed.result;
+          label = completed.actionLabel;
+        } catch {
+          result = { ok: false, error: 'FareSight could not perform that action. Check the tool and its arguments.' };
+        }
+        if (!current()) return;
+        if (label) this.callbacks.onTranscript({ kind: 'action', text: label });
+        const output = JSON.stringify({ ...result, currentView: this.callbacks.getContext() });
+        if (!this.send(session, { type: 'response.item.create', item: { type: 'function_call_output', call_id: call.call_id, output } })) return;
+      }
+      if (!current()) return;
+      session.batches.delete(batch);
+      session.pausedBatches.delete(batch);
+      if (!session.batches.size) this.requestResponse(session);
+    } catch {
+      if (current()) this.fail(session, 'GPT Live could not return the app action.');
+    }
+  }
+
+  private rejectBatch(session: VoiceSession, id?: string): void {
+    if (!id) return;
+    session.rejectedResponses.add(id);
+    if (session.rejectedResponses.size > 128) session.rejectedResponses.delete(session.rejectedResponses.values().next().value!);
+  }
+
   private completeResponse(session: VoiceSession, event: LiveEvent, delegationId?: string): void {
-    const status = event.response?.status;
+    const status = event.response?.status ?? event.type.split('.')[1];
+    const responseId = event.response_id ?? event.response?.id;
+    if (session.rejectedResponses.has(responseId ?? delegationId ?? '')) return;
     if (!delegationId || status === 'failed' || status === 'cancelled' || status === 'incomplete') session.responding = false;
     const output = Array.isArray(event.response?.output) ? event.response.output.filter((item) => item?.type === 'function_call') : [];
     let batch = this.findBatch(session, event, delegationId);
@@ -386,7 +461,11 @@ export class RealtimeVoice {
       batch = output.map(({ call_id }) => session.handled.get(call_id ?? '')).find((match) => match && session.batches.has(match));
     }
     if (status === 'cancelled' || status === 'incomplete' || status === 'failed') {
-      if (batch) session.batches.delete(batch);
+      this.rejectBatch(session, responseId ?? delegationId);
+      if (batch) {
+        session.batches.delete(batch);
+        session.pausedBatches.delete(batch);
+      }
       if (status === 'failed') this.handleError(session, event.response?.status_details?.error);
       else this.refreshState(session);
       return;
@@ -394,21 +473,17 @@ export class RealtimeVoice {
     for (const call of output) {
       batch = this.queueTool(session, call, event, delegationId, batch) ?? batch;
     }
-    if (batch) {
+    if (batch && !batch.completed) {
       batch.completed = true;
-      this.resumeAfterTools(session, batch);
+      void this.runTools(session, batch);
     }
     this.refreshState(session);
-  }
-
-  private resumeAfterTools(session: VoiceSession, batch: ToolBatch): void {
-    if (!batch.completed || batch.pending || !session.batches.delete(batch)) return;
-    this.requestResponse(session);
   }
 
   private requestResponse(session: VoiceSession): boolean {
     const eventId = crypto.randomUUID();
     if (!this.send(session, { type: 'response.create', event_id: eventId })) return false;
+    session.audioArmed = true;
     session.pendingResponseId = eventId;
     session.responding = true;
     this.refreshState(session);
@@ -471,6 +546,8 @@ export class RealtimeVoice {
     window.clearTimeout(session.timer);
     window.clearTimeout(session.reconnectTimer);
     window.clearTimeout(session.audioMeterTimer);
+    window.clearTimeout(session.pauseTimer);
+    window.clearTimeout(session.playbackTimer);
     session.cancel.abort();
     session.channel?.close();
     session.peer?.close();

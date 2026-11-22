@@ -4,8 +4,8 @@ import {
 } from '@faresight/shared';
 import { api, type Alert, type Prediction, type Trip } from '../api/client';
 import { has3DDish, has3DRoom, hasDishPreview, isSplat } from '../data/preview3D';
-import { bostonHours, formatHours, liveBriefingReview, loadLiveReviews, week } from '../data/reviewBriefing';
-import { button, element, errorText, field, link, message, money, option, previewBadge, section } from './dom';
+import { bostonHours, formatHours, liveBriefingReview, loadLiveReviews, reviewFacts, week } from '../data/reviewBriefing';
+import { button, element, errorText, field, httpUrl, link, message, money, option, previewBadge, replacePreservingFocus, section } from './dom';
 import { renderBriefingReview } from './ReviewBriefingModal';
 import { oneWayCost, type Filters } from './state';
 
@@ -252,6 +252,7 @@ export class PlaceDrawer {
     let firstHighlighted: HTMLButtonElement | undefined;
     for (const place of places) {
       const item = button('', () => this.actions.showPlace(place), 'place-row');
+      item.dataset.focusKey = place.id;
       if (highlightedPlaces?.has(place.id)) {
         item.dataset.highlighted = 'true';
         if (!firstHighlighted) firstHighlighted = item;
@@ -267,7 +268,7 @@ export class PlaceDrawer {
       row.append(item, this.compareButton(place));
       list.append(row);
     }
-    this.stationList.replaceChildren(list);
+    replacePreservingFocus(this.stationList, this.title, list);
     if (compareFocus) [...list.querySelectorAll<HTMLButtonElement>('.compare-place')]
       .find((toggle) => toggle.dataset.compareVenue === compareFocus)?.focus({ preventScroll: true });
     if (firstHighlighted) firstHighlighted.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -304,7 +305,7 @@ export class PlaceDrawer {
       if (applicable.length) alerts.append(...applicable.map((alert) => element('p', '', alert.header)));
       else alerts.append(message('No active alerts for this stop.'));
     } else alerts.append(message(data.alerts.error ?? 'Checking service alerts…', Boolean(data.alerts.error)));
-    this.stationDetails.replaceChildren(arrivals, alerts);
+    replacePreservingFocus(this.stationDetails, this.title, arrivals, alerts);
   }
 
   venue(data: ViewData, focus = false) {
@@ -342,7 +343,7 @@ export class PlaceDrawer {
     const reviewsKey = JSON.stringify(place.reviews);
     if (this.reviewsKey !== reviewsKey) {
       this.reviewsKey = reviewsKey;
-      this.reviewsNode?.replaceChildren(this.reviews(place));
+      if (this.reviewsNode) replacePreservingFocus(this.reviewsNode, this.title, this.reviews(place));
     }
     if (focus) {
       this.title.tabIndex = -1;
@@ -354,7 +355,7 @@ export class PlaceDrawer {
     const node = section('Live web reviews');
     const status = message('Checking public reviews…');
     node.append(status);
-    host.replaceChildren(node);
+    replacePreservingFocus(host, node.querySelector('h3')!, node);
     const result = await loadLiveReviews(place.id).catch(() => undefined);
     if (!host.isConnected) return;
     if (!result?.live) {
@@ -363,18 +364,19 @@ export class PlaceDrawer {
       return;
     }
     status.remove();
-    for (const { source, rating, count, url } of result.ratings) {
+    const facts = reviewFacts(place.details, result);
+    for (const { source, rating, count, url } of facts.ratings) {
       const row = element('p');
       row.append(url ? link(source, url) : source,
         ` · ${rating.toFixed(1)} / 5${count ? ` · ${ratingCount.format(count)} reviews` : ''}`);
       node.append(row);
     }
-    if (result.highlights.length) {
+    if (facts.highlights.length) {
       const highlights = element('ul', 'review-highlights');
-      highlights.append(...result.highlights.map((text) => element('li', '', text)));
+      highlights.append(...facts.highlights.map((text) => element('li', '', text)));
       node.append(highlights);
     }
-    if (result.reviews.length) {
+    if (result.reviews?.length) {
       node.append(...result.reviews.slice(0, 3).map((review) => renderBriefingReview(liveBriefingReview(review))));
     } else node.append(element('p', 'muted', 'No attributed customer excerpts found.'));
   }
@@ -422,10 +424,9 @@ export class PlaceDrawer {
     if (trip.error || trip.offline) node.append(button('Refresh trip estimate', this.actions.retryTrip, 'quiet'));
     if (originName && stop) {
       const fallback = buildMbtaTripPlannerUrl(`${originName}, Boston`, { lat: place.lat, lon: place.lon });
-      try { node.append(link('Open full directions on MBTA', trip.data?.planner_url || fallback)); }
-      catch { node.append(link('Open full directions on MBTA', fallback)); }
+      node.append(link('Open full directions on MBTA', httpUrl(trip.data?.planner_url)?.href ?? fallback));
     }
-    this.tripDetails.replaceChildren(node);
+    replacePreservingFocus(this.tripDetails, this.title, node);
   }
 
   private updateModels(data: ViewData) {
@@ -434,7 +435,6 @@ export class PlaceDrawer {
       manifest.error, manifest.offline, highlightedDishId]);
     if (this.modelKey === key && this.modelManifest === manifest.data && this.modelPlace === place
         && this.modelComparison === comparison && this.modelCatalog === data.places) return;
-    const previousFocus = this.modelDetails.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.control : undefined;
     this.modelKey = key;
     this.modelManifest = manifest.data;
     this.modelPlace = place;
@@ -500,10 +500,8 @@ export class PlaceDrawer {
         slider.value = String(data.rotation);
         slider.dataset.control = 'rotation';
         const degrees = element('output', 'muted', slider.value + '°');
-        slider.addEventListener('input', () => {
-          degrees.value = slider.value + '°';
-          this.actions.rotate(Number(slider.value));
-        });
+        degrees.dataset.rotationReadout = '';
+        slider.addEventListener('input', () => this.actions.rotate(Number(slider.value)));
         node.append(field('Turntable rotation', slider), degrees);
         const tableMode = element('select');
         tableMode.dataset.control = 'table';
@@ -554,13 +552,24 @@ export class PlaceDrawer {
         if (hasDishPreview(entry.dish) || isSplat(entry.dish_asset)) name.append(previewBadge());
         label.append(name, element('p', 'price', formatDishPrice(entry.dish.price)));
         row.append(label);
-        if (entry.dish_asset) row.append(button('View dish on table', () => this.actions.openDish(entry.dish)));
+        if (entry.dish_asset) {
+          const open = button('View dish on table', () => this.actions.openDish(entry.dish));
+          open.setAttribute('aria-label', `View ${entry.dish.name} on the table`);
+          open.dataset.focusKey = entry.dish.id;
+          row.append(open);
+        }
         else row.append(element('span', 'muted', 'No 3D preview'));
         node.append(row);
       }
     }
-    this.modelDetails.replaceChildren(node);
-    if (previousFocus) node.querySelector<HTMLElement>(`[data-control="${previousFocus}"]`)?.focus({ preventScroll: true });
+    replacePreservingFocus(this.modelDetails, this.title, node);
+  }
+
+  setRotation(degrees: number): void {
+    const slider = this.modelDetails.querySelector<HTMLInputElement>('[data-control="rotation"]');
+    const readout = this.modelDetails.querySelector<HTMLOutputElement>('[data-rotation-readout]');
+    if (slider) slider.value = String(degrees);
+    if (slider && readout) readout.value = `${slider.value}°`;
   }
 
   private reviews(place: Place) {

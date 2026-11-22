@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import { open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -6,7 +7,9 @@ import { promisify } from 'node:util';
 import { createGunzip } from 'node:zlib';
 import type { Asset, Vector3 } from '@faresight/shared';
 import type { Config } from '../config.ts';
+import { MAX_SPLAT_BYTES, TerminalProviderError, type CommitFile } from './providerHttp.ts';
 
+const maxVertices = 2_000_000;
 const run = promisify(execFile);
 const options = { timeout: 120_000, maxBuffer: 2 * 1024 * 1024 };
 const scalarBytes: Record<string, number> = {
@@ -20,21 +23,22 @@ const gaussianProperties = [
 
 export function inspectSplat(buffer: Buffer, centerDish = false) {
   const header = /(?:^|\n)end_header\r?\n/.exec(buffer.toString('ascii', 0, 65536));
-  if (!header) throw new Error('PLY header is missing or too long');
+  if (!header) throw new TerminalProviderError('PLY header is missing or too long');
   const offset = header.index + header[0].length;
   const lines = buffer.toString('ascii', 0, offset).split(/\r?\n/);
-  if (lines[0] !== 'ply') throw new Error('File is not a PLY');
+  if (lines[0] !== 'ply') throw new TerminalProviderError('File is not a PLY');
   const format = lines.find((line) => line.startsWith('format '))?.split(/\s+/)[1];
   if (format !== 'binary_little_endian' && format !== 'binary_big_endian') {
-    throw new Error('Gaussian PLY must use binary encoding');
+    throw new TerminalProviderError('Gaussian PLY must use binary encoding');
   }
 
   const element = lines.findIndex((line) => line.startsWith('element '));
   const [, elementName, declaredCount] = lines[element]?.split(/\s+/) ?? [];
   const count = Number(declaredCount);
   if (elementName !== 'vertex' || !Number.isSafeInteger(count) || count < 1) {
-    throw new Error('PLY must begin with a nonempty vertex element');
+    throw new TerminalProviderError('PLY must begin with a nonempty vertex element');
   }
+  if (count > maxVertices) throw new TerminalProviderError('PLY vertex count exceeds the safety limit');
 
   const properties = new Map<string, { offset: number; type: string }>();
   let stride = 0;
@@ -42,19 +46,19 @@ export function inspectSplat(buffer: Buffer, centerDish = false) {
     const [directive, type, name] = line.split(/\s+/);
     if (directive === 'element' || directive === 'end_header') break;
     if (directive !== 'property') continue;
-    if (!Object.hasOwn(scalarBytes, type) || properties.has(name)) throw new Error('Invalid Gaussian vertex property');
+    if (!Object.hasOwn(scalarBytes, type) || properties.has(name)) throw new TerminalProviderError('Invalid Gaussian vertex property');
     properties.set(name, { offset: stride, type });
     stride += scalarBytes[type];
   }
   const hasOpacity = properties.has('opacity') || properties.has('opacity_linear');
   if (offset + stride * count > buffer.length || !hasOpacity || !gaussianProperties.every((name) => properties.has(name))) {
-    throw new Error('PLY vertex payload is truncated or missing Gaussian properties');
+    throw new TerminalProviderError('PLY vertex payload is truncated or missing Gaussian properties');
   }
 
   const coordinates = ['x', 'y', 'z'].map((axis) => {
     const property = properties.get(axis);
     if (!property || !['float', 'float32', 'double', 'float64'].includes(property.type)) {
-      throw new Error(`PLY vertex is missing floating-point ${axis} centers`);
+      throw new TerminalProviderError(`PLY vertex is missing floating-point ${axis} centers`);
     }
     const double = property.type === 'double' || property.type === 'float64';
     const little = format === 'binary_little_endian';
@@ -73,7 +77,7 @@ export function inspectSplat(buffer: Buffer, centerDish = false) {
     const row = offset + index * stride;
     for (const [axis, coordinate] of coordinates.entries()) {
       const value = buffer[coordinate.read](row + coordinate.offset);
-      if (!Number.isFinite(value)) throw new Error('PLY has nonfinite Gaussian centers');
+      if (!Number.isFinite(value)) throw new TerminalProviderError('PLY has nonfinite Gaussian centers');
       min[axis] = Math.min(min[axis], value);
       max[axis] = Math.max(max[axis], value);
       if (axis === 0) xs[index] = value;
@@ -122,57 +126,67 @@ function splatCli(): Promise<string[] | undefined> {
   return cli;
 }
 
-export async function convertSplat(config: Config, jobId: string, kind: 'room' | 'dish', original: string) {
+export async function convertSplat(
+  config: Config, jobId: string, kind: 'room' | 'dish', original: string, commit: CommitFile = rename,
+) {
   const format: 'spz' | 'ply' = extname(original) === '.spz' ? 'spz' : 'ply';
-  const normalized = format === 'spz' ? original : resolve(config.outputs, `${jobId}-normalized.ply`);
-  const limited = resolve(config.outputs, `${jobId}-decimated.ply`);
-  const sog = resolve(config.outputs, `${jobId}.sog`);
-  const temporary = resolve(config.outputs, `${jobId}.part.sog`);
-  let geometry: { count: number; bounds?: NonNullable<Asset['metadata']>['bounds']; width?: number };
-  if (format === 'spz') {
-    geometry = { count: await readSpzCount(original) };
-  } else {
-    const payload = await readFile(original);
-    geometry = inspectSplat(payload, kind === 'dish');
-    await writeFile(`${normalized}.part`, payload);
-    await rename(`${normalized}.part`, normalized);
-  }
-  const target = kind === 'room' ? 100_000 : 60_000;
-  const command = await splatCli();
-  const decimate = geometry.count > target;
-  // SplatTransform requires .ply output when --decimate is the final action.
-  const commands = [
-    ...(decimate ? [['--gpu', 'cpu', normalized, '--decimate', String(target), limited]] : []),
-    ['--gpu', 'cpu', decimate ? limited : normalized, temporary],
-  ];
-  const executable = command ?? ['splat-transform'];
-  const metadata: NonNullable<Asset['metadata']> = {
-    bounds: geometry.bounds, measured_width: geometry.width, target_gaussians: target,
-    splat_transform_command: commands.map((args) => displayCommand([...executable, ...args])).join(' && '),
-    conversion_status: format === 'spz' ? 'spz_fallback' : 'ply_fallback',
-  };
-  if (command) {
-    try {
-      const [binary, ...prefix] = command;
-      await rm(temporary, { force: true });
-      await rm(limited, { force: true });
-      let count = geometry.count;
-      if (decimate) {
-        await run(binary, [...prefix, ...commands[0]], options);
-        count = inspectSplat(await readFile(limited)).count;
-      }
-      await run(binary, [...prefix, ...commands.at(-1)!], options);
-      if (!(await stat(temporary)).size) throw new Error('SplatTransform produced an empty SOG');
-      await rename(temporary, sog);
-      metadata.conversion_status = 'compressed';
-      return { path: sog, count, format: 'sog' as const, metadata };
-    } catch {
-      await rm(temporary, { force: true });
-    } finally {
-      await rm(limited, { force: true });
+  const unique = resolve(config.outputs, `${jobId}.${randomUUID()}.part`);
+  const normalized = format === 'spz' ? original : `${unique}.ply`;
+  const limited = `${unique}-decimated.ply`;
+  const temporary = `${unique}.sog`;
+  if ((await stat(original)).size > MAX_SPLAT_BYTES) throw new TerminalProviderError('Splat exceeds the byte limit');
+
+  try {
+    let geometry: { count: number; bounds?: NonNullable<Asset['metadata']>['bounds']; width?: number };
+    if (format === 'spz') {
+      geometry = { count: await readSpzCount(original) };
+    } else {
+      const payload = await readFile(original);
+      geometry = inspectSplat(payload, kind === 'dish');
+      await writeFile(normalized, payload, { flag: 'wx' });
     }
+    const target = kind === 'room' ? 100_000 : 60_000;
+    const command = await splatCli();
+    const decimate = geometry.count > target;
+    const commands = [
+      ...(decimate ? [['--gpu', 'cpu', normalized, '--decimate', String(target), limited]] : []),
+      ['--gpu', 'cpu', decimate ? limited : normalized, temporary],
+    ];
+    const executable = command ?? ['splat-transform'];
+    const metadata: NonNullable<Asset['metadata']> = {
+      bounds: geometry.bounds, measured_width: geometry.width, target_gaussians: target,
+      splat_transform_command: commands.map((args) => displayCommand([...executable, ...args])).join(' && '),
+      conversion_status: format === 'spz' ? 'spz_fallback' : 'ply_fallback',
+    };
+    let convertedCount: number | undefined;
+    if (command) {
+      try {
+        const [binary, ...prefix] = command;
+        let count = geometry.count;
+        if (decimate) {
+          await run(binary, [...prefix, ...commands[0]], options);
+          if ((await stat(limited)).size > MAX_SPLAT_BYTES) throw new Error('Decimated splat exceeds the byte limit');
+          count = inspectSplat(await readFile(limited)).count;
+        }
+        await run(binary, [...prefix, ...commands.at(-1)!], options);
+        const length = (await stat(temporary)).size;
+        if (length > 0 && length <= MAX_SPLAT_BYTES) convertedCount = count;
+      } catch {
+        // A validated original can still be published when compression is unavailable.
+      }
+    }
+    if (convertedCount !== undefined) {
+      const sog = resolve(config.outputs, `${jobId}.sog`);
+      await commit(temporary, sog);
+      metadata.conversion_status = 'compressed';
+      return { path: sog, count: convertedCount, format: 'sog' as const, metadata };
+    }
+    const fallback = format === 'spz' ? original : resolve(config.outputs, `${jobId}-normalized.ply`);
+    if (format === 'ply') await commit(normalized, fallback);
+    return { path: fallback, count: geometry.count, format, metadata };
+  } finally {
+    await Promise.all([temporary, limited, ...(format === 'ply' ? [normalized] : [])].map((path) => rm(path, { force: true })));
   }
-  return { path: normalized, count: geometry.count, format, metadata };
 }
 
 function displayCommand(args: string[]) {
@@ -188,15 +202,36 @@ async function readSpzCount(path: string) {
   } finally {
     await file.close();
   }
+  let total = (await stat(path)).size;
   if (length >= 2 && header[0] === 0x1f && header[1] === 0x8b) {
     length = 0;
-    for await (const chunk of createReadStream(path).compose(createGunzip())) {
-      length += (chunk as Buffer).copy(header, length);
-      if (length === header.length) break;
+    total = 0;
+    try {
+      for await (const chunk of createReadStream(path).compose(createGunzip())) {
+        if (length < header.length) {
+          length += (chunk as Buffer).copy(header, length);
+          if (length === header.length) validateHeader();
+        }
+        total += chunk.length;
+        if (total > MAX_SPLAT_BYTES) throw new TerminalProviderError('Decompressed SPZ exceeds the byte limit');
+      }
+    } catch (error) {
+      if (error instanceof TerminalProviderError) throw error;
+      if (['Z_DATA_ERROR', 'Z_BUF_ERROR'].includes((error as NodeJS.ErrnoException).code ?? '')) {
+        throw new TerminalProviderError('Invalid compressed SPZ');
+      }
+      throw error;
     }
   }
-  const count = header.readUInt32LE(8);
-  if (length < header.length || header.toString('ascii', 0, 4) !== 'NGSP' || !count) throw new Error('Invalid SPZ header');
+  function validateHeader() {
+    const count = header.readUInt32LE(8);
+    if (length < header.length || header.toString('ascii', 0, 4) !== 'NGSP' || !count || count > maxVertices) {
+      throw new TerminalProviderError('Invalid SPZ header or vertex count');
+    }
+    return count;
+  }
+  const count = validateHeader();
+  if (total < header.length + count * 3) throw new TerminalProviderError('SPZ vertex payload is truncated');
   return count;
 }
 

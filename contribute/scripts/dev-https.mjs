@@ -1,7 +1,7 @@
 // Serves the Contribute app over HTTPS on :5181 so a phone on the same network can use the 360° scan.
 // Browsers only open the camera and the motion sensors on a secure page, and http://<LAN-IP> is not one.
 // The certificate is self-signed and never leaves this machine, so the phone asks to trust it once.
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -12,8 +12,11 @@ const addresses = Object.values(networkInterfaces()).flat()
   .map((entry) => entry.address);
 const hosts = ['DNS:localhost', 'DNS:contribute.localhost', 'IP:127.0.0.1', ...addresses.map((address) => 'IP:' + address)].join(',');
 
-// The certificate names this machine's addresses, so it is reissued when the network changes.
-if (!existsSync(dir + 'cert.pem') || !existsSync(dir + 'hosts.txt') || readFileSync(dir + 'hosts.txt', 'utf8') !== hosts) {
+const reusable = existsSync(dir + 'cert.pem') && existsSync(dir + 'key.pem') && existsSync(dir + 'hosts.txt')
+  && readFileSync(dir + 'hosts.txt', 'utf8') === hosts
+  && spawnSync('openssl', ['x509', '-in', dir + 'cert.pem', '-noout', '-checkend', '86400'], { stdio: 'ignore' }).status === 0;
+
+if (!reusable) {
   mkdirSync(dir, { recursive: true });
   execFileSync('openssl', [
     'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '30',

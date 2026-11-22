@@ -1,4 +1,4 @@
-import type { XRDishData, XRManifestData, XRPlaceData } from '../xr/bridgeTypes';
+import type { XRAssetData, XRDishData, XRManifestData, XRPlaceData, XRRoomData } from '../xr/bridgeTypes';
 
 type PreviewPlace = Pick<XRPlaceData, 'room_asset_id' | 'rooms' | 'dishes'>;
 type AssetReference = Pick<XRDishData, 'asset_id' | 'asset'>;
@@ -56,4 +56,12 @@ export function countPreviewsByStop(places: readonly XRPlaceData[], matched: Rea
 
 export function menuDishes(place: XRPlaceData, manifest: XRManifestData | null): XRDishData[] {
   return manifest?.menu_items.map(({ dish, dish_asset }) => dish_asset ? { ...dish, asset: dish_asset } : dish) ?? place.dishes;
+}
+
+export function measuredRoomForAsset(rooms: readonly XRRoomData[], asset: XRAssetData | null | undefined, seating: XRRoomData['seating']) {
+  if (asset?.scale_status !== 'measured') return;
+  const matching = rooms.filter((room) => (room.asset?.id ?? room.asset_id) === asset.id &&
+    Number.isFinite(room.floor_width_m) && room.floor_width_m > 0 &&
+    Number.isFinite(room.floor_depth_m) && room.floor_depth_m > 0);
+  return matching.find((room) => room.seating === seating) ?? matching[0];
 }

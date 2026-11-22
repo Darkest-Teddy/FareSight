@@ -362,7 +362,9 @@ const block = (type: string, properties: Record<string, object>, required: strin
   object({ type: { type: 'string', enum: [type] }, heading: text, ...properties }, ['type', required]);
 
 function tool<Name extends string>(name: Name, description: string, properties: Record<string, object>, required: string[] = []) {
-  return { type: 'function', name, description, parameters: { type: 'object', properties, required, additionalProperties: false } };
+  const hasOptionalProperties = Object.keys(properties).length > required.length;
+  return { type: 'function', name, description, ...(hasOptionalProperties ? { strict: false } : {}),
+    parameters: object(properties, required) };
 }
 
 export const LIVE_APP_TOOLS = [
@@ -375,7 +377,8 @@ export const LIVE_APP_TOOLS = [
   tool('focus_stop', 'Open a subway stop and show its neighborhood diorama.', { stopId: stop }, ['stopId']),
   tool('open_venue', 'Open a venue from the catalog and step into its room preview.', { placeId: id }, ['placeId']),
   tool('open_dish', 'Show a dish or compare two published 3D dishes from any venues on the bistro table.', {
-    placeId: id, dishId: id, compareDishId: id, comparePlaceId: id,
+    placeId: id, dishId: id, compareDishId: id,
+    comparePlaceId: { ...id, description: 'Exact venue ID for the second dish. Requires compareDishId.' },
   }, ['placeId']),
   tool('navigate_scene', 'Switch to a scene with an existing selection. Use focus_stop, open_venue, or open_dish to select a new subject.', {
     scene: { type: 'string', enum: ['map', 'station', 'venue', 'dish'] },

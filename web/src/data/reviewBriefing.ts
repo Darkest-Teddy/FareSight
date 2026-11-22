@@ -20,6 +20,24 @@ export function liveBriefingReview(review: LiveReviewItem): BriefingReview {
   return { ...review, live: true, sample: false, unverified: false };
 }
 
+export function reviewFacts(facts: Place['details'] | null, web?: LiveReviewsResponse) {
+  const catalogRatings = facts?.ratings ?? [];
+  const ratings = new Map(catalogRatings.map((rating) => [rating.source.toLowerCase(), rating]));
+  if (web?.live) {
+    for (const rating of web.ratings ?? []) {
+      if (typeof rating.source !== 'string' || !rating.source.trim()) continue;
+      const key = rating.source.trim().toLowerCase();
+      const previous = ratings.get(key);
+      ratings.set(key, { ...rating, rating: Number.isFinite(rating.rating) ? rating.rating : previous?.rating ?? NaN,
+        count: rating.count ?? previous?.count ?? null, url: rating.url || previous?.url || null });
+    }
+  }
+  return {
+    ratings: [...ratings.values()].filter(({ rating }) => Number.isFinite(rating)),
+    highlights: web?.live && web.highlights?.length ? web.highlights : facts?.review_highlights ?? [],
+  };
+}
+
 const liveLookups = new Map<string, Promise<LiveReviewsResponse>>();
 
 export function loadLiveReviews(placeId: string): Promise<LiveReviewsResponse> {
@@ -229,16 +247,15 @@ export function buildPlaceBriefingCard(details: PlaceDecision, web?: LiveReviews
   const sections: BriefingSection[] = [{ kind: 'text', heading: 'Overview', body:
     `${details.vibe}\n${trip.costBasis} · ${money(trip.roundTripTotal)} with return fare · ${trip.rideMinutes} min estimated ride.` }];
   const facts = details.details;
-  const ratings = web?.live ? web.ratings : facts?.ratings ?? [];
-  const highlights = web?.live ? web.highlights : facts?.review_highlights ?? [];
-  if (ratings.length || highlights.length) sections.push({ kind: 'list', heading: web?.live ? 'Live web ratings and highlights' : 'What reviewers say', items: [
+  const { ratings, highlights } = reviewFacts(facts, web);
+  if (ratings.length || highlights.length) sections.push({ kind: 'list', heading: 'What reviewers say', items: [
     ...(ratings.map(({ source, rating, count, url }) => ({
       label: `${source} ${rating.toFixed(1)} / 5`, detail: count ? `${count.toLocaleString('en-US')} reviews` : undefined,
-      url: web?.live ? url ?? undefined : undefined,
+      url: url ?? undefined,
     }))),
     ...highlights.map((label) => ({ label })),
   ] });
-  if (web?.live && web.reviews.length) {
+  if (web?.live && web.reviews?.length) {
     sections.push({ kind: 'reviews', heading: 'Live web reviews', items: web.reviews.map(liveBriefingReview) });
   }
   if (facts?.awards.length) sections.push({ kind: 'list', heading: 'Recognition', items: facts.awards.map((award) => ({

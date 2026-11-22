@@ -1,13 +1,15 @@
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { MAX_ROOM_PHOTOS, ROOM_MODEL_TIERS, ROOM_PHOTO_REQUIREMENT } from '@faresight/shared';
-import type { Dish, GenerationJob, RoomModelTier, Vector3 } from '@faresight/shared';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { Asset, Dish, GenerationJob, RoomModelTier, Vector3 } from '@faresight/shared';
+import type { FastifyInstance } from 'fastify';
 import type { Config } from '../config.ts';
 import { publicJob } from '../db/database.ts';
 import type { JobRecord, Store } from '../db/database.ts';
+import { places } from '../db/seed.ts';
 import { selectReferencePhotos } from '../services/geminiSelector.ts';
 import { decodeImageBase64, MAX_IMAGE_BYTES, prepareImage } from '../services/imagePrep.ts';
+import type { PasscodeGuards } from '../services/passcodes.ts';
 import { measureScale } from '../services/splatProcessor.ts';
 
 interface ImageFields { filename: string; mimeType: string; place_id: string; dish_id?: string; source_url?: string }
@@ -27,26 +29,50 @@ const idList = (maxItems: number) => ({ type: 'array', minItems: 1, maxItems, un
 const plateSize = { type: 'number', exclusiveMinimum: 0, maximum: 2 };
 const defaultVector: Vector3 = [0, 0, 0];
 
-export function registerPipeline(app: FastifyInstance, store: Store, config: Config) {
-  async function admin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-    if (!config.adminPasscode) return;
-    const provided = request.headers['x-admin-passcode'] ?? request.headers.authorization?.replace(/^Bearer /i, '');
-    const expected = Buffer.from(config.adminPasscode);
-    if (typeof provided !== 'string' || Buffer.byteLength(provided) !== expected.length
-      || !timingSafeEqual(Buffer.from(provided), expected)) {
-      reply.code(401).send({ error: 'Admin passcode is required' });
-    }
-  }
+const multipartLimit = MAX_IMAGE_BYTES + 64 * 1024;
 
-  app.post<{ Body: UploadBody }>('/api/uploads', { preHandler: admin }, async (request, reply) => {
+export function registerPipeline(app: FastifyInstance, store: Store, config: Config, guards: PasscodeGuards) {
+  app.post<{ Body: UploadBody }>('/api/uploads', {
+    onRequest: guards.contributor,
+    bodyLimit: Math.ceil(MAX_IMAGE_BYTES * 4 / 3) + 16 * 1024,
+  }, async (request, reply) => {
     let input: ImageFields & { bytes: Buffer };
     if (request.isMultipart()) {
-      const fields: Record<string, string> = {};
+      if (Number(request.headers['content-length']) > multipartLimit) {
+        return reply.code(413).send({ error: 'Multipart upload is too large' });
+      }
+      const fields: Record<string, string> = Object.create(null);
       let file: Pick<typeof input, 'filename' | 'mimeType' | 'bytes'> | undefined;
-      for await (const part of request.parts({ limits: { files: 1, fields: 5, fileSize: MAX_IMAGE_BYTES } })) {
-        if (part.type === 'file') {
-          file = { filename: part.filename, mimeType: part.mimetype, bytes: await part.toBuffer() };
-        } else if (typeof part.value === 'string') fields[part.fieldname] = part.value;
+      let bytes = 0;
+      let overLimit = false;
+      let stopReading: () => void;
+      const oversized = new Promise<void>((resolve) => { stopReading = resolve; });
+      const count = (chunk: Buffer) => {
+        bytes += chunk.length;
+        if (bytes > multipartLimit) {
+          overLimit = true;
+          stopReading();
+        }
+      };
+      const parse = async () => {
+        for await (const part of request.parts({ limits: { files: 1, fields: 5, fileSize: MAX_IMAGE_BYTES } })) {
+          if (overLimit) break;
+          if (part.type === 'file') {
+            file = { filename: part.filename, mimeType: part.mimetype, bytes: await part.toBuffer() };
+          } else if (typeof part.value === 'string' && !part.valueTruncated) fields[part.fieldname] = part.value;
+          else throw Object.assign(new Error('Invalid multipart field'), { statusCode: 400 });
+        }
+      };
+      request.raw.on('data', count);
+      try {
+        await Promise.race([oversized, parse()]);
+      } finally {
+        request.raw.off('data', count);
+      }
+      if (overLimit) {
+        request.raw.unpipe();
+        request.raw.pause();
+        return reply.header('Connection', 'close').code(413).send({ error: 'Multipart upload is too large' });
       }
       if (!file) return reply.code(400).send({ error: 'Upload requires one image file' });
       input = { ...file, place_id: fields.place_id, dish_id: fields.dish_id, source_url: fields.source_url };
@@ -83,7 +109,7 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
   });
 
   app.post<{ Body: IntakeBody }>('/api/intake', {
-    preHandler: admin,
+    onRequest: guards.contributor,
     schema: { body: {
       type: 'object', required: ['place_id', 'upload_ids'],
       properties: { place_id: idSchema, upload_ids: idList(MAX_ROOM_PHOTOS + 1) },
@@ -96,7 +122,7 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
   });
 
   app.post<{ Body: JobBody }>('/api/jobs', {
-    preHandler: admin,
+    onRequest: guards.contributor,
     schema: { body: {
       type: 'object', required: ['kind', 'place_id', 'upload_ids'],
       properties: {
@@ -105,49 +131,67 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
         plate_diameter_m: plateSize, model_tier: { enum: ROOM_MODEL_TIERS },
       },
     } },
-  }, async ({ body }, reply) => {
-    const place = store.get('places', body.place_id);
-    if (!place) return reply.code(404).send({ error: 'Place not found' });
-    const uploads = store.uploadsForPlace(body.place_id, body.upload_ids);
-    if (!uploads) return reply.code(400).send({ error: 'All uploads must belong to this place' });
-    const dishName = body.dish_name?.trim();
-    const dishId = body.dish_id ?? (!dishName ? uploads[0].dish_id : null);
-    const dish = dishId ? place.dishes.find((entry) => entry.id === dishId)
-      : place.dishes.find((entry) => entry.name.toLowerCase() === dishName?.toLowerCase());
-    if (body.kind === 'dish' && (uploads.length !== 1 || (body.dish_id && !dish))) {
-      return reply.code(400).send({ error: 'Dish generation requires one image and any supplied dish_id must belong to the place' });
+  }, async ({ body, headers }, reply) => {
+    const keyHeader = headers['idempotency-key'];
+    if (keyHeader !== undefined && (typeof keyHeader !== 'string' || !/^[!-~]{1,200}$/.test(keyHeader))) {
+      return reply.code(400).send({ error: 'Invalid Idempotency-Key' });
     }
-    const key = body.kind === 'room' ? config.atlasKey : config.replicateKey;
-    let provider: GenerationJob['provider'] = body.kind === 'room' ? 'atlas-v2' : 'trellis-replicate';
-    if (config.mode === 'demo' || (config.mode === 'auto' && !key)) provider = 'demo-sim';
-    if (provider === 'atlas-v2' && uploads.length < 2) return reply.code(400).send({ error: ROOM_PHOTO_REQUIREMENT });
-    if (config.mode === 'live' && !key) return reply.code(503).send({ error: `Missing API credentials for ${provider}` });
-    const now = new Date().toISOString();
-    const job: JobRecord = {
-      id: randomUUID(), kind: body.kind, place_id: place.id,
-      dish_id: body.kind === 'dish' ? dish?.id ?? null : null,
-      dish_name: body.kind === 'dish' ? dish?.name ?? (dishName || 'Untitled dish') : null,
-      input_upload_ids: body.upload_ids, status: 'queued', progress: 0, provider, provider_task_id: null,
-      plate_diameter_m: body.kind === 'dish' ? body.plate_diameter_m ?? dish?.plate_diameter_m ?? null : null,
-      model_tier: body.kind === 'room' ? body.model_tier ?? 'atlas-draft' : undefined,
-      status_message: provider === 'demo-sim' ? 'Demo simulation · Queued' : 'Queued',
-      created_at: now, updated_at: now,
-    };
-    store.put('jobs', job);
-    return reply.code(202).send(publicJob(job));
+    const fingerprint = keyHeader && createHash('sha256').update(JSON.stringify([
+      body.kind, body.place_id, body.upload_ids, body.dish_id, body.dish_name, body.plate_diameter_m, body.model_tier,
+    ])).digest('hex');
+    return store.transaction(() => {
+      if (keyHeader) {
+        const prior = store.jobByIdempotencyKey(keyHeader);
+        if (prior) {
+          if (prior.request_fingerprint !== fingerprint) return reply.code(409).send({ error: 'Idempotency-Key already used for a different job' });
+          return reply.code(202).send(publicJob(prior));
+        }
+      }
+      const place = store.get('places', body.place_id);
+      if (!place) return reply.code(404).send({ error: 'Place not found' });
+      const uploads = store.uploadsForPlace(body.place_id, body.upload_ids);
+      if (!uploads) return reply.code(400).send({ error: 'All uploads must belong to this place' });
+      const dishName = body.dish_name?.trim();
+      const dishId = body.dish_id ?? (!dishName ? uploads[0].dish_id : null);
+      const dish = dishId ? place.dishes.find((entry) => entry.id === dishId)
+        : place.dishes.find((entry) => entry.name.toLowerCase() === dishName?.toLowerCase());
+      if (body.kind === 'dish' && (uploads.length !== 1 || (body.dish_id && !dish))) {
+        return reply.code(400).send({ error: 'Dish generation requires one image and any supplied dish_id must belong to the place' });
+      }
+      const key = body.kind === 'room' ? config.atlasKey : config.replicateKey;
+      let provider: GenerationJob['provider'] = body.kind === 'room' ? 'atlas-v2' : 'trellis-replicate';
+      if (config.mode === 'demo' || (config.mode === 'auto' && !key)) provider = 'demo-sim';
+      if (provider === 'atlas-v2' && uploads.length < 2) return reply.code(400).send({ error: ROOM_PHOTO_REQUIREMENT });
+      if (config.mode === 'live' && !key) return reply.code(503).send({ error: `Missing API credentials for ${provider}` });
+      const now = new Date().toISOString();
+      const job: JobRecord = {
+        id: randomUUID(), kind: body.kind, place_id: place.id,
+        dish_id: body.kind === 'dish' ? dish?.id ?? null : null,
+        dish_name: body.kind === 'dish' ? dish?.name ?? (dishName || 'Untitled dish') : null,
+        input_upload_ids: body.upload_ids, status: 'queued', progress: 0, provider, provider_task_id: null,
+        plate_diameter_m: body.kind === 'dish' ? body.plate_diameter_m ?? dish?.plate_diameter_m ?? null : null,
+        model_tier: body.kind === 'room' ? body.model_tier ?? 'atlas-draft' : undefined,
+        status_message: provider === 'demo-sim' ? 'Demo simulation · Queued' : 'Queued',
+        created_at: now, updated_at: now, idempotency_key: keyHeader, request_fingerprint: fingerprint,
+      };
+      store.put('jobs', job);
+      return reply.code(202).send(publicJob(job));
+    });
   });
 
-  app.get('/api/jobs', async () => store.all('jobs').reverse().map(publicJob));
+  app.get('/api/jobs', { onRequest: guards.contributor }, async () => store.all('jobs').reverse().map(publicJob));
   app.get<{ Params: { id: string } }>('/api/jobs/:id', async ({ params }, reply) => {
     const job = store.get('jobs', params.id);
     if (!job) return reply.code(404).send({ error: 'Job not found' });
     return publicJob(job);
   });
-  app.post<{ Params: { id: string } }>('/api/jobs/:id/retry', { preHandler: admin }, async ({ params }, reply) => {
+  app.post<{ Params: { id: string } }>('/api/jobs/:id/retry', { onRequest: guards.contributor }, async ({ params }, reply) => {
     return store.transaction(() => {
       const job = store.get('jobs', params.id);
       if (!job) return reply.code(404).send({ error: 'Job not found' });
       if (job.status !== 'failed') return reply.code(409).send({ error: 'Only failed jobs can be retried' });
+      if (!store.get('places', job.place_id)) return reply.code(409).send({ error: 'The job venue is no longer in the catalog' });
+      if (job.terminal_failure) return reply.code(409).send({ error: job.error ?? 'This job cannot be retried' });
       if (job.submission_pending && !job.provider_task_id && job.provider !== 'atlas-v2') {
         return reply.code(409).send({ error: job.error });
       }
@@ -171,8 +215,10 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
     if (!asset) return reply.code(404).send({ error: 'Asset not found' });
     return asset;
   });
-  app.post<{ Params: { id: string }; Body: PublishBody }>('/api/assets/:id/publish', {
-    preHandler: admin,
+  for (const url of ['/api/assets/:id/publish', '/api/jobs/:id/publish']) app.route<{ Params: { id: string }; Body: PublishBody }>({
+    method: 'POST',
+    url,
+    onRequest: guards.admin,
     schema: { body: {
       type: 'object',
       properties: {
@@ -180,23 +226,40 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
         plate_diameter_m: plateSize, rotation_y: { type: 'number', minimum: -360, maximum: 360 }, approve: { type: 'boolean' },
       },
     } },
-  }, async ({ params, body = {} }, reply) => store.transaction(() => {
-    const asset = store.get('assets', params.id);
-    if (!asset) return reply.code(404).send({ error: 'Asset not found' });
-    const job = store.get('jobs', params.id);
-    if (!job || (job.status !== 'needs_review' && job.status !== 'ready')) {
-      return reply.code(409).send({ error: 'Asset is not associated with a reviewable job' });
+    handler: async ({ params, body = {} }, reply) => store.transaction(() => {
+      const asset = store.get('assets', params.id);
+      if (!asset) return reply.code(404).send({ error: 'Asset not found' });
+      const job = store.get('jobs', params.id);
+      const place = job && store.get('places', job.place_id);
+      if (!job || !place || !['needs_review', 'ready'].includes(job.status)) {
+        return reply.code(409).send({ error: 'Asset is not associated with a reviewable job' });
+      }
+      return body.approve === false ? rejectAsset(store, asset, job) : publishAsset(store, asset, job, body);
+    }),
+  });
+}
+
+export function rejectAsset(store: Store, asset: Asset, job?: JobRecord) {
+  const place = job && store.get('places', job.place_id);
+  if (place) {
+    const seed = places.find(({ id }) => id === place.id);
+    if (place.room_asset_id === asset.id) place.room_asset_id = seed?.room_asset_id ?? null;
+    const seedPreviews = [...(seed?.rooms ?? []), ...(seed?.dishes ?? []), ...(seed?.seat_views ?? [])];
+    for (const entry of [...place.rooms, ...place.dishes, ...place.seat_views]) {
+      if (entry.asset_id === asset.id) entry.asset_id = seedPreviews.find(({ id }) => id === entry.id)?.asset_id ?? null;
     }
-    if (body.approve === false) {
-      if (job.status === 'ready') return reply.code(409).send({ error: 'This asset has already been published' });
-      asset.status = 'rejected';
-      store.put('assets', asset);
-      store.updateJob(job, { status_message: 'Asset rejected during review' });
-      return asset;
-    }
-    const place = store.get('places', job.place_id);
-    if (!place) return reply.code(404).send({ error: 'Place not found' });
-    if (job.status === 'ready') return asset;
+    store.put('places', place);
+  }
+  asset.status = 'rejected';
+  store.put('assets', asset);
+  if (job) store.updateJob(job, { status: 'failed', terminal_failure: true, status_message: 'Asset rejected', error: 'Asset rejected' });
+  return asset;
+}
+
+export function publishAsset(store: Store, asset: Asset, job?: JobRecord, body: PublishBody = {}) {
+  if (asset.status === 'ready') return asset;
+  const place = job && store.get('places', job.place_id);
+  if (job && place) {
     if (job.kind === 'dish' && body.plate_diameter_m !== undefined) {
       Object.assign(asset, measureScale(body.plate_diameter_m, asset.metadata?.measured_width));
     }
@@ -206,14 +269,13 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
       position: asset.transform?.position ?? defaultVector,
       rotation: [rotation[0], body.rotation_y ?? rotation[1], rotation[2]], scale: asset.scale_factor,
     };
-    asset.status = 'ready';
     if (job.kind === 'room') {
       for (const room of place.rooms) {
         if (room.asset_id === place.room_asset_id) room.asset_id = asset.id;
       }
       place.room_asset_id = asset.id;
     } else {
-      const name = job.dish_name!;
+      const name = job.dish_name ?? 'Untitled dish';
       let dish = place.dishes.find((entry) => entry.id === job.dish_id || entry.name.toLowerCase() === name.toLowerCase());
       if (!dish) {
         dish = { id: `${place.id}-dish-${job.id}`, place_id: place.id, name, price: null, portion_note: '' } satisfies Dish;
@@ -224,9 +286,10 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
       job.dish_id = dish.id;
       job.plate_diameter_m = asset.plate_diameter_m;
     }
-    store.put('assets', asset);
     store.put('places', place);
-    store.updateJob(job, { status: 'ready', status_message: 'Published', progress: 100 });
-    return asset;
-  }));
+    store.updateJob(job, { status: 'ready', status_message: 'Published', terminal_failure: false, error: null, progress: 100 });
+  }
+  asset.status = 'ready';
+  store.put('assets', asset);
+  return asset;
 }

@@ -4,7 +4,7 @@
 
 ## Architecture
 
-- **`modeling/`** — Deterministic procedural glTF 2.0 (`.glb`) and binary 3D Gaussian Splat (`.ply`) generators (`node modeling/generate_all.mjs && node modeling/validate_assets.mjs`):
+- **`modeling/`** — Deterministic procedural glTF 2.0 (`.glb`) and binary 3D Gaussian Splat (`.ply`) generators:
   - **Boston Map Sculpture** (`boston-map-sculpture.glb`): a grounded base slab with an inlaid Charles River and street grid, MBTA Green (B/C/D/E), Red, Orange, and Blue tubes stacked in three shallow layers, white on-line stop markers, transfer posts at interchanges, raised drums for the five explorable stations, and `mbta-train-capsule.glb`.
   - **5 Floating-Island City Segment Dioramas** (`segment-place-*.glb`): BU Central, Packard's Corner, Kenmore, Harvard Square, and Chinatown, each an OpenStreetMap city block with Boston landmarks on a low-poly island of turf, earth and rock (`modeling/segment-island.mjs`).
   - **6 Demo 3DGS `.ply` Assets**: Ramen house, karaoke suite, study café, tonkotsu ramen (`24 cm`), katsu curry (`26 cm`), and matcha tiramisu (`18 cm`), plus `table-pedestal.glb`.
@@ -19,8 +19,8 @@
   - `POST /api/assets/:id/publish`, `GET /api/restaurants`, `GET /api/restaurants/:id/manifest`
   - `POST /api/restaurants/:id/reviews`, `GET/POST /api/admin/moderation`, `POST/GET /api/debug/logs`
   - `GET /api/mbta/{vehicles,predictions,alerts,schedules,trip}` — Cached MBTA V3 proxy (10s / 60s / 1h TTL) with realistic Boston simulation fallback.
-  - `GET /api/live/status` & `POST /api/live/sessions` — OpenAI **`gpt-live-1.1`** full-duplex WebRTC voice broker with `responses` delegation (`gpt-6-luna`) and 16 tools giving the assistant control over map highlights, station dioramas, 3D venue rooms, physical menu books, 3D dish tabletop previews/comparisons, filters, live MBTA queries, camera controls, modals, audio, and Quest pairing.
-  - `POST /api/realtime/session` — Mints a short-lived `gpt-realtime` credential for the app’s GPT Live button, XR Voice key, and Quest A/X shortcut. The server loads `OPENAI_API_KEY` from the environment, and the browser connects over WebRTC using the `ash` voice.
+  - `GET /api/live/status` reports the voice configuration. `POST /api/live/sessions` brokers the app’s GPT Live WebRTC connection using `gpt-live-1.1` and the `ballad` voice by default. A Responses backend (`gpt-6-luna` by default) handles catalog and transit queries and controls the app’s scenes, filters, and review clipboards.
+  - `POST /api/realtime/session` mints a short-lived `gpt-realtime` credential configured with the `ballad` voice. The server loads `OPENAI_API_KEY` from the environment for both endpoints.
   - `POST /api/pairing/create` & `WS /ws/pair/:code` — 4-digit Phone ↔ Quest headset handoff.
 - **`web/`** (`@faresight/web`) — PlayCanvas v2 + WebXR (`immersive-vr` & `immersive-ar` passthrough) 4-scene app with an animated map-to-station dive, 3D canvas panels, Web Audio synthesizer, responsive 2D Phone Companion, Upload & Pipeline Studio, Pairing, Moderation, and offline cache-first Service Worker (`/sw.js`).
 - **`contribute/`** (`@faresight/contribute`) — Mobile-first app for people who add the photos behind the 3D rooms and dishes, served from its own subdomain (`contribute.<domain>`). It has no 3D engine: the map sculpture and the station dioramas are drawn as flat, touch-driven SVG maps.
@@ -51,7 +51,8 @@ pnpm dev                  # Starts Fastify server (:3001) + Vite web app (:5173)
 ## Build & Verify
 
 ```bash
-node modeling/generate_all.mjs && node modeling/validate_assets.mjs
+pnpm --filter @faresight/shared build
+node modeling/generate_all.mjs && pnpm assets:sync && node modeling/validate_assets.mjs
 pnpm typecheck
 pnpm build
 pnpm --filter @faresight/server test
