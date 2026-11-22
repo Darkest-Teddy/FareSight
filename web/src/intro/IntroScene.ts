@@ -1,15 +1,15 @@
 import * as pc from 'playcanvas';
 import { STOPS } from '@faresight/shared';
-import { offlineCatalog } from '../data/fallbackData';
-import { JarvisReveal } from '../xr/JarvisReveal';
+import { offlineCatalog, offlineManifest } from '../data/fallbackData';
+import { JarvisReveal, jarvisPoints } from '../xr/JarvisReveal';
 import { MapSculptureScene } from '../xr/MapSculptureScene';
+import { SplatLoader } from '../xr/SplatLoader';
 import { StationDioramaScene } from '../xr/StationDioramaScene';
-import { assetBase, child, clamp, damp, material, ModelLibrary, shape, smooth } from '../xr/sceneSupport';
+import { assetBase, child, clamp, damp, material, ModelLibrary, smooth } from '../xr/sceneSupport';
 
 /**
  * The landing page's 3D stage. It builds the same gallery, map sculpture and station diorama a
- * headset shows (physical plaques, plinth, floor rings, no flat-screen panels) and lets one
- * number, the scroll progress, pose the camera and scrub the app's own map-to-station dive.
+ * headset shows. Scroll progress drives the camera, mesh reveals, and the room splat.
  */
 
 export const STOP_ID = 'place-bucen';
@@ -41,9 +41,13 @@ export const DIVE: [number, number] = [0.345, 0.585];
 export const CLEAR_AT = 0.305;
 /** Over this stretch every flag but the ramen counter's folds back into its roof. */
 export const FOCUS: [number, number] = [0.775, 0.835];
+export const ROOM_START = 0.92;
+const PIN_REVEAL = [0.557, 0.635] as const;
+const CITY_EXIT = [0.91, 0.96] as const;
+const featured = offlineCatalog.places.find((place) => place.id === PLACE_ID);
 
 const shots: Shot[] = [
-  // The whole network on its plinth, as a visitor standing in the gallery sees it.
+  // The visitor sees the full network above the gallery floor.
   { at: 0.00, look: 'map', yaw: -0.44, pitch: 0.44, distance: 2.02, shiftX: 0.31, shiftY: 0.12 },
   { at: 0.10, look: 'map', yaw: -0.30, pitch: 0.47, distance: 1.88, shiftX: 0.31, shiftY: 0.12 },
   // Lean in over the table until BU Central's marker fills the view.
@@ -54,10 +58,21 @@ const shots: Shot[] = [
   { at: 0.74, look: 'stage', yaw: -0.02, pitch: 0.44, distance: 1.70, shiftX: 0.27, shiftY: 0 },
   // One flag left standing: the ramen counter, seen from across the avenue.
   { at: 0.88, look: 'pin', yaw: 0.72, pitch: 0.60, distance: 0.72, shiftX: -0.26, shiftY: -0.09 },
-  { at: 0.935, look: 'pin', yaw: 0.80, pitch: 0.57, distance: 0.66, shiftX: -0.26, shiftY: -0.09 },
+  { at: 0.925, look: 'pin', yaw: 0.80, pitch: 0.54, distance: 0.62, shiftX: -0.26, shiftY: -0.09 },
   // Slide down the stem to the front door.
-  { at: 1.00, look: 'door', yaw: 0.96, pitch: 0.40, distance: 0.085, shiftX: 0, shiftY: 0 },
+  { at: 0.972, look: 'door', yaw: 0.96, pitch: 0.13, distance: 0.085, shiftX: 0, shiftY: 0 },
 ];
+
+function progressAt(value: number, start: number, end: number): number {
+  return clamp((value - start) / (end - start), 0, 1);
+}
+
+function reducedScene(p: number): number {
+  if (p >= ROOM_START) return 1;
+  if (p >= FOCUS[1]) return 0.89;
+  if (p >= (DIVE[0] + DIVE[1]) / 2) return 0.67;
+  return p >= 0.20 ? 0.22 : 0;
+}
 
 export class IntroScene {
   private app?: pc.Application;
@@ -67,8 +82,13 @@ export class IntroScene {
   private reveal!: JarvisReveal;
   private map!: MapSculptureScene;
   private station!: StationDioramaScene;
-  private plinth!: pc.Entity;
-  private pedestal!: pc.Entity;
+  private splats!: SplatLoader;
+  private gallery!: pc.Entity;
+  private roomRoot!: pc.Entity;
+  private roomReady = false;
+  private roomSpawn = new pc.Vec3();
+  private roomOffset = new pc.Vec3();
+  private roomEye = new pc.Vec3();
   private materials: pc.StandardMaterial[] = [];
   private resizeObserver?: ResizeObserver;
   private events = new AbortController();
@@ -76,8 +96,13 @@ export class IntroScene {
   private allPlaces = new Set(offlineCatalog.places.map((place) => place.id));
   private pin?: pc.Entity;
   private otherPins: pc.Entity[] = [];
-  private lastDive = 0;
-  private focus = 0;
+  private lastDive = -1;
+  private calloutProgress = 1;
+  private cityProgress = -1;
+  private galleryProgress = 1;
+  private pinsProgress = -1;
+  private featuredProgress = -1;
+  private focus = -1;
   private clock = 0;
   private pointer = { x: 0, y: 0, easedX: 0, easedY: 0 };
   private anchor = new pc.Vec3();
@@ -91,8 +116,7 @@ export class IntroScene {
   /** `onFrame` runs once per rendered frame and returns the eased scroll progress, 0 to 1. */
   constructor(private canvas: HTMLCanvasElement, private onFrame: (dt: number) => number) {}
 
-  /** Resolves once the map sculpture and the BU Central neighbourhood are on the GPU. */
-  async init(): Promise<void> {
+  async init(): Promise<boolean> {
     const app = new pc.Application(this.canvas, {
       graphicsDeviceOptions: { antialias: true, alpha: false, preserveDrawingBuffer: false },
     });
@@ -116,9 +140,16 @@ export class IntroScene {
     const log = (text: string, level?: string) => { if (level === 'error') console.error(text); };
     this.models = new ModelLibrary(app, log);
     this.reveal = new JarvisReveal(app.graphicsDevice, this.reducedMotion);
+    this.splats = new SplatLoader(app, log, this.reducedMotion);
+    this.roomRoot = child(app.root, 'Tsuru Ramen interior', undefined, app);
+    this.roomRoot.enabled = false;
+    const manifest = featured && offlineManifest(featured);
+    this.roomSpawn.set(...(manifest?.spawn_point ?? [0, 1.55, 2]));
+    const room = this.splats.show('room', manifest?.room_asset, this.roomRoot);
+    this.splats.seekReveal('room', 0);
     const noop = () => undefined;
     this.map = new MapSculptureScene(app.root, app.graphicsDevice, this.models, this.reveal, log, noop, this.canvas, noop);
-    this.station = new StationDioramaScene(app.root, app.graphicsDevice, this.models, this.reveal, log, noop);
+    this.station = new StationDioramaScene(app, this.models, this.reveal, log, noop);
     this.map.root.setLocalPosition(0, mapHeight, 0);
     this.map.setImmersive(true);
     this.map.setStops(STOPS);
@@ -136,15 +167,22 @@ export class IntroScene {
     this.resizeObserver.observe(this.canvas);
     this.resize();
     app.on('update', (dt: number) => this.update(dt));
-    app.start();
 
     const stop = STOPS.find((item) => item.stop_id === STOP_ID);
-    const [sculpture] = await Promise.all([
+    const [sculpture, , roomReady] = await Promise.all([
       this.models.load(`${assetBase}boston-map-sculpture.glb`),
       stop ? this.station.show(stop) : Promise.resolve(),
+      room,
     ]);
+    if (!this.app) return false;
     if (!sculpture) throw new Error('The map sculpture could not be loaded');
-    if (this.lastDive === 0) this.map.setVisible(true);
+    this.roomReady = roomReady;
+    this.findPins();
+    return roomReady;
+  }
+
+  start(): void {
+    this.app?.start();
   }
 
   private addLights(root: pc.Entity): void {
@@ -160,9 +198,8 @@ export class IntroScene {
     }
   }
 
-  /** The headset gallery: an unlit floor, two floor rings and the plinth the models stand on. */
   private buildGallery(root: pc.Entity, device: pc.GraphicsDevice): void {
-    const gallery = child(root, 'VR gallery');
+    const gallery = this.gallery = child(root, 'VR gallery');
     const floor = material('#141821', 1);
     const rings = material('#2a3242', 1);
     for (const surface of [floor, rings]) {
@@ -170,8 +207,7 @@ export class IntroScene {
       surface.useLighting = false;
       surface.update();
     }
-    const finish = material('#292e39', 0.12);
-    this.materials.push(floor, rings, finish);
+    this.materials.push(floor, rings);
     const deck = child(gallery, 'Gallery floor');
     const disk = pc.Mesh.fromGeometry(device, new pc.CircleGeometry({ radius: 8, sectors: 128, rings: 1 }));
     deck.addComponent('render', { meshInstances: [new pc.MeshInstance(disk, floor, deck)] });
@@ -183,9 +219,6 @@ export class IntroScene {
       ring.setLocalScale(1, 0.2, 1);
       ring.addComponent('render', { meshInstances: [new pc.MeshInstance(mesh, rings, ring)] });
     }
-    this.plinth = child(gallery, 'Tabletop plinth');
-    this.pedestal = shape(this.plinth, 'Plinth column', 'cylinder', finish, [0, 0.4, 0], [0.36, 0.8, 0.36]);
-    shape(this.plinth, 'Plinth foot', 'cylinder', finish, [0, 0.016, 0], [0.53, 0.032, 0.53]);
   }
 
   private resize(): void {
@@ -205,7 +238,7 @@ export class IntroScene {
   }
 
   /** Pose the map and the neighbourhood for dive progress `u`, exactly as the app does. */
-  private applyDive(u: number): void {
+  private applyDive(u: number): boolean {
     const origin = this.map.root.getPosition();
     const marker = this.map.stopPosition(STOP_ID);
     if (marker) this.anchor.copy(marker).add(origin);
@@ -223,22 +256,17 @@ export class IntroScene {
       this.station.root.setLocalScale(size, size, size);
       this.station.root.setPosition(center);
     }
-    const height = Math.max(0.10, pc.math.lerp(origin.y - 0.02, this.stage.y - 0.16, travel));
-    this.pedestal.setLocalPosition(0, height / 2, 0);
-    this.pedestal.setLocalScale(0.36, height, 0.36);
-
-    if (u === this.lastDive) return;
+    if (u === this.lastDive) return false;
+    if (u === 0 && this.lastDive < 0) this.map.setVisible(true);
+    else this.map.seekReveal(1 - clamp((u - 0.11) / 0.65, 0, 1));
     this.lastDive = u;
-    this.map.seekReveal(1 - clamp((u - 0.11) / 0.65, 0, 1));
-    this.station.seekReveal(clamp((u - 0.22) / 0.75, 0, 1));
-    this.station.setPinsShown(u > 0.86);
+    return true;
   }
 
   /** The ramen counter's pin and its neighbours, once the neighbourhood has built them. */
   private findPins(): void {
     if (this.pin) return;
     const named = (name: string) => this.station.root.findByName(name) as pc.Entity | null;
-    const featured = offlineCatalog.places.find((place) => place.id === PLACE_ID);
     this.pin = (featured && named(featured.name)) ?? undefined;
     if (!this.pin) return;
     this.otherPins = offlineCatalog.places
@@ -247,12 +275,36 @@ export class IntroScene {
       .filter((entity): entity is pc.Entity => !!entity);
   }
 
-  private applyFocus(focus: number): void {
-    this.findPins();
-    if (focus === this.focus) return;
-    this.focus = focus;
-    const size = Math.max(0.0001, 1 - focus);
-    for (const pin of this.otherPins) pin.setLocalScale(size, size, size);
+  private applyPins(p: number, leaving: number): void {
+    const pins = progressAt(p, ...PIN_REVEAL);
+    if (pins !== this.pinsProgress) {
+      this.pinsProgress = pins;
+      this.station.seekPins(pins);
+      this.focus = this.featuredProgress = -1;
+    }
+    if (pins < 1) return;
+    const focus = smooth(progressAt(p, ...FOCUS));
+    if (focus !== this.focus) {
+      this.focus = focus;
+      for (const pin of this.otherPins) this.reveal.seek(pin, 1 - focus, jarvisPoints.detail);
+    }
+    const featuredProgress = 1 - leaving;
+    if (this.pin && featuredProgress !== this.featuredProgress) {
+      this.featuredProgress = featuredProgress;
+      this.reveal.seek(this.pin, featuredProgress, jarvisPoints.detail);
+    }
+  }
+
+  private alignRoom(): void {
+    const shot = shots[shots.length - 1];
+    const eye = this.resolve('door', this.roomEye);
+    const horizontal = Math.cos(shot.pitch) * shot.distance;
+    eye.x += Math.sin(shot.yaw) * horizontal;
+    eye.y += Math.sin(shot.pitch) * shot.distance;
+    eye.z += Math.cos(shot.yaw) * horizontal;
+    this.roomRoot.setLocalEulerAngles(0, shot.yaw * pc.math.RAD_TO_DEG, 0);
+    this.roomRoot.getRotation().transformVector(this.roomSpawn, this.roomOffset);
+    this.roomRoot.setPosition(eye.sub(this.roomOffset));
   }
 
   private resolve(anchor: Anchor, out: pc.Vec3): pc.Vec3 {
@@ -293,8 +345,9 @@ export class IntroScene {
       const ease = damp(dt, 3);
       this.pointer.easedX += (this.pointer.x - this.pointer.easedX) * ease;
       this.pointer.easedY += (this.pointer.y - this.pointer.easedY) * ease;
-      yaw += 0.03 * Math.sin(this.clock * 0.23) - 0.045 * this.pointer.easedX;
-      pitch += 0.010 * Math.sin(this.clock * 0.31) + 0.025 * this.pointer.easedY;
+      const sway = 1 - smooth(progressAt(p, ...CITY_EXIT));
+      yaw += (0.03 * Math.sin(this.clock * 0.23) - 0.045 * this.pointer.easedX) * sway;
+      pitch += (0.010 * Math.sin(this.clock * 0.31) + 0.025 * this.pointer.easedY) * sway;
     }
     const horizontal = Math.cos(pitch) * distance;
     this.eye.set(target.x + Math.sin(yaw) * horizontal, target.y + Math.sin(pitch) * distance, target.z + Math.cos(yaw) * horizontal);
@@ -308,21 +361,51 @@ export class IntroScene {
 
   private update(dt: number): void {
     this.clock += dt;
-    const p = clamp(this.onFrame(dt), 0, 1);
-    this.applyDive(clamp((p - DIVE[0]) / (DIVE[1] - DIVE[0]), 0, 1));
-    this.map.setImmersive(p < CLEAR_AT);
-    this.applyFocus(smooth((p - FOCUS[0]) / (FOCUS[1] - FOCUS[0])));
-    this.poseCamera(p, dt);
+    const scroll = clamp(this.onFrame(dt), 0, 1);
+    const p = this.reducedMotion.matches ? reducedScene(scroll) : scroll;
+    const dive = progressAt(p, ...DIVE);
+    const initial = this.lastDive < 0;
+    const diveChanged = this.applyDive(dive);
+    const callouts = 1 - smooth(progressAt(p, CLEAR_AT, DIVE[0]));
+    if (callouts !== this.calloutProgress || (diveChanged && !initial)) {
+      this.calloutProgress = callouts;
+      this.map.seekCallouts(callouts);
+    }
+    const leaving = this.roomReady ? smooth(progressAt(p, ...CITY_EXIT)) : 0;
+    const city = clamp((dive - 0.22) / 0.75, 0, 1) * (1 - leaving);
+    this.station.root.enabled = dive > 0 && leaving < 1;
+    if (city !== this.cityProgress) {
+      this.cityProgress = city;
+      this.station.seekReveal(city);
+      this.station.seekMarker(city);
+    }
+    this.applyPins(p, leaving);
+    const inside = this.roomReady ? progressAt(p, ROOM_START, 1) : 0;
+    const gallery = 1 - leaving;
+    if (gallery !== this.galleryProgress) {
+      this.galleryProgress = gallery;
+      this.reveal.seek(this.gallery, gallery, jarvisPoints.detail);
+    }
+    if (inside > 0 && !this.roomRoot.enabled) {
+      this.alignRoom();
+      this.roomRoot.enabled = true;
+    } else if (inside <= 0) {
+      this.roomRoot.enabled = false;
+    }
+    this.splats.seekReveal('room', inside);
+    this.poseCamera(this.roomReady ? p : Math.min(p, 0.925), dt);
     this.map.update(dt, this.camera, this.lens, 0);
-    if (this.lastDive > 0) this.station.update(dt, this.camera);
+    if (this.station.root.enabled) this.station.update(this.reducedMotion.matches ? 1 : dt, this.camera);
     this.reveal.update(dt);
   }
 
   destroy(): void {
+    if (!this.app) return;
     this.events.abort();
     this.resizeObserver?.disconnect();
     this.map?.destroy();
     this.station?.destroy();
+    this.splats?.destroy();
     this.reveal?.destroy();
     this.models?.destroy();
     for (const surface of this.materials) surface.destroy();

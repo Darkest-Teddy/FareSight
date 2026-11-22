@@ -3,7 +3,9 @@ import {
   type Asset, type Dish, type MbtaSource, type Place, type RestaurantManifest, type Stop,
 } from '@faresight/shared';
 import { api, type Alert, type Prediction, type Trip } from '../api/client';
-import { button, element, errorText, field, link, message, money, option, section } from './dom';
+import { has3DDish, has3DRoom, hasDishPreview, isSplat } from '../data/preview3D';
+import { bostonHours, formatHours, week } from '../data/reviewBriefing';
+import { button, element, errorText, field, link, message, money, option, previewBadge, section } from './dom';
 import { oneWayCost, type Filters } from './state';
 
 export type Seating = 'seated' | 'standing';
@@ -12,27 +14,39 @@ export interface StationData {
   predictions: Load<{ predictions: Prediction[]; source: MbtaSource }>;
   alerts: Load<Alert[]>;
 }
+export interface DishComparison {
+  place: Place;
+  dish: Dish;
+  asset: Asset;
+  offline?: boolean;
+}
 export interface ViewData {
   place: Place;
+  places: readonly Place[];
   stop?: Stop;
   filters: Filters;
   manifest: Load<RestaurantManifest> & { offline?: boolean };
   trip: Load<Trip> & { offline?: boolean };
   originName?: string;
   dish?: Dish;
-  compareId: string;
+  comparison?: DishComparison;
   fit: boolean;
   seating: Seating;
   rotation: number;
   table: 'virtual' | 'passthrough';
   inside: boolean;
+  highlightedDishId?: string;
 }
 interface DrawerActions {
+  showBriefing(place: Place): void;
+  toggleComparison(place: Place): void;
+  clearComparison(): void;
+  openComparison(): void;
   close(): void;
   toggleSheet(): void;
   showPlace(place: Place): void;
   enterRoom(): void;
-  openDish(dish: Dish, compareId?: string): void;
+  openDish(dish: Dish, compareId?: string, comparePlaceId?: string): void;
   changeFit(enabled: boolean, seating: Seating): void;
   rotate(angle: number): void;
   table(useVirtual: boolean): void;
@@ -62,6 +76,69 @@ function breakdown(rows: [string, string][]) {
   return list;
 }
 
+const ratingCount = new Intl.NumberFormat('en-US');
+
+function venueFacts(place: Place): HTMLElement[] {
+  const details = place.details;
+  const nodes: HTMLElement[] = [];
+  const hours = section('Hours');
+  const { openNow } = bostonHours(place.hours, new Date());
+  hours.append(element('p', openNow ? 'open-now' : 'muted', openNow ? 'Open now' : 'Closed now'));
+  const today = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short' }).format(new Date()).toLowerCase();
+  const list = breakdown(week.map(([day, label]) => [label, formatHours(place.hours[day])]));
+  list.querySelectorAll('dt').forEach((term, index) => {
+    if (week[index][0] !== today) return;
+    term.classList.add('today');
+    term.nextElementSibling?.classList.add('today');
+  });
+  hours.append(list);
+  if (!details?.hours_verified) hours.append(element('p', 'muted', 'Planning hours. Check with the venue.'));
+  if (details?.hours_note) hours.append(element('p', 'muted', details.hours_note));
+  nodes.push(hours);
+  if (!details) return nodes;
+
+  if (details.awards.length) {
+    const awards = section('Recognition');
+    const items = element('ul', 'award-list');
+    for (const award of details.awards) {
+      const item = element('li');
+      const title = [award.title, award.year].filter(Boolean).join(', ');
+      item.append(award.url ? link(title, award.url) : element('span', '', title), element('small', '', award.org));
+      items.append(item);
+    }
+    awards.append(items);
+    nodes.push(awards);
+  }
+
+  if (details.ratings.length || details.review_highlights.length) {
+    const reviews = section('What reviewers say');
+    if (details.ratings.length) {
+      reviews.append(breakdown(details.ratings.map(({ source, rating, count }) =>
+        [source, `${rating.toFixed(1)} / 5${count ? ` · ${ratingCount.format(count)} reviews` : ''}`])));
+    }
+    if (details.review_highlights.length) {
+      const items = element('ul', 'review-highlights');
+      for (const text of details.review_highlights) items.append(element('li', '', text));
+      reviews.append(items);
+    }
+    reviews.append(element('p', 'muted', `Summarized from public reviews · checked ${details.checked_on}`));
+    nodes.push(reviews);
+  }
+
+  if (details.address || details.website || details.phone) {
+    const contact = section('Visit');
+    if (details.address) contact.append(element('p', '', details.address));
+    if (details.phone) {
+      const phone = element('a', 'text-link', details.phone);
+      phone.href = `tel:${details.phone.replace(/[^\d+]/g, '')}`;
+      contact.append(phone);
+    }
+    if (details.website) contact.append(link('Website', details.website));
+    nodes.push(contact);
+  }
+  return nodes;
+}
+
 function badgeAsset(asset: Asset, node: HTMLElement) {
   const badges = element('div', 'badges');
   badges.append(element('span', 'badge', asset.provenance_label));
@@ -75,6 +152,10 @@ export class PlaceDrawer {
   private readonly title = element('h2');
   private readonly caption = element('p', 'drawer-caption');
   private readonly content = element('div', 'drawer-scroll');
+  private readonly compareTray = element('div', 'restaurant-compare-tray');
+  private readonly venueComparison = element('span');
+  private comparedPlaces: readonly Place[] = [];
+  private comparisonKey = '';
   private readonly stationDetails = element('div');
   private readonly stationList = element('div');
   private readonly tripDetails = element('div');
@@ -86,6 +167,8 @@ export class PlaceDrawer {
   private modelKey = '';
   private modelManifest?: RestaurantManifest;
   private modelPlace?: Place;
+  private modelComparison?: DishComparison;
+  private modelCatalog?: readonly Place[];
   private reviewsNode?: HTMLElement;
   private reviewsKey = '';
 
@@ -109,8 +192,38 @@ export class PlaceDrawer {
     });
     heading.append(label, button('Close', actions.close, 'quiet'));
     this.pairingDetails.append(button('Send to paired device', actions.sendPlace), button('Send trip', actions.sendTrip, 'quiet'));
-    this.root.append(this.grip, heading, this.content);
+    this.compareTray.hidden = true;
+    this.root.append(this.grip, heading, this.compareTray, this.content);
     this.root.hidden = true;
+  }
+
+  setComparison(places: readonly Place[], loading: boolean) {
+    this.comparedPlaces = places;
+    const key = JSON.stringify([places.map(({ id, name }) => [id, name]), loading]);
+    if (key === this.comparisonKey) return;
+    this.comparisonKey = key;
+    const focused = this.compareTray.contains(document.activeElement);
+    const chips = element('div', 'restaurant-compare-chips');
+    for (const place of places) {
+      const remove = button(`${place.name} ×`, () => this.actions.toggleComparison(place), 'quiet');
+      remove.setAttribute('aria-label', `Remove ${place.name} from comparison`);
+      chips.append(remove);
+    }
+    const compare = button(loading ? 'Comparing…' : `Compare (${places.length})`, this.actions.openComparison, 'accent');
+    compare.disabled = places.length < 2 || loading;
+    const clear = button('Clear', this.actions.clearComparison, 'quiet');
+    this.compareTray.replaceChildren(chips, compare, clear);
+    this.compareTray.hidden = !places.length;
+    if (focused) (places.length ? (compare.disabled ? clear : compare) : this.title).focus({ preventScroll: true });
+  }
+
+  private compareButton(place: Place) {
+    const selected = this.comparedPlaces.some(({ id }) => id === place.id);
+    const toggle = button(selected ? 'Comparing ✓' : '+ Compare', () => this.actions.toggleComparison(place), 'quiet compare-place');
+    toggle.dataset.compareVenue = place.id;
+    toggle.setAttribute('aria-label', `${selected ? 'Remove from comparison' : 'Compare'} ${place.name}`);
+    toggle.setAttribute('aria-pressed', String(selected));
+    return toggle;
   }
 
   expanded(expanded: boolean) {
@@ -119,7 +232,8 @@ export class PlaceDrawer {
     this.grip.textContent = expanded ? 'Collapse sheet' : 'Expand sheet';
   }
 
-  station(stop: Stop, places: Place[], filters: Filters, focus = false) {
+  station(stop: Stop, places: Place[], filters: Filters, focus = false, highlightedPlaces?: ReadonlySet<string>) {
+    const compareFocus = (document.activeElement as HTMLElement | null)?.dataset.compareVenue;
     const key = 'station:' + stop.stop_id;
     this.root.hidden = false;
     if (this.viewKey !== key) {
@@ -134,14 +248,28 @@ export class PlaceDrawer {
     if (!places.length) {
       list.append(message('No places at this stop match your filters.'), button('Clear filters', this.actions.clearFilters));
     }
+    let firstHighlighted: HTMLButtonElement | undefined;
     for (const place of places) {
       const item = button('', () => this.actions.showPlace(place), 'place-row');
+      if (highlightedPlaces?.has(place.id)) {
+        item.dataset.highlighted = 'true';
+        if (!firstHighlighted) firstHighlighted = item;
+      }
       const label = element('span', '', place.name);
-      label.append(element('small', '', `${place.walk_from_stop_m} m from station`));
+      const room = has3DRoom(place);
+      const dishes = has3DDish(place);
+      if (room || dishes) label.append(previewBadge());
+      const preview = room && dishes ? ' · 3D room & dishes' : room ? ' · 3D room' : dishes ? ' · 3D dishes' : '';
+      label.append(element('small', '', `${place.walk_from_stop_m} m from station${preview}`));
       item.append(label, element('strong', 'price', money(oneWayCost(place, filters.startStopId, filters.groupSize))));
-      list.append(item);
+      const row = element('div', 'place-compare-row');
+      row.append(item, this.compareButton(place));
+      list.append(row);
     }
     this.stationList.replaceChildren(list);
+    if (compareFocus) [...list.querySelectorAll<HTMLButtonElement>('.compare-place')]
+      .find((toggle) => toggle.dataset.compareVenue === compareFocus)?.focus({ preventScroll: true });
+    if (firstHighlighted) firstHighlighted.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     if (focus) {
       this.title.tabIndex = -1;
       this.title.focus({ preventScroll: true });
@@ -187,11 +315,21 @@ export class PlaceDrawer {
       const summary = element('div', 'venue-intro');
       summary.append(element('p', '', place.vibe));
       if (stop) summary.append(lineDots(stop));
+      summary.append(button('Reviews & Briefing', () => this.actions.showBriefing(place), 'quiet briefing-launch'));
+      summary.append(this.venueComparison);
       this.reviewsNode = element('div');
       this.reviewsKey = '';
-      this.content.replaceChildren(summary, this.costDetails, this.tripDetails, this.modelDetails, this.pairingDetails, this.reviewsNode);
+      this.content.replaceChildren(summary, ...venueFacts(place), this.costDetails, this.tripDetails, this.modelDetails, this.pairingDetails, this.reviewsNode);
       this.content.scrollTop = 0;
       this.modelKey = '';
+    }
+    const selected = this.comparedPlaces.some(({ id }) => id === place.id);
+    if (this.venueComparison.firstElementChild?.getAttribute('aria-pressed') !== String(selected)
+        || (this.venueComparison.firstElementChild as HTMLElement | null)?.dataset.compareVenue !== place.id) {
+      const restore = this.venueComparison.contains(document.activeElement);
+      const toggle = this.compareButton(place);
+      this.venueComparison.replaceChildren(toggle);
+      if (restore) toggle.focus({ preventScroll: true });
     }
     this.caption.textContent = dish ? place.name : [stop?.name, stop?.area_code].filter(Boolean).join(' · ');
     this.title.textContent = (dish?.name ?? place.name).replaceAll('—', '–');
@@ -257,13 +395,17 @@ export class PlaceDrawer {
   }
 
   private updateModels(data: ViewData) {
-    const { place, manifest, dish, compareId, inside, filters, fit, seating, table } = data;
-    const key = JSON.stringify([place.id, dish?.id, compareId, inside, filters.groupSize, fit, seating, table, manifest.error, manifest.offline]);
-    if (this.modelKey === key && this.modelManifest === manifest.data && this.modelPlace === place) return;
+    const { place, manifest, dish, comparison, inside, filters, fit, seating, table, highlightedDishId } = data;
+    const key = JSON.stringify([place.id, dish?.id, inside, filters.groupSize, fit, seating, table,
+      manifest.error, manifest.offline, highlightedDishId]);
+    if (this.modelKey === key && this.modelManifest === manifest.data && this.modelPlace === place
+        && this.modelComparison === comparison && this.modelCatalog === data.places) return;
     const previousFocus = this.modelDetails.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.control : undefined;
     this.modelKey = key;
     this.modelManifest = manifest.data;
     this.modelPlace = place;
+    this.modelComparison = comparison;
+    this.modelCatalog = data.places;
     const node = section(dish ? 'On the table' : '3D previews');
     if (manifest.offline) node.append(message('Showing bundled demo previews.'));
     if (manifest.error) node.append(message(manifest.error, true), button('Reload previews', this.actions.retryManifest));
@@ -288,18 +430,29 @@ export class PlaceDrawer {
         compare.dataset.control = 'compare';
         compare.append(option('', 'One dish'));
         for (const entry of menu) {
-          if (entry.dish.id !== dish.id && entry.dish_asset) compare.append(option(entry.dish.id, entry.dish.name));
+          if (entry.dish.id !== dish.id && isSplat(entry.dish_asset)) compare.append(option(entry.dish.id, entry.dish.name));
         }
-        compare.value = compareId;
+        const others = element('optgroup');
+        others.label = 'Other Boston restaurants';
+        for (const venue of data.places) {
+          if (venue.id === place.id) continue;
+          for (const entry of venue.dishes.filter(hasDishPreview)) {
+            const choice = option(entry.id, `${venue.name} — ${entry.name}`);
+            choice.dataset.placeId = venue.id;
+            others.append(choice);
+          }
+        }
+        if (others.children.length) compare.append(others);
+        compare.value = comparison?.dish.id ?? '';
         compare.disabled = compare.options.length < 2;
-        compare.addEventListener('change', () => this.actions.openDish(dish, compare.value));
+        compare.addEventListener('change', () => this.actions.openDish(dish, compare.value, compare.selectedOptions[0]?.dataset.placeId));
         node.append(field('Compare side-by-side', compare));
-        if (compare.disabled) node.append(message('This venue has one published dish preview.'));
-        const compared = menu.find((entry) => entry.dish.id === compareId);
-        if (compared?.dish_asset) {
-          node.append(element('p', '', compared.dish.name));
-          badgeAsset(compared.dish_asset, node);
-          if (active?.scale_status !== 'measured' || compared.dish_asset.scale_status !== 'measured') {
+        if (compare.disabled) node.append(message('No other published 3D dish previews are available.'));
+        if (comparison) {
+          node.append(element('p', '', `${comparison.dish.name} · ${comparison.place.name}`));
+          badgeAsset(comparison.asset, node);
+          if (comparison.offline) node.append(message('The comparison uses a bundled preview.'));
+          if (active?.scale_status !== 'measured' || comparison.asset.scale_status !== 'measured') {
             node.append(message('Relative size is approximate. One or both dishes use an unverified scale.'));
           }
         }
@@ -357,8 +510,12 @@ export class PlaceDrawer {
       for (const entry of menu) {
         if (entry.dish.id === dish?.id) continue;
         const row = element('div', 'menu-row');
+        row.dataset.dishId = entry.dish.id;
+        if (highlightedDishId && entry.dish.id === highlightedDishId) row.dataset.highlighted = 'true';
         const label = element('div');
-        label.append(element('strong', '', entry.dish.name), element('p', 'price', money(entry.dish.price)));
+        const name = element('strong', '', entry.dish.name);
+        if (hasDishPreview(entry.dish) || isSplat(entry.dish_asset)) name.append(previewBadge());
+        label.append(name, element('p', 'price', money(entry.dish.price)));
         row.append(label);
         if (entry.dish_asset) row.append(button('View dish on table', () => this.actions.openDish(entry.dish)));
         else row.append(element('span', 'muted', 'No 3D preview'));
@@ -374,7 +531,9 @@ export class PlaceDrawer {
     if (!place.reviews.length) node.append(message('No approved notes yet. Share a detail from your visit.'));
     for (const review of place.reviews) {
       const item = element('article', 'visit-note');
-      item.append(element('strong', '', review.author), element('p', '', review.text));
+      item.append(element('strong', '', review.author));
+      if (review.sample) item.append(element('span', 'briefing-sample', 'Sample diner note'));
+      item.append(element('p', '', review.text));
       node.append(item);
     }
     const form = element('form', 'form-stack');
@@ -406,6 +565,17 @@ export class PlaceDrawer {
     });
     node.append(form);
     return node;
+  }
+
+  focusMenu(dishId?: string) {
+    if (dishId) {
+      const match = this.modelDetails.querySelector<HTMLElement>(`.menu-row[data-dish-id="${CSS.escape(dishId)}"]`);
+      if (match) {
+        match.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        return;
+      }
+    }
+    this.modelDetails.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
 
   hide() { this.root.hidden = true; }

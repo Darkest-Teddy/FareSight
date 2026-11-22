@@ -1,4 +1,6 @@
 import * as pc from 'playcanvas';
+import { describe3DCount, type StopPreviewCounts } from '../data/preview3D';
+import { previewBadge } from '../ui/dom';
 import type { XRStopData } from './bridgeTypes';
 
 interface Label {
@@ -6,6 +8,7 @@ interface Label {
   node: HTMLButtonElement;
   stem: HTMLSpanElement;
   count: HTMLSpanElement;
+  preview: HTMLSpanElement;
   width: number;
   height: number;
   slot: number;
@@ -28,6 +31,7 @@ export class MapLabels {
   private screen = new pc.Vec3();
   private hovered?: string;
   private selected?: string;
+  private highlighted = new Set<string>();
   private opacity = -1;
   // Fonts and breakpoints change label sizes after first paint; re-measure whenever they do.
   private sizes = new ResizeObserver((entries) => {
@@ -58,11 +62,13 @@ export class MapLabels {
       dot.className = 'map-label-dot';
       const name = document.createElement('strong');
       name.textContent = stop.name;
+      const preview = previewBadge();
+      preview.hidden = true;
       const count = document.createElement('span');
       count.className = 'map-label-count';
       const stem = document.createElement('span');
       stem.className = 'map-label-stem';
-      node.append(dot, name, count, stem);
+      node.append(dot, name, preview, count, stem);
       node.addEventListener('click', () => this.select(stop.stop_id));
       node.addEventListener('pointerenter', () => this.hover(stop.stop_id));
       node.addEventListener('pointerleave', () => this.hover(undefined));
@@ -70,18 +76,22 @@ export class MapLabels {
       node.addEventListener('blur', () => this.hover(undefined));
       this.root.append(node);
       this.sizes.observe(node);
-      return { stop, node, stem, count, width: 0, height: 0, slot: 0, shown: false };
+      return { stop, node, stem, count, preview, width: 0, height: 0, slot: 0, shown: false };
     });
     this.mark();
   }
 
-  setCounts(counts: Map<string, number>): void {
+  setCounts(counts: ReadonlyMap<string, StopPreviewCounts>): void {
     for (const label of this.labels) {
-      const count = counts.get(label.stop.stop_id) ?? 0;
+      const previews = counts.get(label.stop.stop_id);
+      const count = previews?.matching ?? 0;
       const text = `${count} ${count === 1 ? 'spot' : 'spots'}`;
-      if (label.count.textContent === text) continue;
+      const hasPreview = Boolean(previews?.published3D);
+      const name = `${label.stop.name}, ${count} matching ${count === 1 ? 'place' : 'places'}${describe3DCount(previews)}. Open station.`;
+      if (label.count.textContent === text && label.preview.hidden === !hasPreview && label.node.ariaLabel === name) continue;
       label.count.textContent = text;
-      label.node.setAttribute('aria-label', `${label.stop.name}, ${count} matching ${count === 1 ? 'place' : 'places'}. Open station.`);
+      label.preview.hidden = !hasPreview;
+      label.node.ariaLabel = name;
       label.node.dataset.empty = String(count === 0);
       label.width = 0;
     }
@@ -99,10 +109,16 @@ export class MapLabels {
     this.mark();
   }
 
+  setHighlighted(ids: ReadonlySet<string>): void {
+    this.highlighted = new Set(ids);
+    this.mark();
+  }
+
   private mark(): void {
     for (const { stop, node } of this.labels) {
       node.dataset.hover = String(stop.stop_id === this.hovered);
       node.dataset.selected = String(stop.stop_id === this.selected);
+      node.dataset.highlighted = String(this.highlighted.has(stop.stop_id));
     }
   }
 

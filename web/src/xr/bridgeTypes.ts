@@ -1,3 +1,6 @@
+import type { VoiceState } from '../voice/RealtimeVoice';
+import type { BriefingCard } from '../data/reviewBriefing';
+
 export type SceneMode = 'map' | 'station' | 'venue' | 'dish';
 
 export interface XRFilterSummary {
@@ -69,8 +72,11 @@ export interface XRPlaceData {
   lon?: number;
   pin_index?: number;
   typical_price: number;
+  hours?: Record<string, [string, string]>;
+  stated_capacity?: number;
   vibe: string;
   photos: string[];
+  room_asset_id?: string | null;
   dishes: XRDishData[];
   rooms: XRRoomData[];
 }
@@ -100,7 +106,10 @@ export interface XRSceneCallbacks {
   onHoverStop: (stopId: string | undefined) => void;
   onSelectPlace: (placeId: string) => void;
   onSelectDish: (dishId: string) => void;
+  onCompareDish: (dishId: string, placeId: string) => void;
   onNavigateScene: (scene: SceneMode) => void;
+  onToggleVoice: () => void;
+  onDismissReviewCard: (cardId: string) => void;
   onXrStateChange: (state: { vrSupported: boolean; arSupported: boolean; activeMode: 'none' | 'vr' | 'ar' }) => void;
   onStatsUpdate: (stats: { fps: number; loadedSplats: number; activeAssetLabel: string }) => void;
   onDebugLog: (message: string, level?: 'info' | 'warn' | 'error') => void;
@@ -114,16 +123,26 @@ export interface FareSightSceneEngine {
   setPlaces(places: XRPlaceData[], filteredIds: Set<string>): void;
   setStops(stops: XRStopData[]): void;
   setFilters(filters: XRFilterSummary): void;
+  setVoiceState(state: VoiceState): void;
+  setReviewCards(cards: readonly BriefingCard[]): void;
   setLiveVehicles(vehicles: XRVehicleData[]): void;
   setStationTelemetry(stopId: string, nextArrivalMin: number | null, matchingCount: number): void;
   focusStop(stopId: string): Promise<void>;
   /** Highlight a stop on the map from outside the 3D view (for example the stop list). */
   setHoveredStop(stopId: string | undefined): void;
+  /** Highlight and optionally pulse one or more stops on the 3D Boston map. */
+  setHighlightedStops(stopIds: string[], pulse?: boolean): void;
+  /** Highlight one or more venue pins inside the active station diorama. */
+  setHighlightedPlaces(placeIds: string[]): void;
+  /** Spotlight a dish row on the 3D physical menu book. */
+  setHighlightedDish(dishId: string | undefined): void;
   openVenue(place: XRPlaceData, manifest: XRManifestData | null): Promise<void>;
-  openDish(place: XRPlaceData, dish: XRDishData, compareDish?: XRDishData | null, manifest?: XRManifestData | null): Promise<void>;
+  openDish(place: XRPlaceData, dish: XRDishData, compareDish?: XRDishData | null, manifest?: XRManifestData | null, comparePlaceName?: string): Promise<void>;
   setWillWeFit(enabled: boolean, groupSize: number, seating: 'seated' | 'standing'): void;
   setDishRotation(angleRad: number): void;
-  setPassthroughFallback(useVirtualTable: boolean): void;
+  setPassthroughFallback(useRoomBackdrop: boolean): void;
+  orbitCamera(yawDeltaRad: number, pitchDeltaRad: number, zoomFactor?: number): void;
+  focusMapStopCamera(stopId: string): void;
   enterVR(): Promise<void>;
   enterAR(): Promise<void>;
   exitXR(): void;

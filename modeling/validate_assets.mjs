@@ -29,6 +29,7 @@ const uiModels = [
   'table-menu-stand',
   'room-plaque-stand',
   'menu-book',
+  'review-clipboard',
 ];
 const genModels = [
   'boston-map-sculpture',
@@ -238,20 +239,18 @@ assert.ok(
 );
 exactBounds(
   models['table-pedestal'].bounds,
-  [-0.45, -0.042, -0.45],
+  [-0.45, -0.74, -0.45],
   [0.45, 0, 0.45],
 );
-const table = models['table-pedestal'].meshes.get(
-  'Cyan photoluminescent inlay',
-).positions;
+const table = models['table-pedestal'].meshes.get('Scale inlay').positions;
 for (const r of [0.1, 0.15]) {
   let hits = 0;
   for (let i = 0; i < table.length; i += 3)
-    if (Math.abs(Math.hypot(table[i], table[i + 2]) - r) < 0.0007) {
-      approx(table[i + 1], 0);
+    if (Math.abs(Math.hypot(table[i], table[i + 2]) - r) < 0.0012) {
+      approx(table[i + 1], 0, 1e-4);
       hits++;
     }
-  assert.ok(hits >= 240);
+  assert.ok(hits >= 120);
 }
 const train = models['mbta-train-capsule'];
 approx(train.bounds.min[2], -0.016);

@@ -1,5 +1,7 @@
 import * as pc from 'playcanvas';
+import type { VoiceState } from '../voice/RealtimeVoice';
 import type { JarvisReveal } from './JarvisReveal';
+import type { ForearmPose } from './XRPresence';
 import { assetBase, brass, calloutAmber, child, damp, ivory, material, pickBounds, shape, target, wrapAngle,
   type HitTarget, type ModelLibrary, type PickBounds, type XYZ } from './sceneSupport';
 
@@ -9,13 +11,13 @@ interface PanelLine {
   size?: number;
   weight?: number;
   wrap?: boolean;
-  badge?: boolean;
 }
 
 const paper = '#f4ecdc';
 const ink = '#221b15';
 const bronze = '#80603a';
 const slate = '#1c222d';
+const previewCyan = '#4cd4ff';
 
 export class CanvasSurface {
   readonly canvas = document.createElement('canvas');
@@ -119,8 +121,8 @@ export function chamferedHousing(device: pc.GraphicsDevice, parent: pc.Entity, n
   return entity;
 }
 
-const plaqueFaces = { flag: 'Pin_Plate', station: 'Station_Plate', menu: 'Menu_Card', room: 'Plaque_Face' } as const;
-const faceHeights = { flag: 0.058, station: 0.064, menu: 0.070, room: 0 };
+const plaqueFaces = { flag: 'Pin_Plate', station: 'Station_Plate', room: 'Plaque_Face' } as const;
+const faceHeights = { flag: 0.058, station: 0.064, room: 0 };
 type PlaqueKind = keyof typeof plaqueFaces;
 type PlaqueMaterial = { surface: pc.StandardMaterial; color: pc.Color };
 
@@ -147,16 +149,12 @@ export class PhysicalPlaque {
     this.surface = new CanvasSurface(device, 1024, Math.max(128, Math.round(1024 * height / width)));
 
     const fallback = this.fallback = child(this.entity, 'Procedural plaque');
-    const frame = material(kind === 'menu' || kind === 'room' ? '#61432e' : brass);
+    const frame = material(kind === 'room' ? '#61432e' : brass);
     const trim = material(kind === 'flag' ? '#544537' : '#a58a5f');
     this.fallbackMaterials = [frame, trim];
     if (kind === 'flag') this.housingMaterials = this.fallbackMaterials.map((surface) => ({ surface, color: surface.diffuse.clone() }));
     const centerY = this.faceHeight;
     const body = child(fallback, 'Framed face', [0, centerY, 0]);
-    if (kind === 'menu') {
-      body.setLocalEulerAngles(-12, 0, 0);
-      chamferedHousing(device, fallback, 'Walnut foot', frame, [0, 0.008, -0.014], [width, 0.016, 0.073], 0.004);
-    }
     if (kind === 'flag' || kind === 'station') {
       const collarHeight = centerY - height / 2 + 0.003;
       shape(fallback, 'Swivel collar', 'cylinder', trim, [0, collarHeight / 2, 0], [0.016, collarHeight, 0.016]);
@@ -283,21 +281,17 @@ export class PhysicalPlaque {
             row = next;
           }
         }
-        if (line.badge) {
-          const badgeWidth = Math.min(availableWidth, ctx.measureText(row).width + 20);
-          ctx.strokeStyle = brass;
-          ctx.lineWidth = 2;
-          ctx.strokeRect(padding, y, badgeWidth, size * 1.12);
-          ctx.fillText(row, padding + 10, y + size * 0.06, badgeWidth - 20);
-        } else ctx.fillText(row, padding, y, availableWidth);
+        ctx.fillText(row, padding, y, availableWidth);
         y += size * 1.24;
       }
     });
   }
 
-  setCallout(name: string, detail: string, options: { category?: string; lineColor?: string; selected?: boolean } = {}): void {
-    const { category, lineColor, selected } = options;
-    this.surface.draw(JSON.stringify([name, detail, category, lineColor, selected]), (ctx, width, height) => {
+  setCallout(name: string, detail: string, options: {
+    category?: string; lineColor?: string; selected?: boolean; has3D?: boolean;
+  } = {}): void {
+    const { category, lineColor, selected, has3D } = options;
+    this.surface.draw(JSON.stringify([name, detail, category, lineColor, selected, has3D]), (ctx, width, height) => {
       const padding = width * 0.046;
       const contentWidth = width - padding * 2;
       ctx.fillStyle = slate;
@@ -311,9 +305,32 @@ export class PhysicalPlaque {
       }
 
       ctx.textBaseline = 'middle';
+      const banner = this.kind === 'flag';
+      const previewWidth = height * (banner ? 0.52 : 0.43);
+      const previewHeight = height * (banner ? 0.36 : 0.28);
+      const previewX = width - padding - previewWidth;
+      const titleY = height * 0.34;
+      if (has3D) {
+        if (banner) {
+          ctx.fillStyle = '#38d6ff';
+          ctx.fillRect(12, 10, width - 24, 7);
+        }
+        ctx.fillStyle = banner ? '#38d6ff' : '#103447';
+        ctx.fillRect(previewX, titleY - previewHeight / 2, previewWidth, previewHeight);
+        ctx.strokeStyle = previewCyan;
+        ctx.lineWidth = 3;
+        ctx.strokeRect(previewX, titleY - previewHeight / 2, previewWidth, previewHeight);
+        ctx.fillStyle = 'rgba(76, 212, 255, 0.65)';
+        ctx.fillRect(width - 14, 16, 4, height - 32);
+        ctx.fillStyle = banner ? '#0b1824' : previewCyan;
+        ctx.font = `800 ${height * (banner ? 0.25 : 0.20)}px system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('3D', previewX + previewWidth / 2, titleY, previewWidth - 8);
+        ctx.textAlign = 'left';
+      }
       ctx.fillStyle = ivory;
       ctx.font = `700 ${height * 0.31}px system-ui, sans-serif`;
-      ctx.fillText(name, padding, height * 0.34, contentWidth);
+      ctx.fillText(name, padding, titleY, contentWidth - (has3D ? previewWidth + 20 : 0));
 
       const baseline = height * 0.73;
       ctx.font = `600 ${height * 0.21}px system-ui, sans-serif`;
@@ -388,39 +405,50 @@ function keyMotion(body: pc.Entity, face: pc.Entity): KeyMotion[] {
 export class XRActionBar {
   readonly entity: pc.Entity;
   readonly targets: HitTarget[];
-  readonly gripBounds: PickBounds;
+  readonly bounds: PickBounds;
+  private cuff: pc.Entity;
+  private cuffMaterial = material('#373934');
   private keys: DeckKey[];
   private status: CanvasSurface;
   private fallback?: pc.Entity;
   private fallbackMaterials: pc.StandardMaterial[];
-  private showDebug = false;
+  private voiceState: VoiceState = 'idle';
   private ar = false;
-  private virtual = false;
+  private roomBackdrop = false;
   private placement = '';
+  private surfaceStatus = '';
   private mode = 'map';
-  private fps = 0;
   private position = new pc.Vec3();
   private destination = new pc.Vec3();
   private heading = new pc.Vec3();
   private keyPosition = new pc.Vec3();
-  private dockBlend = 0;
-  private held = false;
-  private pinned = false;
-  private palmTime = 0;
-  private palmConsumed = false;
-  private gripFlashUntil = 0;
-  private docked = false;
+  private consolePosition = new pc.Vec3();
+  private consoleViewer = new pc.Vec3();
+  private consoleForward = new pc.Vec3();
+  private consoleLeft = new pc.Vec3();
+  private consoleRotation = new pc.Quat();
+  private consoleView = new pc.Mat4();
+  private consolePose = new pc.Mat4();
+  private localBox = new pc.BoundingBox();
+  private sceneBox = new pc.BoundingBox();
+  private deckBox = new pc.BoundingBox();
+  private eyeLevel = new pc.Vec3();
+  private anchored = false;
   private facing = new pc.Quat();
   private facingTilt = new pc.Quat();
   private facingMatrix = new pc.Mat4();
 
   constructor(
     device: pc.GraphicsDevice, parent: pc.Entity, models: ModelLibrary, private reveal: JarvisReveal,
-    actions: { map: () => void; station: () => void; back: () => void; virtualTable: () => void; recenter: () => void },
+    actions: { map: () => void; station: () => void; back: () => void; toggleBackdrop: () => void; recenter: () => void; toggleVoice: () => void },
   ) {
     this.entity = child(parent, 'XR control deck');
     this.entity.enabled = false;
-    this.gripBounds = pickBounds(this.entity, [0.362, 0.172, 0.064], [0, 0, -0.010]);
+    this.entity.setLocalScale(0.52, 0.52, 0.52);
+    this.bounds = pickBounds(this.entity, [0.362, 0.172, 0.064], [0, 0, -0.010]);
+    this.cuff = shape(this.entity, 'Padded forearm cuff', 'sphere', this.cuffMaterial, [0, 0, -0.085], [0.13, 0.42, 0.108]);
+    this.cuff.setLocalEulerAngles(0, 0, 90);
+    this.cuff.enabled = false;
     const fallback = this.fallback = child(this.entity, 'Procedural control deck');
     const housing = material('#44413b');
     const bezel = material(brass);
@@ -433,7 +461,7 @@ export class XRActionBar {
 
     const buttons: [KeyName, () => void][] = [
       ['Map', actions.map], ['Station', actions.station], ['Back', actions.back], ['Recenter', actions.recenter],
-      ['Table', actions.virtualTable], ['Debug', () => { this.showDebug = !this.showDebug; }],
+      ['Table', actions.toggleBackdrop], ['Debug', actions.toggleVoice],
     ];
     this.keys = buttons.map(([name, action], i) => {
       const x = (i % 3 - 1) * 0.104;
@@ -452,6 +480,7 @@ export class XRActionBar {
     });
     this.targets = this.keys.map((key) => key.hit);
     this.setState(false, false, '', 'map');
+    this.drawKey(this.keys[5], false);
 
     void models.load(`${assetBase}vr-control-deck.glb`).then((resource) => {
       if (!resource || !this.fallback) return;
@@ -480,41 +509,31 @@ export class XRActionBar {
         if (mesh) key.hit.center = mesh.aabb.center.clone();
       }
       this.dropFallback();
-      this.setState(this.ar, this.virtual, this.placement, this.mode);
+      this.setState(this.ar, this.roomBackdrop, this.placement, this.mode, this.surfaceStatus);
       this.reveal.refresh(this.entity, 0.65);
     });
   }
 
-  setState(ar: boolean, virtual: boolean, placement: string, mode: string): void {
+  setState(ar: boolean, roomBackdrop: boolean, placement: string, mode: string, surfaceStatus = ''): void {
     this.ar = ar;
-    this.virtual = virtual;
+    this.roomBackdrop = roomBackdrop;
     this.placement = placement;
+    this.surfaceStatus = surfaceStatus;
     this.mode = mode;
     const table = this.keys[4];
     table.hit.enabled = ar;
     this.drawStatus();
   }
 
-  setFps(fps: number): void {
-    this.fps = fps;
-    if (this.showDebug) this.drawStatus();
-  }
-
-  setHeld(held: boolean): void {
-    this.held = held;
-    this.pinned = true;
-    this.palmTime = 0;
-    this.gripFlashUntil = performance.now() + 135;
+  setVoiceState(state: VoiceState): void {
+    if (this.voiceState === state) return;
+    this.voiceState = state;
+    this.drawStatus();
+    this.drawKey(this.keys[5], false);
   }
 
   recenter(): void {
-    this.held = false;
-    this.pinned = false;
-    this.palmConsumed = true;
-    this.palmTime = 0;
-    this.gripFlashUntil = 0;
-    this.dockBlend = 0;
-    this.docked = false;
+    this.anchored = false;
   }
 
   setVisible(visible: boolean): void {
@@ -523,85 +542,92 @@ export class XRActionBar {
   }
 
   private drawStatus(): void {
-    const text = (this.placement || this.mode).toUpperCase();
-    const fps = this.showDebug ? `${this.fps} FPS` : '';
-    const carried = this.held || performance.now() < this.gripFlashUntil;
-    this.status.draw(JSON.stringify([text, fps, carried]), (ctx, w, h) => {
+    const text = this.voiceState === 'idle' ? (this.placement || this.surfaceStatus || this.mode).toUpperCase()
+      : `GPT LIVE · ${this.voiceState.toUpperCase()}`;
+    this.status.draw(text, (ctx, w, h) => {
       ctx.fillStyle = '#4c6055';
       ctx.fillRect(0, 0, w, h);
       ctx.fillStyle = '#d6e6d5';
       ctx.font = '700 33px monospace';
       ctx.textBaseline = 'middle';
-      const reserved = fps ? ctx.measureText(fps).width + 38 : 0;
-      ctx.fillText(text, 20, h / 2, w - 40 - reserved);
-      if (fps) ctx.fillText(fps, w - reserved, h / 2);
-      if (carried) {
-        ctx.fillStyle = '#e0b66f';
-        ctx.fillRect(0, h - 4, w, 4);
-      }
+      ctx.fillText(text, 20, h / 2, w - 40);
     });
   }
 
-  update(camera: pc.Entity, dt: number, wrist: pc.Vec3 | null, snap: boolean, engaged: (target: HitTarget) => boolean): void {
-    if (!wrist) {
-      this.palmTime = 0;
-      this.palmConsumed = false;
-    } else if (this.held) {
-      this.palmConsumed = true;
-    } else if (this.pinned && !this.palmConsumed) {
-      this.palmTime += Math.min(dt, 0.05);
-      if (this.palmTime >= 0.22) this.pinned = false;
+  private faceViewer(from: pc.Vec3, viewer: pc.Vec3, pitch: number): pc.Quat {
+    const up = Math.hypot(from.x - viewer.x, from.z - viewer.z) > 0.01 ? pc.Vec3.UP : pc.Vec3.FORWARD;
+    return this.facing.setFromMat4(this.facingMatrix.setLookAt(from, viewer, up))
+      .mul(this.facingTilt.setFromEulerAngles(pitch, 180, 0));
+  }
+
+  private horizontalHeading(camera: pc.Entity): pc.Vec3 {
+    this.heading.copy(camera.forward);
+    this.heading.y = 0;
+    return this.heading.lengthSq() < 0.0001 ? this.heading.copy(pc.Vec3.FORWARD) : this.heading.normalize();
+  }
+
+  private anchorConsole(camera: pc.Entity): void {
+    const viewer = camera.getPosition();
+    this.consoleViewer.copy(viewer);
+    this.consoleForward.copy(this.horizontalHeading(camera));
+    this.consoleLeft.set(this.consoleForward.z, 0, -this.consoleForward.x);
+    this.consolePosition.copy(viewer).addScaled(this.consoleForward, 0.46).addScaled(this.consoleLeft, 0.26);
+    this.consolePosition.y -= 0.28;
+    this.eyeLevel.copy(viewer);
+    this.eyeLevel.y = this.consolePosition.y;
+    this.consoleRotation.copy(this.faceViewer(this.consolePosition, this.eyeLevel, -28));
+    this.consoleView.setLookAt(viewer, this.eyeLevel.copy(viewer).add(this.consoleForward), pc.Vec3.UP).invert();
+    this.anchored = true;
+  }
+
+  private clearConsole(clearance: PickBounds | undefined): void {
+    this.destination.copy(this.consolePosition);
+    if (!clearance?.entity.enabled) return;
+    const center = clearance.center ?? pc.Vec3.ZERO;
+    this.localBox.center.copy(center);
+    this.localBox.halfExtents.copy(clearance.halfExtents);
+    this.sceneBox.setFromTransformedAabb(this.localBox,
+      this.consolePose.mul2(this.consoleView, clearance.entity.getWorldTransform()));
+    this.localBox.center.copy(this.bounds.center ?? pc.Vec3.ZERO);
+    this.localBox.halfExtents.copy(this.bounds.halfExtents);
+    this.consolePose.setTRS(this.consolePosition, this.consoleRotation, this.entity.getLocalScale());
+    this.deckBox.setFromTransformedAabb(this.localBox, this.consolePose.mul2(this.consoleView, this.consolePose));
+    if (!this.deckBox.intersects(this.sceneBox)) return;
+
+    const towardViewer = this.sceneBox.getMax().z - this.deckBox.getMin().z + 0.025;
+    const fartherLeft = this.deckBox.getMax().x - this.sceneBox.getMin().x + 0.025;
+    if (towardViewer <= 0.31 && towardViewer < fartherLeft) this.destination.addScaled(this.consoleForward, -towardViewer);
+    else this.destination.addScaled(this.consoleLeft, fartherLeft);
+  }
+
+  private updatePose(camera: pc.Entity, dt: number, mount: ForearmPose | null, snap: boolean, clearance?: PickBounds): void {
+    this.cuff.enabled = !!mount && !this.ar;
+    if (mount) {
+      this.anchored = false;
+      this.entity.setPosition(mount.position);
+      this.entity.setRotation(mount.rotation);
+      return;
     }
-    const dock = this.palmConsumed ? null : wrist;
-    const docked = !!dock && !this.pinned;
-    if (docked && !this.docked && this.entity.enabled) this.reveal.show(this.entity, 0.65);
-    this.docked = docked;
-    if (!this.pinned) {
-      const blend = snap ? 1 : damp(dt, dock ? 13 : 7);
-      this.dockBlend = pc.math.lerp(this.dockBlend, dock ? 1 : 0, blend);
-      this.heading.copy(camera.forward);
-      this.heading.y = 0;
-      if (this.heading.lengthSq() < 0.0001) this.heading.copy(pc.Vec3.FORWARD);
-      this.destination.copy(this.heading.normalize()).mulScalar(0.72).add(camera.getPosition());
-      this.destination.y -= 0.36;
-      if (dock) {
-        this.destination.set(
-          dock.x - this.heading.z * 0.09 + this.heading.x * 0.06,
-          dock.y + 0.10,
-          dock.z + this.heading.x * 0.09 + this.heading.z * 0.06,
-        );
-      }
-      this.position.lerp(this.entity.getPosition(), this.destination, blend);
-      this.entity.setPosition(this.position);
-    }
-    if (!this.pinned || this.held) {
-      const from = this.entity.getPosition();
-      const to = camera.getPosition();
-      if (from.distanceSq(to) > 0.0025) {
-        const up = Math.hypot(from.x - to.x, from.z - to.z) > 0.01 ? pc.Vec3.UP : pc.Vec3.FORWARD;
-        this.facing.setFromMat4(this.facingMatrix.setLookAt(from, to, up))
-          .mul(this.facingTilt.setFromEulerAngles(pc.math.lerp(-9, -4, this.dockBlend), 180, 0));
-        if (this.held) this.facing.slerp(this.entity.getRotation(), this.facing, damp(dt, 12));
-        this.entity.setRotation(this.facing);
-      }
-    }
+
+    const walkedAway = camera.getPosition().distanceSq(this.destination) > 1.1 ** 2 &&
+      camera.getPosition().distanceSq(this.consoleViewer) > 0.01 ** 2;
+    const reanchor = snap || !this.anchored || walkedAway;
+    if (reanchor) this.anchorConsole(camera);
+    this.clearConsole(clearance);
+    const blend = reanchor ? 1 : damp(dt, 8);
+    this.entity.setPosition(this.position.lerp(this.entity.getPosition(), this.destination, blend));
+    this.entity.setRotation(this.facing.slerp(this.entity.getRotation(), this.consoleRotation, blend));
+  }
+
+  update(camera: pc.Entity, dt: number, mount: ForearmPose | null, snap: boolean,
+    engaged: (target: HitTarget) => boolean, clearance?: PickBounds): void {
+    this.updatePose(camera, dt, mount, snap, clearance);
 
     const now = performance.now();
     for (const key of this.keys) {
       const disabled = key.name === 'Table' && !this.ar;
       const pressed = !disabled && (engaged(key.hit) || now < key.pressedUntil);
-      const active = key.name.toLowerCase() === this.mode || (key.name === 'Debug' && this.showDebug);
-      const label = key.name === 'Table' ? (this.virtual && this.ar ? 'PASS' : 'VIRTUAL') : key.name.toUpperCase();
-      const finish = disabled ? '#a9a297' : pressed || active ? '#efb762' : '#efe4ce';
-      key.surface.draw(`${label}:${finish}`, (ctx, w, h) => {
-        ctx.fillStyle = finish;
-        ctx.fillRect(0, 0, w, h);
-        ctx.fillStyle = '#302a24';
-        ctx.font = '700 46px monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(label, w / 2, h / 2, w - 24);
-      });
+      this.drawKey(key, pressed);
       const destination = pressed ? 0.0045 : 0;
       const offset = key.travel - destination;
       const omega = 36;
@@ -617,6 +643,25 @@ export class XRActionBar {
     }
   }
 
+  private drawKey(key: DeckKey, pressed: boolean): void {
+    const disabled = key.name === 'Table' && !this.ar;
+    const voiceOn = key.name === 'Debug' && this.voiceState !== 'idle' && this.voiceState !== 'error';
+    const active = key.name.toLowerCase() === this.mode;
+    const label = key.name === 'Table' ? (this.roomBackdrop && this.ar ? 'PASS' : 'ROOM')
+      : key.name === 'Debug' ? 'VOICE' : key.name.toUpperCase();
+    const finish = disabled ? '#a9a297' : voiceOn ? (pressed ? '#83eaff' : previewCyan)
+      : pressed || active ? '#efb762' : '#efe4ce';
+    key.surface.draw(`${label}:${finish}`, (ctx, w, h) => {
+      ctx.fillStyle = finish;
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#302a24';
+      ctx.font = '700 46px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, w / 2, h / 2, w - 24);
+    });
+  }
+
   private dropFallback(): void {
     this.fallback?.destroy();
     this.fallback = undefined;
@@ -627,6 +672,7 @@ export class XRActionBar {
   destroy(): void {
     this.dropFallback();
     this.entity.destroy();
+    this.cuffMaterial.destroy();
     this.status.destroy();
     for (const key of this.keys) key.surface.destroy();
   }

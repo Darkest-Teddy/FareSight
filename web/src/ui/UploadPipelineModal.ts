@@ -112,6 +112,8 @@ export class UploadPipelineModal {
     void this.loadJobs();
   }
 
+  close() { if (this.surface.dialog.open) this.surface.dialog.close(); }
+
   private reconcilePlaces(placeId?: string) {
     const old = this.place.value;
     const choices = this.actions.places();

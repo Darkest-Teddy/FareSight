@@ -1,4 +1,4 @@
-import { STOPS } from '@faresight/shared';
+import { applyPlaceFacts, STOPS } from '@faresight/shared';
 import type { Asset, Category, CategoryGroup, Dish, Place, Vector3 } from '@faresight/shared';
 
 const demoDate = '2026-11-21';
@@ -66,11 +66,8 @@ export const places: Place[] = listings.flatMap((entries, stopIndex) => entries.
   };
 }));
 
+places.forEach(applyPlaceFacts);
 const byId = (id: string) => places.find((place) => place.id === id)!;
-const pavement = byId('bu-pavement-01');
-pavement.hours.sat = ['07:00', '14:00'];
-pavement.hours.sun = ['07:00', '14:00'];
-delete byId('harvard-art-01').hours.mon;
 
 export const demoAssets: Asset[] = [];
 

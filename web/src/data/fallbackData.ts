@@ -1,4 +1,4 @@
-import { STOPS } from '@faresight/shared';
+import { applyPlaceFacts, sampleReviews, STOPS } from '@faresight/shared';
 import type { Asset, Category, CategoryGroup, Dish, Place, RestaurantManifest, Vector3 } from '@faresight/shared';
 
 // Bundled snapshot of the catalog seed for first launch without the server.
@@ -63,15 +63,12 @@ const places: Place[] = listings.flatMap((entries, stopIndex) => entries.map((li
     pin_index, walk_from_stop_m, cravings, typical_price, price_checked_on: '',
     hours: Object.fromEntries(days.map((day): [string, [string, string]] => [day, [open, close]])),
     vibe, family_friendly, evening_venue, seed_status: 'planning_estimate',
-    photos: [], room_asset_id: null, dishes: [], rooms: [], seat_views: [], reviews: [],
+    photos: [], room_asset_id: null, dishes: [], rooms: [], seat_views: [], reviews: sampleReviews(id),
   };
 }));
 
+places.forEach(applyPlaceFacts);
 const byId = (id: string) => places.find((place) => place.id === id)!;
-const pavement = byId('bu-pavement-01');
-pavement.hours.sat = ['07:00', '14:00'];
-pavement.hours.sun = ['07:00', '14:00'];
-delete byId('harvard-art-01').hours.mon;
 
 const demoAssets: Asset[] = [];
 

@@ -13,6 +13,6 @@ segments(output);
 physicalUi(output);
 splats(output);
 console.log(
-  'Generated 14 glTF models, 6 Gaussian scenes and 3 metadata files in ' +
+  'Generated 15 glTF models, 6 Gaussian scenes and 3 metadata files in ' +
     output,
 );

@@ -10,9 +10,11 @@ import type { Config } from './config.ts';
 import { Store } from './db/database.ts';
 import { registerAdminAndCommunity } from './routes/admin.ts';
 import { registerCatalog } from './routes/catalog.ts';
+import { registerLive } from './routes/live.ts';
 import { registerMbta } from './routes/mbta.ts';
 import { registerPairing } from './routes/pairing.ts';
 import { registerPipeline } from './routes/pipeline.ts';
+import { registerRealtime } from './routes/realtime.ts';
 import { findDemoAsset } from './services/demoAssets.ts';
 import { MAX_IMAGE_BYTES } from './services/imagePrep.ts';
 import { startJobWorker } from './worker/jobWorker.ts';
@@ -53,6 +55,8 @@ export async function createApp(config: Config = getConfig(), options: { logger?
   registerAdminAndCommunity(app, store, config);
   registerPipeline(app, store, config);
   registerMbta(app, config, store);
+  registerLive(app, store, config);
+  registerRealtime(app, config);
   registerPairing(app);
   if (options.worker !== false) {
     app.addHook('onReady', async () => {

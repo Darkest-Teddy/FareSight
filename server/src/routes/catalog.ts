@@ -3,7 +3,7 @@ import type { Asset, Place, RestaurantManifest } from '@faresight/shared';
 import { STOPS } from '@faresight/shared';
 import type { FastifyInstance } from 'fastify';
 import type { Config } from '../config.ts';
-import type { Store } from '../db/database.ts';
+import type { PendingReview, Store } from '../db/database.ts';
 import { findDemoAsset } from '../services/demoAssets.ts';
 
 export function registerCatalog(app: FastifyInstance, store: Store, config: Config) {
@@ -30,9 +30,19 @@ export function registerCatalog(app: FastifyInstance, store: Store, config: Conf
     return { ...asset, gaussian_count: count };
   }
 
-  function hydrate(place: Place): Place {
+  function hydrate(place: Place, storedReviews = store.all('reviews')): Place {
+    const reviews = new Map(place.reviews.map((review) => [review.id, review]));
+    for (const review of storedReviews) {
+      if (review.place_id !== place.id) continue;
+      if (review.status !== 'approved') reviews.delete(review.id);
+      else reviews.set(review.id, {
+        id: review.id, author: review.author_label, text: review.text, created_at: review.created_at,
+        rating: reviews.get(review.id)?.rating ?? (review.sample ? 0 : 5), sample: review.sample,
+      });
+    }
     return {
       ...place,
+      reviews: [...reviews.values()],
       dishes: place.dishes.map((dish) => ({ ...dish, asset: getAsset(dish.asset_id) })),
       rooms: place.rooms.map((room) => ({ ...room, asset: getAsset(room.asset_id) })),
     };
@@ -40,8 +50,9 @@ export function registerCatalog(app: FastifyInstance, store: Store, config: Conf
 
   app.get('/api/stops', async () => STOPS);
   app.get<{ Querystring: { stop?: string; category?: string } }>('/api/restaurants', async ({ query }) => {
+    const reviews: PendingReview[] = store.all('reviews');
     return store.all('places').filter((place) => (!query.stop || query.stop === place.stop_id)
-      && (!query.category || query.category === place.category)).map(hydrate);
+      && (!query.category || query.category === place.category)).map((place) => hydrate(place, reviews));
   });
   app.get<{ Params: { id: string } }>('/api/restaurants/:id', async ({ params }, reply) => {
     const place = store.get('places', params.id);

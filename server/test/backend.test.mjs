@@ -525,3 +525,71 @@ test('MBTA rate-limit fallback keeps all seven subway routes and labels estimate
   assert.equal(trip.schedule_source, 'simulated');
   assert(Number.isFinite(Date.parse(trip.last_train_time)));
 });
+
+test('gpt-live-1.1 session broker validates config, forwards full toolset, and retries without standby if rejected', async (t) => {
+  const unconfigured = await setup(t, { openaiKey: undefined });
+  await unconfigured.start();
+  const statusOff = await unconfigured.request('/api/live/status');
+  assert.equal(statusOff.configured, false);
+  assert.equal(statusOff.model, 'gpt-live-1.1');
+  assert.equal(statusOff.backend_model, 'gpt-6-luna');
+  await unconfigured.request('/api/live/sessions', { body: { sdp: 'v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\n' }, status: 503 });
+
+  const server = await setup(t, {
+    openaiKey: 'test-openai-live',
+    openaiBaseUrl: 'https://openai.example/v1',
+    openaiLiveModel: 'gpt-live-1.1',
+    openaiLiveBackendModel: 'gpt-6-luna',
+    openaiLiveVoice: 'marin',
+  });
+  await server.start();
+  const statusOn = await server.request('/api/live/status');
+  assert.equal(statusOn.configured, true);
+
+  await server.request('/api/live/sessions', { body: { sdp: 'not-sdp' }, status: 400 });
+
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(input);
+    if (url.hostname !== 'openai.example') return originalFetch(input, init);
+    assert.equal(url.pathname, '/v1/live/sessions');
+    assert.equal(init.method, 'POST');
+    assert.equal(init.headers.Authorization, 'Bearer test-openai-live');
+    const body = JSON.parse(init.body);
+    requests.push(body);
+    if (requests.length === 1) {
+      assert.equal(body.session.model, 'gpt-live-1.1');
+      assert.equal(body.session.audio.output.voice, 'quartz');
+      assert.equal(body.session.idle_timeout_s, 30);
+      assert.equal(body.session.delegation.type, 'responses');
+      assert.equal(body.session.delegation.responses.model, 'gpt-6-luna');
+      const toolNames = body.session.delegation.responses.tools.map((tool) => tool.name);
+      for (const expected of ['open_place', 'show_menu', 'open_dish', 'highlight_map_stops', 'highlight_station_places', 'set_filters', 'control_camera', 'control_ui']) {
+        assert(toolNames.includes(expected), `Missing tool ${expected}`);
+      }
+      return Response.json({ error: { message: 'Unknown parameter: idle_timeout_s' } }, { status: 400 });
+    }
+    assert.equal(body.session.idle_timeout_s, undefined);
+    assert.equal(body.transport.type, 'webrtc');
+    return Response.json({
+      session: { id: 'live_test_123' },
+      transport: { type: 'webrtc', sdp: 'v=0\r\no=- 2 2 IN IP4 127.0.0.1\r\ns=answer\r\n' },
+    }, { status: 201 });
+  });
+
+  const created = await server.request('/api/live/sessions', {
+    body: {
+      sdp: 'v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=offer\r\n',
+      voice: 'quartz',
+      context: 'Scene: map',
+    },
+    status: 201,
+  });
+  assert.equal(requests.length, 2);
+  assert.equal(created.session_id, 'live_test_123');
+  assert.equal(created.model, 'gpt-live-1.1');
+  assert.equal(created.backend_model, 'gpt-6-luna');
+  assert.equal(created.voice, 'quartz');
+  assert(created.sdp.includes('s=answer'));
+});

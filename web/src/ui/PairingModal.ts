@@ -46,6 +46,8 @@ export class PairingModal {
 
   open() { this.surface.open(); }
 
+  close() { if (this.surface.dialog.open) this.surface.dialog.close(); }
+
   send(message: PairingMessage) {
     if (this.socket?.readyState === WebSocket.OPEN && this.peers > 1) {
       this.socket.send(JSON.stringify(message));

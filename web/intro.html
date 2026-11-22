@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#07080b" />
-    <meta name="description" content="FareSight turns Boston's T into a model you can walk around in VR. Scroll from the whole map down to one ramen counter at BU Central." />
+    <meta name="description" content="Explore Boston restaurants and hangouts by MBTA stop in VR or your browser. Compare total prices with train fare included, then step inside in 3D." />
     <link rel="icon" href="data:," />
-    <title>FareSight · See the place before you ride</title>
+    <title>FareSight · Know the spot before you get on the T</title>
     <link rel="stylesheet" href="/src/intro/intro.css" />
   </head>
   <body data-state="loading">
@@ -22,22 +22,22 @@
         <a href="#place" data-to="0.915" data-chapter="place">Tsuru Ramen</a>
         <a href="#inside" data-to="1" data-chapter="inside">Inside</a>
       </nav>
-      <a class="pill" href="/">Open the app</a>
+      <a class="pill" href="/">Open FareSight</a>
       <span class="meter" aria-hidden="true"></span>
     </header>
 
     <main id="top">
       <section class="beat beat-hero" id="map" data-in="-1,-1" data-out="0.065,0.105">
         <div class="copy">
-          <h1>See the place before you ride.</h1>
-          <p class="lead">FareSight turns Boston's T into a model you can walk around in VR. Pick a stop, look inside, then go.</p>
+          <h1>Know the spot before you get on the T.</h1>
+          <p class="lead">Browse Boston food and hangouts by subway stop in VR or your browser. See real total prices with MBTA fare included, then look inside in 3D.</p>
         </div>
       </section>
 
       <section class="beat beat-stops" data-in="0.15,0.20" data-out="0.305,0.345">
         <div class="copy">
-          <h2>Five stops on one table.</h2>
-          <p class="lead">The Red, Orange and Green lines as a sculpture you can stand over. Each marker opens a neighborhood.</p>
+          <h2>Start from the subway map.</h2>
+          <p class="lead">Watch live trains move across Boston and pick from five neighborhoods: BU Central, Packard's Corner, Kenmore, Harvard, and Chinatown.</p>
         </div>
       </section>
 
@@ -45,29 +45,29 @@
         <div class="copy">
           <p class="line">Green Line B</p>
           <h2>BU Central</h2>
-          <p class="lead">A 560 meter cutout of Commonwealth Avenue, modeled from real OpenStreetMap building footprints.</p>
-          <p class="note">Six places sit within a short walk of the platform. Each flag marks one of them.</p>
+          <p class="lead">Every rooftop pin shows what going there actually costs, including the $2.40 T fare. Cyan 3D markers highlight places you can step inside.</p>
+          <p class="note">Next-train arrival times and your budget filter update directly on the base display.</p>
         </div>
       </section>
 
-      <section class="beat beat-place" id="place" data-in="0.845,0.885" data-out="0.94,0.962">
+      <section class="beat beat-place" id="place" data-in="0.845,0.885" data-out="0.915,0.936">
         <div class="copy">
           <h2>Tsuru Tonkotsu Ramen</h2>
-          <p class="lead">A small ramen counter 85 meters from the platform. Bowls from $14.50, open until 10 pm.</p>
+          <p class="lead">85 meters from the BU Central platform. Bowls start at $14.50, open 11:30 am to 10 pm, with a 3D room preview and actual-size 3D dishes.</p>
         </div>
       </section>
 
-      <section class="beat beat-inside" id="inside" data-in="0.968,0.996" data-out="2,2">
+      <section class="beat beat-inside" id="inside" data-in="0.931,0.961" data-out="2,2">
         <div class="copy">
-          <h2>Next, you walk in.</h2>
-          <p class="lead">We are capturing this room as a Gaussian splat, so you can stand inside it before you leave home.</p>
-          <p class="soon">Interior coming soon</p>
-          <a class="pill solid" href="/">Open the app</a>
+          <h2>Step inside before you go.</h2>
+          <p class="lead">Check the seating, tap dishes on the physical menu, and preview real portion sizes right on a table in VR, AR, or desktop.</p>
+          <p class="room-tag">Works on Meta Quest 3, phone, and desktop</p>
+          <a class="pill solid" href="/">Launch FareSight</a>
         </div>
       </section>
     </main>
 
-    <p class="status" role="status">Building the model</p>
+    <p class="status" role="status">Loading Boston map</p>
     <script type="module" src="/src/intro/main.ts"></script>
   </body>
 </html>

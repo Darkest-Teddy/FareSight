@@ -12,6 +12,12 @@ export function button(label: string, action: () => void, className = '') {
   return node;
 }
 
+export function previewBadge() {
+  const badge = element('span', 'preview-badge', '3D');
+  badge.setAttribute('aria-hidden', 'true');
+  return badge;
+}
+
 export function option(value: string, label: string) {
   const node = element('option', '', label);
   node.value = value;

@@ -19,6 +19,8 @@
   - `POST /api/assets/:id/publish`, `GET /api/restaurants`, `GET /api/restaurants/:id/manifest`
   - `POST /api/restaurants/:id/reviews`, `GET/POST /api/admin/moderation`, `POST/GET /api/debug/logs`
   - `GET /api/mbta/{vehicles,predictions,alerts,schedules,trip}` — Cached MBTA V3 proxy (10s / 60s / 1h TTL) with realistic Boston simulation fallback.
+  - `GET /api/live/status` & `POST /api/live/sessions` — OpenAI **`gpt-live-1.1`** full-duplex WebRTC voice broker with `responses` delegation (`gpt-6-luna`) and 16 tools giving the assistant control over map highlights, station dioramas, 3D venue rooms, physical menu books, 3D dish tabletop previews/comparisons, filters, live MBTA queries, camera controls, modals, audio, and Quest pairing.
+  - `POST /api/realtime/session` — Mints a short-lived `gpt-realtime` credential for the app’s GPT Live button, XR Voice key, and Quest A/X shortcut. The server loads `OPENAI_API_KEY` from the environment, and the browser connects over WebRTC using the `ash` voice.
   - `POST /api/pairing/create` & `WS /ws/pair/:code` — 4-digit Phone ↔ Quest headset handoff.
 - **`web/`** (`@faresight/web`) — PlayCanvas v2 + WebXR (`immersive-vr` & `immersive-ar` passthrough) 4-scene app with an animated map-to-station dive, 3D canvas panels, Web Audio synthesizer, responsive 2D Phone Companion, Upload & Pipeline Studio, Pairing, Moderation, and offline cache-first Service Worker (`/sw.js`).
 
@@ -26,7 +28,7 @@
 
 ```bash
 pnpm install
-cp .env.example .env      # Optional: add GEMINI_API_KEY, WLT_API_KEY, REPLICATE_API_TOKEN, MBTA_API_KEY
+cp .env.example .env      # Optional: add OPENAI_API_KEY, GEMINI_API_KEY, WLT_API_KEY, REPLICATE_API_TOKEN, MBTA_API_KEY
 pnpm assets:sync          # Sync modeling/output/* into web/public/assets-demo/
 pnpm dev                  # Starts Fastify server (:3001) + Vite web app (:5173)
 ```

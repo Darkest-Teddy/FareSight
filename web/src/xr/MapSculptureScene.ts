@@ -1,7 +1,8 @@
 import * as pc from 'playcanvas';
+import { countPreviewsByStop } from '../data/preview3D';
 import type { XRPlaceData, XRStopData, XRVehicleData } from './bridgeTypes';
 import { PhysicalPlaque } from './CanvasPanel3D';
-import type { JarvisReveal } from './JarvisReveal';
+import { jarvisPoints, type JarvisReveal } from './JarvisReveal';
 import { MapLabels } from './MapLabels';
 import { assetBase, brass, child, clamp, damp, fetchAssetJson, material, project, shape, target,
   type DebugLog, type HitTarget, type ModelLibrary, type XYZ } from './sceneSupport';
@@ -125,6 +126,9 @@ export class MapSculptureScene {
   private trainLookAt = new pc.Vec3();
   private selected?: string;
   private hovered?: string;
+  private highlighted = new Set<string>();
+  private readonly whiteTint = new pc.Color(1, 1, 1);
+  private readonly highlightTint = new pc.Color().fromString('#4fe3ff');
   private visible = false;
   private detailsVisible = false;
   private immersive = false;
@@ -187,7 +191,7 @@ export class MapSculptureScene {
       }
       this.sculpture.addChild(model);
       this.fallback.enabled = false;
-      this.reveal.refresh(this.sculpture, mapRevealTime, 3000);
+      this.reveal.refresh(this.sculpture, mapRevealTime, jarvisPoints.hero);
     });
     void models.load(`${assetBase}mbta-train-capsule.glb`).then((resource) => {
       if (!resource || !this.alive) return;
@@ -212,7 +216,7 @@ export class MapSculptureScene {
       const callout = child(root, 'Immersive callout');
       callout.enabled = false;
       const panel = new PhysicalPlaque(this.device, callout, stop.name, 0.23, 0.078, 'station', this.medallionModel, this.reveal);
-      if (this.immersive && this.detailsVisible) this.reveal.show(callout, 0.62, 420);
+      if (this.immersive && this.detailsVisible) this.reveal.show(callout, 0.62, jarvisPoints.detail);
       const stem = shape(callout, 'Callout stem', 'cylinder', this.beaconStem, [0, 0, 0], [0.004, 1, 0.004]);
       const select = () => this.selectStop(stop.stop_id);
       const hit = target(root, [0.07, 0.05, 0.07], select, stop.stop_id);
@@ -223,6 +227,7 @@ export class MapSculptureScene {
     });
     this.labels.setStops(stops);
     this.labels.setSelected(this.selected);
+    this.labels.setHighlighted(this.highlighted);
     this.positionBeacons();
     this.updateLabels();
   }
@@ -252,6 +257,15 @@ export class MapSculptureScene {
     this.labels.setHover(id);
   }
 
+  /** Highlight one or more stops from voice/AI control and optionally pulse their rings. */
+  setHighlighted(stopIds: string[], pulse = true): void {
+    this.highlighted = new Set(stopIds);
+    this.labels.setHighlighted(this.highlighted);
+    if (pulse) {
+      for (const id of this.highlighted) this.pulse(id);
+    }
+  }
+
   /** Fire the expanding ring that acknowledges a click before the camera moves. */
   pulse(id: string): void {
     const beacon = this.beacons.find((entry) => entry.stop.stop_id === id);
@@ -263,11 +277,16 @@ export class MapSculptureScene {
     return this.beacons.find((beacon) => beacon.stop.stop_id === id)?.root.getLocalPosition();
   }
 
+  /** Station marker top in world space. */
+  stopWorldPosition(id: string): pc.Vec3 | undefined {
+    return this.beacons.find((beacon) => beacon.stop.stop_id === id)?.root.getPosition();
+  }
+
   setVisible(visible: boolean): void {
     if (this.visible === visible) return;
     this.visible = visible;
-    if (visible) this.reveal.show(this.sculpture, mapRevealTime, 3000);
-    else this.reveal.hide(this.sculpture, 0.73, 3000);
+    if (visible) this.reveal.show(this.sculpture, mapRevealTime, jarvisPoints.hero);
+    else this.reveal.hide(this.sculpture, 0.73, jarvisPoints.hero);
     this.setDetails(visible);
   }
 
@@ -282,16 +301,20 @@ export class MapSculptureScene {
     this.detailsVisible = visible;
     this.updateCallouts();
     for (const { root } of this.trains.values()) {
-      if (visible) this.reveal.show(root, 0.38, 220);
-      else this.reveal.hide(root, 0.34, 220);
+      if (visible) this.reveal.show(root, 0.38, jarvisPoints.detail);
+      else this.reveal.hide(root, 0.34, jarvisPoints.detail);
     }
   }
 
   private updateCallouts(): void {
     for (const { callout } of this.beacons) {
-      if (this.immersive && this.detailsVisible) this.reveal.show(callout, 0.62, 420);
-      else this.reveal.hide(callout, 0.43, 420);
+      if (this.immersive && this.detailsVisible) this.reveal.show(callout, 0.62, jarvisPoints.detail);
+      else this.reveal.hide(callout, 0.43, jarvisPoints.detail);
     }
+  }
+
+  seekCallouts(progress: number): void {
+    for (const { callout } of this.beacons) this.reveal.seek(callout, progress, jarvisPoints.detail);
   }
 
   /** Headsets get 3D callouts; flat screens get the HTML labels. */
@@ -332,14 +355,15 @@ export class MapSculptureScene {
   }
 
   private updateLabels(): void {
-    const counts = new Map<string, number>();
-    for (const place of this.places) {
-      if (this.filtered.has(place.id)) counts.set(place.stop_id, (counts.get(place.stop_id) ?? 0) + 1);
-    }
+    const counts = countPreviewsByStop(this.places, this.filtered);
     for (const { stop, panel } of this.beacons) {
-      const count = counts.get(stop.stop_id) ?? 0;
-      panel.setCallout(stop.name, `${count} matching ${count === 1 ? 'spot' : 'spots'}`,
-        { lineColor: stop.primary_color, selected: this.selected === stop.stop_id });
+      const previews = counts.get(stop.stop_id);
+      const count = previews?.matching ?? 0;
+      const matching3D = previews?.matching3D ?? 0;
+      const published3D = previews?.published3D ?? 0;
+      const detail = matching3D ? ` · ${matching3D} in 3D` : published3D ? ' · 3D outside filters' : '';
+      panel.setCallout(stop.name, `${count} matching ${count === 1 ? 'spot' : 'spots'}${detail}`,
+        { lineColor: stop.primary_color, selected: this.selected === stop.stop_id, has3D: published3D > 0 });
     }
     this.labels.setCounts(counts);
   }
@@ -388,7 +412,7 @@ export class MapSculptureScene {
       if (seen.has(id)) continue;
       this.trains.delete(id);
       train.root.once('destroy', () => train.surface.destroy());
-      this.reveal.hide(train.root, 0.31, 220, () => train.root.destroy());
+      this.reveal.hide(train.root, 0.31, jarvisPoints.detail, () => train.root.destroy());
     }
   }
 
@@ -400,7 +424,7 @@ export class MapSculptureScene {
     }
     model.setLocalScale(1.25, 1.25, 1.25);
     train.root.addChild(model);
-    if (this.detailsVisible) this.reveal.show(train.root, 0.38, 220);
+    if (this.detailsVisible) this.reveal.show(train.root, 0.38, jarvisPoints.detail);
     else this.reveal.finish(train.root, false);
   }
 
@@ -433,10 +457,18 @@ export class MapSculptureScene {
     if (!visible) return;
 
     const focus = this.hovered ?? undefined;
-    const focusColor = this.beacons.find((beacon) => beacon.stop.stop_id === focus)?.stop.primary_color.toLowerCase();
+    const focusColors = new Set<string>();
+    if (focus) {
+      const color = this.beacons.find((beacon) => beacon.stop.stop_id === focus)?.stop.primary_color.toLowerCase();
+      if (color) focusColors.add(color);
+    } else if (this.highlighted.size > 0) {
+      for (const beacon of this.beacons) {
+        if (this.highlighted.has(beacon.stop.stop_id)) focusColors.add(beacon.stop.primary_color.toLowerCase());
+      }
+    }
     const blend = damp(dt, 9);
     for (const [color, line] of this.lineSurfaces) {
-      const goal = !focusColor || focusColor === color ? 1 : 0.32;
+      const goal = focusColors.size === 0 || focusColors.has(color) ? 1 : 0.32;
       if (Math.abs(line.level - goal) < 0.002) continue;
       line.level = pc.math.lerp(line.level, goal, blend);
       line.material.diffuse.copy(line.diffuse).mulScalar(line.level);
@@ -447,12 +479,18 @@ export class MapSculptureScene {
     for (const beacon of this.beacons) {
       if (this.immersive) beacon.panel.faceYaw(camera, dt);
       const id = beacon.stop.stop_id;
-      const goal = id === this.hovered ? 1 : id === this.selected ? 0.75 : 0;
+      const isHighlighted = this.highlighted.has(id);
+      const goal = id === this.hovered || isHighlighted ? 1 : id === this.selected ? 0.75 : 0;
       beacon.glow = pc.math.lerp(beacon.glow, goal, blend);
       // Idle rings breathe gently so the five explorable stops read as clickable.
-      const breath = 0.5 + 0.5 * Math.sin(this.clock * 2.1 + beacon.root.getLocalPosition().x * 9);
-      const size = pc.math.lerp(0.046 + 0.01 * breath, 0.058, beacon.glow);
+      const breath = 0.5 + 0.5 * Math.sin(this.clock * (isHighlighted ? 4.2 : 2.1) + beacon.root.getLocalPosition().x * 9);
+      const size = isHighlighted
+        ? 0.064 + 0.016 * breath
+        : pc.math.lerp(0.046 + 0.01 * breath, 0.058, beacon.glow);
       beacon.ring.setLocalScale(size, 0.02, size);
+      const tint = isHighlighted ? this.highlightTint : this.whiteTint;
+      beacon.ringSurface.emissive.copy(tint);
+      beacon.ringSurface.diffuse.copy(tint);
       beacon.ringSurface.opacity = this.detailsVisible ? pc.math.lerp(0.28 + 0.2 * breath, 1, beacon.glow) : 0;
       beacon.ringSurface.update();
 
@@ -463,6 +501,8 @@ export class MapSculptureScene {
         const t = clamp(beacon.burstClock / burstTime, 0, 1);
         const reach = 0.05 + 0.16 * (1 - (1 - t) ** 3);
         beacon.burst.setLocalScale(reach, 0.02, reach);
+        beacon.burstSurface.emissive.copy(tint);
+        beacon.burstSurface.diffuse.copy(tint);
         beacon.burstSurface.opacity = this.detailsVisible ? (1 - t) ** 2 : 0;
         beacon.burstSurface.update();
       }

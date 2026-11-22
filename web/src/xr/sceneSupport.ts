@@ -34,7 +34,13 @@ export function wrapAngle(radians: number): number {
   return Math.atan2(Math.sin(radians), Math.cos(radians));
 }
 
+export function levelYaw(entity: pc.Entity): number {
+  const { forward, right } = entity;
+  return Math.hypot(forward.x, forward.z) > 0.05 ? Math.atan2(-forward.x, -forward.z) : Math.atan2(-right.z, right.x);
+}
+
 const turnSampleWindow = 60;
+export const handReleaseDelay = 35;
 
 export class TurnVelocity {
   private samples: { time: number; angle: number }[] = [];
@@ -52,17 +58,23 @@ export class TurnVelocity {
     }
     if (time === last.time) last.angle += delta;
     else samples.push({ time, angle: last.angle + delta });
-    while (samples.length > 2 && samples[1].time <= time - turnSampleWindow) samples.shift();
+    while (samples.length > 2 && samples[1].time <= time - turnSampleWindow - handReleaseDelay) samples.shift();
   }
 
-  release(time: number): number {
-    this.add(0, time);
-    const [first, next] = this.samples;
-    if (!next) return 0;
-    const last = this.samples[this.samples.length - 1];
-    const start = Math.max(first.time, time - turnSampleWindow);
-    const angle = pc.math.lerp(first.angle, next.angle, (start - first.time) / (next.time - first.time));
-    return clamp((last.angle - angle) * 1000 / Math.max(8, time - start), -6.5, 6.5);
+  release(time: number, ignoreRecent = 0): number {
+    if (!ignoreRecent) this.add(0, time);
+    const end = time - ignoreRecent;
+    const samples = this.samples;
+    const last = samples.findLast((sample) => sample.time <= end);
+    const first = samples[0];
+    if (!last || !first) return 0;
+    const start = Math.max(first.time, end - turnSampleWindow);
+    if (last.time <= start) return 0;
+    const afterStart = samples.findIndex((sample) => sample.time > start);
+    const previous = samples[afterStart - 1];
+    const next = samples[afterStart];
+    const angle = pc.math.lerp(previous.angle, next.angle, (start - previous.time) / (next.time - previous.time));
+    return clamp((last.angle - angle) * 1000 / Math.max(8, end - start), -6.5, 6.5);
   }
 }
 
@@ -73,8 +85,8 @@ export function coastTurntable(velocity: number, dt: number, resistance: number,
   return Math.abs(remaining) < 0.015 ? 0 : remaining;
 }
 
-export function child(parent: pc.Entity, name: string, position?: XYZ): pc.Entity {
-  const entity = new pc.Entity(name);
+export function child(parent: pc.Entity, name: string, position?: XYZ, app?: pc.AppBase): pc.Entity {
+  const entity = new pc.Entity(name, app);
   if (position) entity.setLocalPosition(...position);
   parent.addChild(entity);
   return entity;
@@ -95,9 +107,9 @@ export function material(hex: string, glow = 0, opacity = 1): pc.StandardMateria
 
 export function shape(
   parent: pc.Entity, name: string, type: 'box' | 'cylinder' | 'sphere' | 'torus' | 'plane',
-  surface: pc.Material, position: XYZ, scale: XYZ,
+  surface: pc.Material, position: XYZ, scale: XYZ, app?: pc.AppBase,
 ): pc.Entity {
-  const entity = child(parent, name, position);
+  const entity = child(parent, name, position, app);
   entity.addComponent('render', { type, material: surface });
   entity.setLocalScale(...scale);
   return entity;
