@@ -62,6 +62,7 @@ export class VenueView {
   private readonly status = el('div', 'venue-status');
   private readonly unsubscribe: () => void;
   private readonly dishName = el('input', 'text-input');
+  private readonly dishPrice = el('input', 'text-input');
   private readonly diameter = el('input', 'text-input');
   private kind: Kind;
   private tier: RoomModelTier = 'atlas-draft';
@@ -107,6 +108,15 @@ export class VenueView {
     this.dishName.enterKeyHint = 'done';
     this.dishName.setAttribute('aria-label', 'Name of the new dish');
     this.dishName.addEventListener('input', () => this.optionsChanged());
+    this.dishPrice.type = 'number';
+    this.dishPrice.inputMode = 'decimal';
+    this.dishPrice.min = '0.25';
+    this.dishPrice.max = '500';
+    this.dishPrice.step = '0.01';
+    this.dishPrice.placeholder = 'For example 12.95';
+    this.dishPrice.autocomplete = 'off';
+    this.dishPrice.setAttribute('aria-label', 'Menu price of the dish in dollars');
+    this.dishPrice.addEventListener('input', () => this.optionsChanged());
     this.diameter.type = 'number';
     this.diameter.inputMode = 'decimal';
     this.diameter.min = '5';
@@ -182,6 +192,7 @@ export class VenueView {
         } else {
           this.dishId = draft.dishId ?? this.dishId;
           this.dishName.value = draft.dishName ?? '';
+          this.dishPrice.value = draft.dishPrice ?? '';
           this.diameter.value = draft.diameter ?? '';
         }
       }
@@ -202,7 +213,8 @@ export class VenueView {
         file, name: file.name, lastModified: file.lastModified, uploadId,
       })),
       ...(kind === 'room' ? { tier: this.tier, capture: this.capture } : {
-        dishId: this.dishId, dishName: this.dishName.value, diameter: this.diameter.value,
+        dishId: this.dishId, dishName: this.dishName.value, dishPrice: this.dishPrice.value,
+        diameter: this.diameter.value,
       }),
       pending,
     };
@@ -362,16 +374,22 @@ export class VenueView {
       chip.append(radio('dish-choice', id, id === this.dishId, () => {
         this.dishId = id;
         nameField.hidden = id !== NEW_DISH;
+        // Start from the price the catalog already holds; the contributor still confirms or corrects it.
+        const known = this.place.dishes.find((dish) => dish.id === id)?.price;
+        if (known != null) this.dishPrice.value = known.toFixed(2);
         if (id === NEW_DISH) this.dishName.focus();
         haptic(6);
         this.optionsChanged();
       }), el('span', '', name));
       chips.append(chip);
     }
+    const price = el('label', 'field');
+    price.append(el('span', 'field-label', 'Menu price in dollars'), this.dishPrice,
+      el('span', 'field-hint', 'Required. Copy the price from the menu for this dish.'));
     const size = el('label', 'field');
     size.append(el('span', 'field-label', 'Plate width in cm'), this.diameter,
       el('span', 'field-hint', 'Optional. It lets riders see the dish at its true size.'));
-    this.options.append(head, chips, nameField, size);
+    this.options.append(head, chips, nameField, price, size);
   }
 
   /** What still stops this scan from being sent, in the words shown on the button. */
@@ -384,6 +402,8 @@ export class VenueView {
     }
     if (!count) return 'Add a photo of the dish';
     if (this.dishId === NEW_DISH && !this.dishName.value.trim()) return 'Name the dish';
+    if (!this.dishPrice.value.trim()) return 'Enter the menu price';
+    if (!this.dishPrice.checkValidity()) return 'Menu price must be $0.25 to $500';
     if (this.diameter.value && !this.diameter.checkValidity()) return 'Plate width must be 5 to 100 cm';
     return '';
   }
@@ -498,6 +518,7 @@ export class VenueView {
         kind, place_id: this.place.id, upload_ids: uploadIds.slice(0, 1),
         dish_id: this.dishId || undefined,
         dish_name: this.dishId ? undefined : this.dishName.value.trim(),
+        dish_price: Math.round(this.dishPrice.valueAsNumber * 100) / 100,
         plate_diameter_m: Number.isFinite(width) ? width / 100 : undefined,
       };
     const pending = { job, idempotencyKey: crypto.randomUUID() };

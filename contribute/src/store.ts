@@ -20,6 +20,7 @@ export interface ScanDraft {
   tier?: RoomModelTier;
   dishId?: string;
   dishName?: string;
+  dishPrice?: string;
   diameter?: string;
   pending?: PendingSubmission;
   capture?: CaptureUpload;

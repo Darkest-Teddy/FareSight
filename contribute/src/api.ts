@@ -63,6 +63,7 @@ export interface JobRequest {
   upload_ids: string[];
   dish_id?: string;
   dish_name?: string;
+  dish_price?: number;
   plate_diameter_m?: number;
   model_tier?: RoomModelTier;
 }

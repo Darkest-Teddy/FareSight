@@ -30,10 +30,16 @@ export function publishAsset(store: Store, asset: Asset, job?: JobRecord, option
       place.room_asset_id = asset.id;
     } else {
       const name = job.dish_name ?? 'Untitled dish';
+      const price = job.dish_price ?? null;
       let dish = place.dishes.find((entry) => entry.id === job.dish_id || entry.name.toLowerCase() === name.toLowerCase());
       if (!dish) {
-        dish = { id: `${place.id}-dish-${job.id}`, place_id: place.id, name, price: null, portion_note: '' } satisfies Dish;
+        dish = { id: `${place.id}-dish-${job.id}`, place_id: place.id, name, price, portion_note: '' } satisfies Dish;
         place.dishes.push(dish);
+      }
+      // The contributor read the price off the menu next to the dish they photographed, so it wins.
+      if (price !== null) {
+        dish.price = price;
+        place.price_checked_on = new Date().toISOString().slice(0, 10);
       }
       dish.asset_id = asset.id;
       dish.plate_diameter_m = asset.plate_diameter_m ?? dish.plate_diameter_m;

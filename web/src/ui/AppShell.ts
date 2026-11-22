@@ -602,6 +602,27 @@ export class AppShell {
     this.renderScene();
     void this.refreshTrip();
     if (changed || !this.manifest.data) await this.refreshManifest();
+    void this.refreshMenuPrices(place);
+  }
+
+  /**
+   * Fills any dish the catalog has no price for from the price agent, so the menu book and the
+   * dish caption show a figure instead of "Not listed". Catalog prices always win.
+   */
+  private async refreshMenuPrices(place: Place) {
+    if (!place.dishes.some((dish) => dish.price == null)) return;
+    const navigation = this.navigation;
+    const result = await api.liveMenuPrices(place.id).catch(() => undefined);
+    if (!result?.prices.length || !this.isCurrentVenue(navigation, place.id)) return;
+    const prices = new Map(result.prices.map(({ dish_id, price }) => [dish_id, price]));
+    const apply = (dish: Dish) => {
+      const price = prices.get(dish.id);
+      if (price !== undefined && dish.price == null) dish.price = price;
+    };
+    place.dishes.forEach(apply);
+    this.manifest.data?.menu_items.forEach(({ dish }) => apply(dish));
+    this.renderDrawer();
+    if (this.mode === 'venue' || this.mode === 'dish') this.renderScene();
   }
 
   private async refreshManifest() {

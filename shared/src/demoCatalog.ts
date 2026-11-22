@@ -4,6 +4,8 @@ import { STOPS } from './transit.js';
 import type { Asset, Category, CategoryGroup, Dish, Place, Vector3 } from './types.js';
 
 const demoDate = '2026-11-21';
+/** When the price agent last filled the prices these venues do not publish themselves. */
+const priceLookupDate = '2026-11-22';
 const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 const group: Record<Category, CategoryGroup> = {
   restaurant: 'A', study: 'B', shop: 'B', market: 'B', music: 'C', activity: 'C',
@@ -142,7 +144,9 @@ addDish(cafe, 'harvard-matcha-tiramisu', 'Ceremonial Matcha Tiramisu + Latte', 9
 
 for (const { venueId, pricingUrl, dishes } of restaurantDishMenus) {
   const place = byId(venueId);
+  // Prices come either from the venue's own ordering page or from a cited lookup, each with its own date.
   if (pricingUrl && dishes.some(({ price }) => price !== null)) place.price_checked_on = demoDate;
+  else if (dishes.some(({ price, priceUrl }) => price !== null && priceUrl)) place.price_checked_on = priceLookupDate;
   for (const { id, name, price, diameter, file, portion, splats, photoUrl } of dishes) {
     addDish(place, id, name, price, diameter, file, portion, { splats, photoUrl });
   }
@@ -153,6 +157,13 @@ export const demoDishPhotoSources = restaurantDishMenus.map(({ venueId, pricingU
   pricingUrl,
   items: dishes.map(({ name, photoUrl }) => ({ name, url: photoUrl })),
 }));
+
+/** Dishes whose price the price agent found, with the page it read the amount from. */
+export const demoDishPriceSources = restaurantDishMenus.map(({ venueId, dishes }) => ({
+  venue: byId(venueId).name,
+  items: dishes.flatMap(({ name, price, priceSource, priceUrl }) => price !== null && priceUrl
+    ? [{ name, price, source: priceSource ?? 'Menu listing', url: priceUrl }] : []),
+})).filter(({ items }) => items.length);
 
 byId('kenmore-fenway-01').seat_views = [{
   id: 'fenway-seat-demo', place_id: 'kenmore-fenway-01', section: 'Grandstand 18',
