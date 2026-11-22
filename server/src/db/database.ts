@@ -95,6 +95,9 @@ export class Store {
         const { name, vibe, hours, details, lat, lon, walk_from_stop_m } = place;
         this.put('places', { ...stored, name, vibe, hours, details, lat, lon, walk_from_stop_m });
       }
+      // Venues dropped from the catalog because they sit outside their station's model.
+      for (const id of ['allston-bostongoods-01', 'allston-coreanos-01', 'allston-brightonmusic-01'])
+        this.sqlite.prepare('DELETE FROM places WHERE id = ?').run(id);
       for (const asset of demoAssets) this.sqlite.prepare('INSERT OR IGNORE INTO assets VALUES (?, ?)').run(asset.id, JSON.stringify(asset));
       const reviewed = new Set(this.all('reviews').map(({ place_id }) => place_id));
       for (const place of this.all('places')) {

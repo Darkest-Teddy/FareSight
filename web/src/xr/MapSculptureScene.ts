@@ -36,9 +36,16 @@ interface Beacon {
   actions: HitTarget[];
 }
 
+/** Green-B, Green-C ... all share the Green Line LRV; everything else is its own line. */
+const familyOf = (routeId: string): string => {
+  const family = String(routeId).split('-')[0].toLowerCase();
+  return family === 'green' || family === 'red' || family === 'orange' || family === 'blue'
+    ? family
+    : 'green';
+};
+
 interface Train {
   root: pc.Entity;
-  surface: pc.StandardMaterial;
   track?: Track;
   from: number;
   to: number;
@@ -118,7 +125,13 @@ export class MapSculptureScene {
   private filtered = new Set<string>();
   private vehicles: XRVehicleData[] = [];
   private trains = new Map<string, Train>();
-  private trainModel?: pc.ContainerResource;
+  /** Route family per live train, so a model that loads late still reaches the right vehicles. */
+  private trainRoutes = new Map<string, string>();
+  /**
+   * One model per line. The rolling stock really does differ -- a Green Line LRV is not a Red Line
+   * heavy rail car -- so each is its own glb, painted in its own livery.
+   */
+  private trainModels = new Map<string, pc.ContainerResource>();
   private medallionModel: Promise<pc.ContainerResource | null>;
   private alive = true;
   private abort = new AbortController();
@@ -193,11 +206,15 @@ export class MapSculptureScene {
       this.fallback.enabled = false;
       this.reveal.refresh(this.sculpture, mapRevealTime, jarvisPoints.hero);
     });
-    void models.load(`${assetBase}mbta-train-capsule.glb`).then((resource) => {
-      if (!resource || !this.alive) return;
-      this.trainModel = resource;
-      for (const train of this.trains.values()) this.attachTrainModel(train);
-    });
+    for (const family of ['green', 'red', 'orange', 'blue']) {
+      void models.load(`${assetBase}mbta-train-${family}.glb`).then((resource) => {
+        if (!resource || !this.alive) return;
+        this.trainModels.set(family, resource);
+        // Any train already on screen waiting for this line's model picks it up now.
+        for (const [id, train] of this.trains)
+          if (!train.root.children.length) this.attachTrainModel(train, this.trainRoutes.get(id));
+      });
+    }
   }
 
   setStops(stops: XRStopData[]): void {
@@ -392,10 +409,10 @@ export class MapSculptureScene {
       const isNew = !train;
       if (!train) {
         const root = child(this.trainRoot, vehicle.label || vehicle.id);
-        const surface = material(vehicle.line_color, 0.75);
-        train = { root, surface, elapsed: pollInterval, from: 0, to: 0 };
+        train = { root, elapsed: pollInterval, from: 0, to: 0 };
         this.trains.set(vehicle.id, train);
-        this.attachTrainModel(train);
+        this.trainRoutes.set(vehicle.id, familyOf(vehicle.route_id));
+        this.attachTrainModel(train, familyOf(vehicle.route_id));
       }
       if (train.track === track) {
         train.from = pc.math.lerp(train.from, train.to, clamp(train.elapsed / pollInterval, 0, 1));
@@ -411,17 +428,18 @@ export class MapSculptureScene {
     for (const [id, train] of this.trains) {
       if (seen.has(id)) continue;
       this.trains.delete(id);
-      train.root.once('destroy', () => train.surface.destroy());
+      this.trainRoutes.delete(id);
       this.reveal.hide(train.root, 0.31, jarvisPoints.detail, () => train.root.destroy());
     }
   }
 
-  private attachTrainModel(train: Train): void {
-    if (!this.trainModel) return;
-    const model = this.trainModel.instantiateRenderEntity();
-    for (const render of model.findComponents('render')) {
-      for (const mesh of render.meshInstances) mesh.material = train.surface;
-    }
+  private attachTrainModel(train: Train, family = 'green'): void {
+    const source = this.trainModels.get(family) ?? this.trainModels.get('green');
+    if (!source) return;
+    const model = source.instantiateRenderEntity();
+    // Materials are left alone on purpose: each model already carries its own livery, window band
+    // and roof trim. Overriding them, as the single shared capsule needed, would flatten all of
+    // that back to one colour.
     model.setLocalScale(1.25, 1.25, 1.25);
     train.root.addChild(model);
     if (this.detailsVisible) this.reveal.show(train.root, 0.38, jarvisPoints.detail);
@@ -525,7 +543,6 @@ export class MapSculptureScene {
     this.root.destroy();
     this.ringMesh.decRefCount();
     this.ringMesh.destroy();
-    for (const { surface } of this.trains.values()) surface.destroy();
     for (const surface of this.materials) surface.destroy();
     this.trains.clear();
   }
