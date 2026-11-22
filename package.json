@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@8.15.4",
-  "engines": { "node": ">=26" },
+  "engines": {
+    "node": ">=26"
+  },
   "scripts": {
     "dev:server": "pnpm --filter @faresight/shared build && pnpm --filter @faresight/server dev",
     "dev:web": "pnpm --filter @faresight/web dev",
@@ -11,7 +13,12 @@
     "dev": "pnpm --filter @faresight/shared build && pnpm --parallel --filter @faresight/server --filter @faresight/web --filter @faresight/contribute dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm --filter @faresight/shared build && pnpm -r typecheck",
-    "assets:sync": "mkdir -p web/public/assets-demo && cp -R modeling/output/. web/public/assets-demo/"
+    "assets:sync": "mkdir -p web/public/assets-demo && cp -R modeling/output/. web/public/assets-demo/",
+    "dev:mobile": "npm --prefix mobile run start",
+    "dev:map": "pnpm --filter @faresight/map dev",
+    "map:data": "pnpm --filter @faresight/map data"
   },
-  "devDependencies": { "typescript": "~5.9.3" }
+  "devDependencies": {
+    "typescript": "~5.9.3"
+  }
 }

@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "FareSight Contribute",
+    "slug": "faresight-contribute",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#111112",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#111112"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.faresight.contribute",
+      "infoPlist": {
+        "NSCameraUsageDescription": "FareSight Contribute uses the camera so you can photograph the places you scan.",
+        "NSPhotoLibraryUsageDescription": "FareSight Contribute reads your photo library so you can submit existing photos.",
+        "NSAppTransportSecurity": { "NSAllowsLocalNetworking": true }
+      }
+    },
+    "android": {
+      "package": "com.faresight.contribute",
+      "edgeToEdgeEnabled": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#111112"
+      },
+      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE"],
+      "usesCleartextTraffic": true
+    },
+    "web": { "favicon": "./assets/favicon.png" },
+    "extra": {
+      "contributeUrl": null
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@faresight/map",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview --host 0.0.0.0",
+    "data": "node --env-file-if-exists=../.env scripts/build-transit-geo.mjs",
+    "data:buildings": "node --env-file-if-exists=../.env scripts/build-buildings.mjs && node scripts/cull-buildings.mjs",
+    "data:cull": "node scripts/cull-buildings.mjs"
+  },
+  "dependencies": {
+    "maplibre-gl": "^6.19.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "vite": "^8.3.8",
+    "@types/geojson": "^7946.0.16"
+  }
+}
