@@ -2,6 +2,7 @@ import { cpSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, loadEnv } from 'vite';
+import { entryRedirect } from './vite-entry-redirect.ts';
 import { seoMetadata } from './vite-seo.ts';
 
 const backend = 'http://localhost:3001';
@@ -30,7 +31,8 @@ export default defineConfig({
         cpSync(modelingOutput, destination, { recursive: true, force: false });
       }
     },
-  }, seoMetadata('VITE_SITE_URL', loadEnv, ['/index.html', '/intro.html'])],
+  }, seoMetadata('VITE_SITE_URL', loadEnv, ['/index.html', '/intro.html']),
+  entryRedirect(loadEnv, { app: '/index.html', intro: '/intro.html' })],
   build: {
     rollupOptions: {
       // The app and the scroll-driven landing page are separate entry points.
