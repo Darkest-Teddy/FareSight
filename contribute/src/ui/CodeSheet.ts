@@ -2,7 +2,7 @@ import { ApiError } from '../api';
 import { button, el, errorText, haptic, icon, replay } from '../dom';
 import { inviteCode } from '../store';
 
-/** Bottom sheet that asks for the invite code once and keeps it on the device. */
+/** Bottom sheet that asks for the upload code once and keeps it on the device. */
 export class CodeSheet {
   private readonly dialog = el('dialog', 'sheet-dialog');
   private readonly input = el('input', 'code-input');
@@ -18,19 +18,19 @@ export class CodeSheet {
     const head = el('header', 'sheet-head');
     const badge = el('span', 'sheet-badge');
     badge.append(icon('key'));
-    const title = el('h2', '', 'Invite code');
+    const title = el('h2', '', 'Contributor upload code');
     title.id = 'code-sheet-title';
     head.append(badge, title);
     this.dialog.setAttribute('aria-labelledby', title.id);
 
     this.input.type = 'text';
-    this.input.name = 'invite-code';
+    this.input.name = 'upload-code';
     this.input.autocomplete = 'off';
     this.input.autocapitalize = 'none';
     this.input.spellcheck = false;
     this.input.enterKeyHint = 'done';
     this.input.placeholder = 'Code from your FareSight host';
-    this.input.setAttribute('aria-label', 'Invite code');
+    this.input.setAttribute('aria-label', 'Upload code');
     this.input.addEventListener('input', () => { this.feedback.textContent = ''; });
     this.feedback.setAttribute('role', 'alert');
 
@@ -62,7 +62,7 @@ export class CodeSheet {
     if (this.dialog.open) this.close(false);
     this.note.textContent = inviteCode.status === 'open'
       ? 'This FareSight server accepts photos without a code.'
-      : 'Sending photos needs the invite code. You only enter it once on this phone.';
+      : 'Enter the upload code from your FareSight host. This phone remembers it for future scans.';
     this.feedback.textContent = reason;
     this.input.value = inviteCode.current;
     this.forget.hidden = !inviteCode.current;
@@ -111,10 +111,10 @@ export class CodeSheet {
 }
 
 export const codeSheet = new CodeSheet();
-const CODE_REQUIRED = 'An invite code is needed to send photos.';
+const CODE_REQUIRED = 'An upload code is needed to send photos.';
 
 /**
- * Runs a request that needs the invite code. Asks for the code when none is saved,
+ * Runs a request that needs the upload code. Asks for the code when none is saved,
  * and asks again if the server rejects the one on file.
  */
 export async function withCode<T>(run: (code: string) => Promise<T>): Promise<T> {

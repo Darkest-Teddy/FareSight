@@ -14,6 +14,7 @@ interface Source {
   refs: number;
   asset?: pc.Asset;
   ready: Promise<pc.Asset | null>;
+  settle(asset: pc.Asset | null): void;
 }
 
 interface Placement {
@@ -28,8 +29,10 @@ interface Placement {
   scrub?: { progress: number; applied?: number };
 }
 
-const softGaussianBudget = 160_000;
-const hardGaussianLimit = 450_000;
+export const xrSplatBudget = 240_000;
+// An Atlas draft room that could not be decimated arrives at 524,288 Gaussians. This leaves room for it plus
+// a few dishes. Rooms converted with splat-transform stay near 100,000, which is what a Quest wants.
+const hardGaussianLimit = 800_000;
 const materializeSeconds = 2.2;
 const starkModifier = { glsl: `
 ${jarvisPalette}
@@ -79,6 +82,7 @@ export class SplatLoader {
   private slots = new Map<Slot, Placement>();
   private outgoing = new Map<Placement, { progress: number; duration: number; retain: boolean }>();
   private hidden = new Set<Slot>();
+  private roomLayer: number = pc.LAYERID_WORLD;
   private disposed = false;
 
   constructor(private app: pc.Application, private log: DebugLog, private reducedMotion: MediaQueryList) {
@@ -95,6 +99,11 @@ export class SplatLoader {
       return previous.ready;
     }
 
+    if (data.gaussian_count > 0 && !this.fits(slot, data.gaussian_count)) {
+      this.log(`Gaussian safety limit exceeded while opening ${data.id}`, 'warn');
+      this.clear(slot, 0.62);
+      return Promise.resolve(false);
+    }
     const source = this.acquire(data.url);
     this.clear(slot, 0.62);
     const placement: Placement = { slot, data, parent, source, count: 0, ready: Promise.resolve(false) };
@@ -114,24 +123,19 @@ export class SplatLoader {
     const { data, parent } = placement;
     const resource = asset.resource as pc.GSplatResourceBase;
     const count = resource.numSplats || data.gaussian_count || 0;
+    if (!this.fits(slot, count)) {
+      this.log(`Gaussian safety limit exceeded while opening ${data.id}`, 'warn');
+      this.clear(slot);
+      return false;
+    }
     for (const [retired, fade] of this.outgoing) {
       if (count + this.loadedSplats <= hardGaussianLimit) break;
       if (fade.retain) continue;
       this.outgoing.delete(retired);
       this.disposePlacement(retired);
     }
-    const totalAfter = count + this.loadedSplats;
-    if (totalAfter > hardGaussianLimit) {
-      this.log(`Gaussian safety limit exceeded while opening ${data.id} (${totalAfter.toLocaleString()} splats)`, 'warn');
-      this.clear(slot);
-      return false;
-    }
-    if (totalAfter > softGaussianBudget) {
-      this.log(`Combined splats (${totalAfter.toLocaleString()}) exceed ${softGaussianBudget.toLocaleString()} Quest target; relying on PlayCanvas splatBudget LOD`, 'warn');
-    }
-
     const entity = new pc.Entity(data.id, this.app);
-    entity.addComponent('gsplat', { asset, unified: true });
+    entity.addComponent('gsplat', { asset, unified: true, layers: [slot === 'room' ? this.roomLayer : pc.LAYERID_WORLD] });
     const scale = data.scale_status === 'measured' && Number.isFinite(data.scale_factor) && data.scale_factor > 0
       ? data.scale_factor : 1;
     entity.setLocalScale(scale, scale, scale);
@@ -144,6 +148,22 @@ export class SplatLoader {
       if (entity.enabled) this.reveal(slot);
     }
     return true;
+  }
+
+  private fits(slot: Slot, count: number): boolean {
+    let total = count;
+    for (const [other, placement] of this.slots) {
+      if (other !== slot) total += placement.count || placement.data.gaussian_count || 0;
+    }
+    return total <= hardGaussianLimit;
+  }
+
+  setRoomLayer(layerId: number): void {
+    if (this.roomLayer === layerId) return;
+    this.roomLayer = layerId;
+    for (const placement of [this.slots.get('room'), ...this.outgoing.keys()]) {
+      if (placement?.slot === 'room' && placement.entity?.gsplat) placement.entity.gsplat.layers = [layerId];
+    }
   }
 
   seekReveal(slot: Slot, progress: number): void {
@@ -253,19 +273,20 @@ export class SplatLoader {
     }
 
     let resolveAsset!: (asset: pc.Asset | null) => void;
-    const source: Source = {
-      refs: 1,
-      ready: new Promise((resolve) => { resolveAsset = resolve; }),
-    };
+    const ready = new Promise<pc.Asset | null>((resolve) => { resolveAsset = resolve; });
+    const source: Source = { refs: 1, ready, settle: resolveAsset };
     this.sources.set(url, source);
     this.app.assets.loadFromUrl(url, 'gsplat', (error, asset) => {
-      if (this.disposed) { resolveAsset(null); return; }
-      source.asset = asset ?? this.app.assets.getByUrl(url) ?? undefined;
+      source.asset = asset ?? this.app.assets?.getByUrl(url) ?? undefined;
+      if (this.disposed) {
+        this.unload(source);
+        return;
+      }
       if (error || !asset?.resource) {
         this.log(`Could not load splat ${url}: ${String(error ?? 'missing resource')}`, 'warn');
-        resolveAsset(null);
+        source.settle(null);
       } else {
-        resolveAsset(asset);
+        source.settle(asset);
       }
       if (source.refs === 0) this.release(url, source);
     });
@@ -317,10 +338,14 @@ export class SplatLoader {
   private release(url: string, source: Source): void {
     if (this.sources.get(url) !== source) return;
     this.sources.delete(url);
-    if (source.asset) {
-      source.asset.unload();
-      this.app.assets.remove(source.asset);
-    }
+    this.unload(source);
+  }
+
+  private unload(source: Source): void {
+    if (!source.asset) return;
+    source.asset.unload();
+    this.app.assets?.remove(source.asset);
+    source.asset = undefined;
   }
 
   get loadedSplats(): number {
@@ -335,11 +360,18 @@ export class SplatLoader {
     return placement?.entity && (placement.data.scale_label || placement.data.provenance_label);
   }
 
+  height(slot: 'dish' | 'compare'): number | undefined {
+    const entity = this.slots.get(slot)?.entity;
+    const bounds = entity?.gsplat?.resource?.aabb;
+    if (entity && bounds) return bounds.halfExtents.y * 2 * entity.getLocalScale().y;
+  }
+
   destroy(): void {
     this.disposed = true;
     for (const slot of this.slots.keys()) this.clear(slot);
     for (const placement of this.outgoing.keys()) this.disposePlacement(placement);
     this.outgoing.clear();
+    for (const source of this.sources.values()) source.settle(null);
     this.sources.clear();
   }
 }

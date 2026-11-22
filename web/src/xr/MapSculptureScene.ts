@@ -12,6 +12,13 @@ interface StationAnchor {
   segmentFile: string;
 }
 
+function isStationAnchor(value: unknown): value is StationAnchor {
+  if (!value || typeof value !== 'object') return false;
+  const { topPos, segmentFile } = value as Record<string, unknown>;
+  return Array.isArray(topPos) && topPos.length === 3 && topPos.every(Number.isFinite)
+    && typeof segmentFile === 'string' && segmentFile.trim().length > 0;
+}
+
 interface PathFile {
   lines: { id: string; routeId: string; name: string; color: string; points: XYZ[] }[];
 }
@@ -46,6 +53,7 @@ const familyOf = (routeId: string): string => {
 
 interface Train {
   root: pc.Entity;
+  family: string;
   track?: Track;
   /**
    * Which way along the track the train faces: +1 with increasing distance, -1 against.
@@ -67,7 +75,7 @@ interface LineSurface {
   level: number;
 }
 
-const pollInterval = 10;
+const pollInterval = 18; // AppShell polls live vehicles every 18 seconds.
 // Trains ride on top of the plate rather than inside it. Half the plate thickness clears it; the
 // old 0.0102 was sized for the swept tube the lines used to be and now floats them well above it.
 const trainLift = 0.0014;
@@ -180,13 +188,11 @@ export class MapSculptureScene {
   private labels: MapLabels;
   private lineSurfaces = new Map<string, LineSurface>();
   private tracks = new Map<string, Track[]>();
-  private anchors: Record<string, StationAnchor> = {};
+  private anchors = new Map<string, StationAnchor>();
   private places: XRPlaceData[] = [];
   private filtered = new Set<string>();
   private vehicles: XRVehicleData[] = [];
   private trains = new Map<string, Train>();
-  /** Route family per live train, so a model that loads late still reaches the right vehicles. */
-  private trainRoutes = new Map<string, string>();
   /**
    * One model per line. The rolling stock really does differ -- a Green Line LRV is not a Red Line
    * heavy rail car -- so each is its own glb, painted in its own livery.
@@ -230,9 +236,16 @@ export class MapSculptureScene {
     shape(this.fallback, 'Map base', 'box', deck, [0, 0.02, 0], [1.5, 0.04, 1.05]);
 
     const signal = this.abort.signal;
-    void fetchAssetJson<Record<string, StationAnchor>>(`${assetBase}station-anchors.json`, signal, log).then((anchors) => {
-      if (!anchors || !this.alive) return;
-      this.anchors = anchors;
+    void fetchAssetJson<unknown>(`${assetBase}station-anchors.json`, signal, log).then((anchors) => {
+      if (anchors === null || !this.alive) return;
+      if (typeof anchors !== 'object' || Array.isArray(anchors)) {
+        log('station-anchors.json: expected a map of station anchors', 'warn');
+        return;
+      }
+      for (const [id, record] of Object.entries(anchors)) {
+        if (isStationAnchor(record)) this.anchors.set(id, record);
+        else log(`station-anchors.json: invalid anchor for ${id}`, 'warn');
+      }
       this.positionBeacons();
     });
     void fetchAssetJson<PathFile>(`${assetBase}mbta-3d-paths.json`, signal, log).then((data) => {
@@ -276,9 +289,9 @@ export class MapSculptureScene {
       void models.load(`${assetBase}mbta-train-${family}.glb`).then((resource) => {
         if (!resource || !this.alive) return;
         this.trainModels.set(family, resource);
-        // Any train already on screen waiting for this line's model picks it up now.
-        for (const [id, train] of this.trains)
-          if (!train.root.children.length) this.attachTrainModel(train, this.trainRoutes.get(id));
+        for (const train of this.trains.values()) {
+          if (train.family === family) this.attachTrainModel(train);
+        }
       });
     }
   }
@@ -408,7 +421,7 @@ export class MapSculptureScene {
   }
 
   segmentFile(id: string): string | undefined {
-    const file = this.anchors[id]?.segmentFile;
+    const file = this.anchors.get(id)?.segmentFile;
     return file && (/^(?:\/|https?:)/.test(file) ? file : `${assetBase}${file}`);
   }
 
@@ -417,7 +430,7 @@ export class MapSculptureScene {
   private positionBeacons(): void {
     for (const { stop, root } of this.beacons) {
       const [x, z] = project(stop.lat, stop.lon);
-      const position: XYZ = this.anchors[stop.stop_id]?.topPos ?? [x, 0.07, z];
+      const position: XYZ = this.anchors.get(stop.stop_id)?.topPos ?? [x, 0.07, z];
       root.setLocalPosition(...position);
     }
     // Stagger neighbouring headset callouts so they do not overlap.
@@ -471,14 +484,19 @@ export class MapSculptureScene {
       // Only draw trains that sit on a modelled line; anything else would float off the map.
       if (!track || !snap || snap.error > maxSnapError) continue;
       seen.add(vehicle.id);
+      const family = familyOf(vehicle.route_id);
       let train = this.trains.get(vehicle.id);
       const isNew = !train;
       if (!train) {
         const root = child(this.trainRoot, vehicle.label || vehicle.id);
-        train = { root, elapsed: pollInterval, from: 0, to: 0, heading: 1 };
+        train = { root, family, elapsed: pollInterval, from: 0, to: 0, heading: 1 };
         this.trains.set(vehicle.id, train);
-        this.trainRoutes.set(vehicle.id, familyOf(vehicle.route_id));
-        this.attachTrainModel(train, familyOf(vehicle.route_id));
+        this.attachTrainModel(train);
+      } else if (train.family !== family) {
+        this.reveal.finish(train.root, false);
+        train.root.children[0]?.destroy();
+        train.family = family;
+        this.attachTrainModel(train);
       }
       if (train.track === track) {
         train.from = pc.math.lerp(train.from, train.to, clamp(train.elapsed / pollInterval, 0, 1));
@@ -491,6 +509,7 @@ export class MapSculptureScene {
       train.track = track;
       train.elapsed = 0;
       if (Math.abs(train.to - train.from) < 0.00001 && vehicle.bearing != null) {
+        // Compass bearings start at north (-Z), the same forward axis as lookAt.
         train.root.setLocalEulerAngles(0, -vehicle.bearing, 0);
       }
       if (isNew) this.updateTrain(train, 0);
@@ -498,19 +517,21 @@ export class MapSculptureScene {
     for (const [id, train] of this.trains) {
       if (seen.has(id)) continue;
       this.trains.delete(id);
-      this.trainRoutes.delete(id);
       this.reveal.hide(train.root, 0.31, jarvisPoints.detail, () => train.root.destroy());
     }
   }
 
-  private attachTrainModel(train: Train, family = 'green'): void {
-    const source = this.trainModels.get(family) ?? this.trainModels.get('green');
-    if (!source) return;
+  private attachTrainModel(train: Train): void {
+    const source = this.trainModels.get(train.family);
+    if (!source || train.root.children.length) return;
     const model = source.instantiateRenderEntity();
     // Materials are left alone on purpose: each model already carries its own livery, window band
-    // and roof trim. Overriding them, as the single shared capsule needed, would flatten all of
-    // that back to one colour.
-    // Flowcast's model runs along z, which is also the direction the scene points a train.
+    // and roof trim. Overriding them would flatten all of that back to one colour.
+    //
+    // The nose is +Z -- measured on the vendored model, whose headlight sits at z=+22.5 and
+    // taillight at z=-22.5 -- while lookAt points the root's -Z along the track. Without the flip
+    // every train runs backwards.
+    model.setLocalEulerAngles(0, 180, 0);
     model.setLocalScale(trainScaleCross, trainScaleCross, trainScaleLength);
     model.setLocalPosition(0, trainFloorOffset, 0);
     train.root.addChild(model);

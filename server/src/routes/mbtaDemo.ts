@@ -80,7 +80,8 @@ export function serviceDate(now = new Date()): string {
 }
 
 export function demoSchedules(stop: string, routes: string[], date: string, direction?: number): MbtaPrediction[] {
-  const midnight = new Date(`${date}T12:00:00Z`);
+  // Both Boston offsets are known by 05:00 UTC before either clock change.
+  const midnight = new Date(`${date}T05:00:00Z`);
   midnight.setUTCDate(midnight.getUTCDate() + 1);
   const nextDay = midnight.toISOString().slice(0, 10);
   const offset = bostonOffset.formatToParts(midnight).find((part) => part.type === 'timeZoneName')?.value.slice(3) ?? '-05:00';

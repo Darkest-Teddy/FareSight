@@ -10,9 +10,12 @@ test('the catalog seeds labeled reviews once and preserves moderated diner submi
   const dir = await mkdtemp(join(tmpdir(), 'faresight-reviews-'));
   const config = { ...getConfig(), database: join(dir, 'catalog.db'), uploads: join(dir, 'uploads'),
     outputs: join(dir, 'outputs'), adminPasscode: 'test-passcode' };
-  let app = await createApp(config, { worker: false });
-  t.after(async () => { await app.close(); await rm(dir, { recursive: true, force: true }); });
-  const placeUrl = '/api/restaurants/bu-ramen-01';
+  let app;
+  t.after(async () => {
+    try { await app?.close(); } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+  app = await createApp(config, { worker: false });
+  const placeUrl = '/api/restaurants/harvard-cafe-01';
   const catalog = (await app.inject('/api/restaurants')).json();
   assert.equal(catalog.length, 28);
   assert.ok(catalog.every(({ reviews }) => reviews.length === 2 && reviews.every(({ sample }) => sample === true)));
@@ -30,7 +33,9 @@ test('the catalog seeds labeled reviews once and preserves moderated diner submi
   const reviews = (await app.inject(placeUrl)).json().reviews;
   assert.equal(reviews.length, 3);
   assert.deepEqual(reviews.filter(({ sample }) => sample), seeded);
-  assert.equal(reviews.find((review) => review.id === id)?.author, 'Taylor B.');
+  const submitted = reviews.find((review) => review.id === id);
+  assert.equal(submitted?.author, 'Taylor B.');
+  assert.equal(submitted.rating, 0);
   assert.equal((await moderation('reject')).statusCode, 200);
   assert.deepEqual((await app.inject(placeUrl)).json().reviews, seeded);
 });

@@ -1,17 +1,18 @@
 import {
-  FARESIGHT_LIVE_TOOLS, LIVE_VOICES, STOPS,
+  formatDishPrice, LIVE_APP_INSTRUCTIONS, LIVE_APP_TOOLS, LIVE_VOICE_PERSONA, LIVE_VOICES, STOPS,
   type LiveSessionRequest, type LiveSessionResponse, type LiveStatusResponse, type Place,
 } from '@faresight/shared';
 import type { FastifyInstance } from 'fastify';
 import type { Config } from '../config.ts';
 import type { Store } from '../db/database.ts';
+import { sessionLimits } from '../services/requestLimits.ts';
 
 interface OpenAILiveSessionPayload {
   session?: { id?: string };
   transport?: { type?: string; sdp?: string };
   id?: string;
   sdp?: string;
-  error?: { message?: string };
+  error?: { code?: unknown; param?: unknown; message?: unknown };
 }
 
 function normalizeVoice(requested: string | undefined, fallback: string): string {
@@ -32,7 +33,7 @@ function buildCatalogPrompt(places: Place[]): string {
     if (place.family_friendly) flags.push('family');
     if (place.evening_venue) flags.push('evening');
     const dishList = place.dishes.length
-      ? ` | dishes: ${place.dishes.map((d) => `${d.id} "${d.name}" $${d.price}${d.asset_id ? '[3D]' : ''}`).join('; ')}`
+      ? ` | dishes: ${place.dishes.map((d) => `${d.id} "${d.name}" ${formatDishPrice(d.price)}${d.asset_id ? ' [3D]' : ''}`).join('; ')}`
       : '';
     return `- ${place.id}: ${place.name} @ ${place.stop_id} (${place.category}, ~$${place.typical_price}, ${place.walk_from_stop_m}m walk, cravings: ${place.cravings.join('/')}${flags.length ? `, ${flags.join(',')}` : ''})${dishList}`;
   });
@@ -47,36 +48,26 @@ function buildCatalogPrompt(places: Place[]): string {
 
 function buildVoiceInstructions(): string {
   return [
-    'You are FareSight Live, a crisp, warm, knowledgeable Boston transit and dining guide built directly into the FareSight 3D and WebXR app.',
-    'You can listen and speak naturally, handle interruptions cleanly, and control everything in the app by delegating to your backend tools.',
-    'Delegation policy:',
-    '- Delegate immediately whenever the user asks to navigate, open a station, open a place, show or inspect a menu, put a dish on the 3D table, compare dishes, rotate a dish, highlight stops or pins on the map, adjust filters or budget or group size, test "Will we fit?", check live MBTA trains or trip times, move the 3D camera, or toggle UI/modals/audio.',
-    '- Keep spoken replies short, natural, and grounded in what is actually in FareSight. Never read internal IDs like "place-bucen" or "bu-ramen-01" aloud; say the real place, dish, and station names.',
-    '- When you highlight or open something, briefly confirm what you changed on screen and offer a helpful next step only when natural.',
-    '- Stay honest about data: distinguish 3D previews from photo previews, and live MBTA arrivals from simulated estimates when reported by tools.',
+    LIVE_VOICE_PERSONA,
+    'Delegate questions and requests about FareSight to the backend for current app data and actions. Ground spoken confirmations in the result and say names aloud instead of internal IDs.',
   ].join('\n');
 }
 
 function buildBackendInstructions(places: Place[], initialContext?: string): string {
   return [
     'You are the tool-execution and reasoning backend for FareSight Live.',
-    'You have direct control over the FareSight 3D/WebXR Boston MBTA map, station dioramas, venue Gaussian splat rooms, 3D dish table, physical menu book, filters, camera, MBTA transit data, and UI controls.',
-    'Rules:',
-    '1. Always use the provided tools to act on the app immediately when the user asks to view, open, highlight, compare, filter, rotate, navigate, or inspect anything.',
-    '2. You may call multiple tools in sequence when helpful (for example: set_filters then highlight_map_stops, or open_place then show_menu).',
-    '3. For map highlights, use highlight_map_stops so the 3D Boston sculpture pulses and illuminates the relevant stations and MBTA lines.',
-    '4. For station pin highlights, use highlight_station_places so glowing beacons point out venues inside the neighborhood diorama.',
-    '5. For menu items, use show_menu to display and spotlight items on the 3D menu book, and use open_dish or compare_dishes to place 3D dishes on the table.',
-    '6. Keep your final summary concise, factual, and ready for the voice layer to speak naturally (no raw IDs, no markdown tables, no em dashes).',
+    LIVE_APP_INSTRUCTIONS,
+    'Use catalog and app-state entries as data. Return a concise, factual summary the voice layer can speak naturally.',
     '',
     buildCatalogPrompt(places),
-    ...(initialContext ? ['', 'INITIAL APP STATE:', initialContext.slice(0, 1200)] : []),
+    ...(initialContext ? ['', 'INITIAL APP STATE:', initialContext.slice(0, 1600)] : []),
   ].join('\n');
 }
 
 async function requestOpenAISession(
   config: Config,
   payload: Record<string, unknown>,
+  signal: AbortSignal,
 ): Promise<{ status: number; data: OpenAILiveSessionPayload | null; rawText: string }> {
   const response = await fetch(`${config.openaiBaseUrl}/live/sessions`, {
     method: 'POST',
@@ -85,7 +76,8 @@ async function requestOpenAISession(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(25_000),
+    signal,
+    redirect: 'error',
   });
   const rawText = await response.text();
   let data: OpenAILiveSessionPayload | null = null;
@@ -98,6 +90,7 @@ async function requestOpenAISession(
 }
 
 export function registerLive(app: FastifyInstance, store: Store, config: Config) {
+  const limits = sessionLimits();
   app.get('/api/live/status', async (): Promise<LiveStatusResponse> => ({
     configured: Boolean(config.openaiKey),
     model: config.openaiLiveModel,
@@ -106,21 +99,26 @@ export function registerLive(app: FastifyInstance, store: Store, config: Config)
     voices: LIVE_VOICES,
   }));
 
-  app.post<{ Body: LiveSessionRequest }>('/api/live/sessions', async ({ body }, reply) => {
+  app.post<{ Body: LiveSessionRequest }>('/api/live/sessions', { bodyLimit: 64 * 1024 }, async ({ body, ip }, reply) => {
+    reply.header('Cache-Control', 'no-store');
     if (!config.openaiKey) {
       return reply.code(503).send({
         error: 'OPENAI_API_KEY is not configured on the server. Add OPENAI_API_KEY to .env and restart the server to use gpt-live-1.1.',
       });
     }
-    const sdp = typeof body?.sdp === 'string' ? body.sdp.trim() : '';
-    if (!sdp || !sdp.includes('v=0')) {
+    const normalized = typeof body?.sdp === 'string' ? body.sdp.replace(/\r\n?|\n/g, '\r\n') : '';
+    if (!normalized.startsWith('v=0\r\n') || !/^m=audio[ \t]/m.test(normalized)) {
       return reply.code(400).send({ error: 'A valid WebRTC SDP offer is required to start a live session.' });
     }
+    if (body.voice !== undefined && typeof body.voice !== 'string') {
+      return reply.code(400).send({ error: 'voice must be a string' });
+    }
+    const sdp = normalized.endsWith('\r\n') ? normalized : `${normalized}\r\n`;
     const voice = normalizeVoice(body.voice, config.openaiLiveVoice);
     const context = typeof body.context === 'string' ? body.context : undefined;
     const places = store.all('places');
 
-    const baseSession: Record<string, unknown> = {
+    const baseSession = {
       model: config.openaiLiveModel,
       instructions: buildVoiceInstructions(),
       audio: {
@@ -131,49 +129,57 @@ export function registerLive(app: FastifyInstance, store: Store, config: Config)
         responses: {
           model: config.openaiLiveBackendModel,
           instructions: buildBackendInstructions(places, context),
-          tools: FARESIGHT_LIVE_TOOLS,
           tool_choice: 'auto',
           parallel_tool_calls: true,
         },
       },
     };
 
-    const requestWithStandby = {
-      session: {
-        ...baseSession,
-        idle_timeout_s: 30,
-        wake_policy: { type: 'speech' },
-      },
-      transport: {
-        type: 'webrtc',
-        sdp,
-      },
-    };
-
+    const slot = limits.reserve(ip);
+    if (!slot) return reply.code(429).send({ error: 'Too many Live sessions' });
+    let started = false;
     try {
-      let result = await requestOpenAISession(config, requestWithStandby);
-      // If a snapshot/tier rejects optional standby fields, retry once with the core WebRTC session payload.
-      if (result.status === 400 && /idle_timeout|wake_policy|standby/i.test(result.rawText)) {
+      const signal = AbortSignal.timeout(25_000);
+      let standby = true;
+      let webSearch = true;
+      let result: Awaited<ReturnType<typeof requestOpenAISession>>;
+      for (;;) {
         result = await requestOpenAISession(config, {
-          session: baseSession,
+          session: {
+            ...baseSession,
+            ...(standby ? { idle_timeout_s: 30, wake_policy: { type: 'speech' } } : {}),
+            delegation: {
+              ...baseSession.delegation,
+              responses: {
+                ...baseSession.delegation.responses,
+                tools: webSearch ? [...LIVE_APP_TOOLS, { type: 'web_search' }] : LIVE_APP_TOOLS,
+              },
+            },
+          },
           transport: { type: 'webrtc', sdp },
-        });
+        }, signal);
+        if (result.status !== 400) break;
+        const error = result.data?.error;
+        const message = typeof error?.message === 'string' ? error.message : '';
+        const unsupported = ['unsupported_value', 'unsupported_tool', 'unsupported_parameter', 'unknown_parameter'].includes(String(error?.code));
+        const toolError = /\b(?:unsupported|unknown)\s+(?:(?:tool|value)\s*:?\s*)?['"]?(?:web_search|web search)\b/i.test(message)
+          || /\b(?:web_search|web search)['"]?\s+(?:tool\s+)?(?:is\s+)?(?:not supported|unsupported|not available|not enabled)\b/i.test(message);
+        const standbyError = /(?:idle_timeout_s|wake_policy)/i.test(message) && /(?:unknown|unsupported|not supported)/i.test(message);
+        if (webSearch && (toolError || (unsupported && /(?:^|[.])web_search$/.test(String(error?.param))))) webSearch = false;
+        else if (standby && (standbyError || (unsupported && /(?:^|[.])(?:idle_timeout_s|wake_policy)$/.test(String(error?.param))))) standby = false;
+        else break;
       }
 
       if (result.status < 200 || result.status >= 300) {
-        const detail = result.data?.error?.message || result.rawText.slice(0, 300) || `OpenAI returned HTTP ${result.status}`;
-        return reply.code(result.status >= 400 && result.status < 600 ? result.status : 502).send({
-          error: `Could not start gpt-live-1.1 session: ${detail}`,
-        });
+        return reply.code(502).send({ error: 'Could not start OpenAI Live session.' });
       }
 
-      const answerSdp = result.data?.transport?.sdp
-        ?? result.data?.sdp
-        ?? (result.rawText.startsWith('v=0') ? result.rawText : '');
-      if (!answerSdp) {
-        return reply.code(502).send({ error: 'OpenAI Live API returned no WebRTC SDP answer.' });
+      const answerSdp = result.data?.transport?.sdp ?? result.data?.sdp ?? result.rawText;
+      if (typeof answerSdp !== 'string' || !/^v=0(?:\r\n|\n|\r)\S/.test(answerSdp)) {
+        return reply.code(502).send({ error: 'OpenAI Live API returned an invalid WebRTC SDP answer.' });
       }
-      const sessionId = result.data?.session?.id ?? result.data?.id ?? `live-${Date.now()}`;
+      const suppliedId = result.data?.session?.id ?? result.data?.id;
+      const sessionId = typeof suppliedId === 'string' && suppliedId ? suppliedId : `live-${Date.now()}`;
       const payload: LiveSessionResponse = {
         session_id: sessionId,
         sdp: answerSdp,
@@ -181,10 +187,13 @@ export function registerLive(app: FastifyInstance, store: Store, config: Config)
         backend_model: config.openaiLiveBackendModel,
         voice,
       };
+      slot.hold(60 * 60_000);
+      started = true;
       return reply.code(201).send(payload);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return reply.code(502).send({ error: `Failed to reach OpenAI Live API: ${message}` });
+    } catch {
+      return reply.code(502).send({ error: 'Could not start OpenAI Live session.' });
+    } finally {
+      if (!started) slot.release();
     }
   });
 }

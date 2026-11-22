@@ -1,5 +1,5 @@
 import * as pc from 'playcanvas';
-import { clamp, type XYZ } from './sceneSupport';
+import { clamp } from './sceneSupport';
 
 type Outline = readonly (readonly [number, number])[];
 type Bounds = [number, number, number, number];
@@ -7,7 +7,7 @@ type Geometry = {
   label: string;
   topY: number;
   bounds: Bounds;
-  outline?: Outline;
+  patches: readonly Outline[];
 };
 
 export interface SurfaceMatch {
@@ -15,6 +15,7 @@ export interface SurfaceMatch {
   label: string;
   topY: number;
   position: pc.Vec3;
+  contains(point: pc.Vec3): boolean;
 }
 
 interface TrackedSurface {
@@ -51,10 +52,7 @@ function outlineArea(points: Outline): number {
   return Math.abs(twiceArea) * 0.5;
 }
 
-function nearestPoint(surface: Geometry, x: number, z: number): [number, number] {
-  const [minX, minZ, maxX, maxZ] = surface.bounds;
-  const outline = surface.outline;
-  if (!outline) return [clamp(x, minX, maxX), clamp(z, minZ, maxZ)];
+function nearestOnOutline(outline: Outline, x: number, z: number): [number, number] {
   let inside = false;
   let best = Infinity;
   let nearest: [number, number] = [x, z];
@@ -77,6 +75,21 @@ function nearestPoint(surface: Geometry, x: number, z: number): [number, number]
   return inside ? [x, z] : nearest;
 }
 
+function nearestPoint(surface: Geometry, x: number, z: number): [number, number] {
+  let best = Infinity;
+  let nearest: [number, number] = [x, z];
+  for (const patch of surface.patches) {
+    const point = nearestOnOutline(patch, x, z);
+    const distance = (point[0] - x) ** 2 + (point[1] - z) ** 2;
+    if (distance === 0) return point;
+    if (distance < best) {
+      best = distance;
+      nearest = point;
+    }
+  }
+  return nearest;
+}
+
 function planeGeometry(label: string, orientation: string | null, points: readonly DOMPointReadOnly[],
   position: pc.Vec3, rotation: pc.Quat): Geometry | undefined {
   if (points.length < 3 || orientation === 'vertical' ||
@@ -90,7 +103,7 @@ function planeGeometry(label: string, orientation: string | null, points: readon
   });
   const area = outlineArea(outline);
   const topY = y / points.length;
-  if (area >= 0.025 && isSupportHeight(topY)) return { label, topY, outline, bounds: outlineBounds(outline) };
+  if (area >= 0.025 && isSupportHeight(topY)) return { label, topY, patches: [outline], bounds: outlineBounds(outline) };
 }
 
 function meshGeometry(label: string, vertices: Float32Array, indices: Uint32Array,
@@ -104,33 +117,16 @@ function meshGeometry(label: string, vertices: Float32Array, indices: Uint32Arra
     return rotation.transformVector(point.set(vertices[i], vertices[i + 1], vertices[i + 2]), point).add(position);
   };
   const tops: { y: number; area: number; points: Outline }[] = [];
-  if (indices.length >= 3) {
-    const stride = Math.max(1, Math.ceil(indices.length / 9000)) * 3;
-    for (let i = 0; i + 2 < indices.length; i += stride) {
-      read(indices[i], a);
-      read(indices[i + 1], b);
-      read(indices[i + 2], c);
-      const points = [[a.x, a.z], [b.x, b.z], [c.x, c.z]] as const;
-      const y = (a.y + b.y + c.y) / 3;
-      if (!isSupportHeight(y)) continue;
-      cross.cross(b.sub(a), c.sub(a));
-      const area = Math.abs(cross.y) * 0.5;
-      if (area > 0.00001 && Math.abs(cross.y) >= cross.length() * 0.88) tops.push({ y, area, points });
-    }
-  } else {
-    const samples: XYZ[] = [];
-    const stride = Math.max(1, Math.ceil(vertices.length / 9000)) * 3;
-    let y = -Infinity;
-    for (let i = 0; i + 2 < vertices.length; i += stride) {
-      read(i / 3, a);
-      samples.push([a.x, a.y, a.z]);
-      y = Math.max(y, a.y);
-    }
-    const points = samples.filter((point) => y - point[1] <= 0.02).map(([x, , z]) => [x, z] as const);
-    if (points.length < 3 || !isSupportHeight(y)) return;
-    const bounds = outlineBounds(points);
-    const area = (bounds[2] - bounds[0]) * (bounds[3] - bounds[1]);
-    if (area >= 0.025) return { label, topY: y, bounds };
+  for (let i = 0; i + 2 < indices.length; i += 3) {
+    read(indices[i], a);
+    read(indices[i + 1], b);
+    read(indices[i + 2], c);
+    const points = [[a.x, a.z], [b.x, b.z], [c.x, c.z]] as const;
+    const y = (a.y + b.y + c.y) / 3;
+    if (!isSupportHeight(y)) continue;
+    cross.cross(b.sub(a), c.sub(a));
+    const area = Math.abs(cross.y) * 0.5;
+    if (area > 0.00001 && Math.abs(cross.y) >= cross.length() * 0.88) tops.push({ y, area, points });
   }
   // Small ridges above a broad horizontal patch should not set the resting height.
   tops.sort((a, b) => b.y - a.y);
@@ -138,14 +134,14 @@ function meshGeometry(label: string, vertices: Float32Array, indices: Uint32Arra
     const height = tops[i].y;
     let area = 0;
     let weightedY = 0;
-    const points: [number, number][] = [];
+    const patches: Outline[] = [];
     do {
       const top = tops[i++];
       area += top.area;
       weightedY += top.y * top.area;
-      for (const [x, z] of top.points) points.push([x, z]);
+      patches.push(top.points);
     } while (i < tops.length && height - tops[i].y <= 0.02);
-    if (area >= 0.025) return { label, topY: weightedY / area, bounds: outlineBounds(points) };
+    if (area >= 0.025) return { label, topY: weightedY / area, patches, bounds: outlineBounds(patches.flat()) };
   }
 }
 
@@ -292,7 +288,7 @@ export class PhysicalSurfaces {
     return best;
   }
 
-  snapAt(worldPos: pc.Vec3, baseOffset: number, verticalRange = 0.11, locked?: object):
+  snapAt(worldPos: pc.Vec3, baseOffset: number, verticalRange = 0.11, locked?: object, horizontalMargin = 0.10):
     { y: number; surface: SurfaceMatch } | undefined {
     const { x, y, z } = this.inverse.copy(this.rig.getWorldTransform()).invert().transformPoint(worldPos, this.local);
     let best: SurfaceMatch | undefined;
@@ -301,9 +297,12 @@ export class PhysicalSurfaces {
       if (!geometry) continue;
       const vertical = Math.abs(y - baseOffset - geometry.topY);
       if (vertical > (id === locked ? 0.12 : verticalRange)) continue;
+      const [minX, minZ, maxX, maxZ] = geometry.bounds;
+      if (x < minX - horizontalMargin || x > maxX + horizontalMargin ||
+        z < minZ - horizontalMargin || z > maxZ + horizontalMargin) continue;
       const [px, pz] = nearestPoint(geometry, x, z);
       const horizontal = Math.hypot(x - px, z - pz);
-      if (horizontal > 0.10) continue;
+      if (horizontal > horizontalMargin) continue;
       const candidate = vertical + horizontal + (id === locked ? -1 : 0);
       if (candidate >= score) continue;
       score = candidate;
@@ -319,7 +318,15 @@ export class PhysicalSurfaces {
 
   private match(id: object, label: string, x: number, y: number, z: number): SurfaceMatch {
     const position = this.rig.getWorldTransform().transformPoint(new pc.Vec3(x, y, z));
-    return { id, label: label || 'surface', topY: position.y, position };
+    const geometry = this.tracked.get(id)?.geometry;
+    return { id, label: label || 'surface', topY: position.y, position, contains: (point) => {
+      if (!geometry) return false;
+      const local = this.inverse.copy(this.rig.getWorldTransform()).invert().transformPoint(point, this.local);
+      const [minX, minZ, maxX, maxZ] = geometry.bounds;
+      if (local.x < minX - 0.012 || local.x > maxX + 0.012 || local.z < minZ - 0.012 || local.z > maxZ + 0.012) return false;
+      const [px, pz] = nearestPoint(geometry, local.x, local.z);
+      return Math.hypot(px - local.x, pz - local.z) <= 0.012;
+    } };
   }
 
   private clear(): void {

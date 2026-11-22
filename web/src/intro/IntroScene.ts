@@ -14,7 +14,7 @@ import { assetBase, child, clamp, damp, ModelLibrary, smooth } from '../xr/scene
  */
 
 export const STOP_ID = 'place-bucen';
-export const PLACE_ID = 'bu-ramen-01';
+export const PLACE_ID = 'bu-starbucks-01';
 
 const mapHeight = 1.0;
 // Same constants as the in-app dive, so the landing page shows the real transition.
@@ -39,7 +39,7 @@ interface Shot {
 export const DIVE: [number, number] = [0.345, 0.585];
 /** Past this point the station plaques dissolve, clearing the view of the marker below. */
 export const CLEAR_AT = 0.305;
-/** Over this stretch every flag but the ramen counter's folds back into its roof. */
+/** Over this stretch every flag but Starbucks's folds back into its roof. */
 export const FOCUS: [number, number] = [0.775, 0.835];
 export const ROOM_START = 0.92;
 const PIN_REVEAL = [0.557, 0.635] as const;
@@ -56,7 +56,7 @@ const shots: Shot[] = [
   // The neighbourhood grows out of the marker; settle beside it and walk a quarter turn.
   { at: 0.585, look: 'stage', yaw: -0.52, pitch: 0.50, distance: 1.86, shiftX: 0.27, shiftY: 0 },
   { at: 0.74, look: 'stage', yaw: -0.02, pitch: 0.44, distance: 1.70, shiftX: 0.27, shiftY: 0 },
-  // One flag left standing: the ramen counter, seen from across the avenue.
+  // One flag left standing: Starbucks, seen from across the avenue.
   { at: 0.88, look: 'pin', yaw: 0.72, pitch: 0.60, distance: 0.72, shiftX: -0.26, shiftY: -0.09 },
   { at: 0.925, look: 'pin', yaw: 0.80, pitch: 0.54, distance: 0.62, shiftX: -0.26, shiftY: -0.09 },
   // Slide down the stem to the front door.
@@ -103,6 +103,9 @@ export class IntroScene {
   private featuredProgress = -1;
   private focus = -1;
   private clock = 0;
+  private awakeUntil = 0;
+  private started = false;
+  private loadRoom?: () => void;
   private pointer = { x: 0, y: 0, easedX: 0, easedY: 0 };
   private anchor = new pc.Vec3();
   private stage = new pc.Vec3();
@@ -115,9 +118,9 @@ export class IntroScene {
   /** `onFrame` runs once per rendered frame and returns the eased scroll progress, 0 to 1. */
   constructor(private canvas: HTMLCanvasElement, private onFrame: (dt: number) => number) {}
 
-  async init(): Promise<boolean> {
+  async init(onRoom: (ready: boolean) => void): Promise<void> {
     const app = new pc.Application(this.canvas, {
-      graphicsDeviceOptions: { antialias: true, alpha: false, preserveDrawingBuffer: false },
+      graphicsDeviceOptions: { antialias: false, alpha: false, preserveDrawingBuffer: false },
     });
     this.app = app;
     app.setCanvasFillMode(pc.FILLMODE_NONE);
@@ -135,19 +138,23 @@ export class IntroScene {
     this.models = new ModelLibrary(app, log);
     this.reveal = new JarvisReveal(app.graphicsDevice, this.reducedMotion);
     this.splats = new SplatLoader(app, log, this.reducedMotion);
-    this.roomRoot = child(app.root, 'Tsuru Ramen interior', undefined, app);
+    this.roomRoot = child(app.root, 'Starbucks (Warren Towers) interior', undefined, app);
     this.roomRoot.enabled = false;
     const manifest = featured && offlineManifest(featured);
     this.roomSpawn.set(...(manifest?.spawn_point ?? [0, 1.55, 2]));
-    const room = this.splats.show('room', manifest?.room_asset, this.roomRoot);
-    this.splats.seekReveal('room', 0);
+
     const noop = () => undefined;
     this.map = new MapSculptureScene(app.root, app.graphicsDevice, this.models, this.reveal, log, noop, this.canvas, noop);
-    this.station = new StationDioramaScene(app, this.models, this.reveal, log, noop);
+
     this.map.root.setLocalPosition(0, mapHeight, 0);
     this.map.setImmersive(true);
     this.map.setStops(STOPS);
     this.map.setPlaces(offlineCatalog.places, this.allPlaces);
+    const sculpture = await this.models.load(`${assetBase}boston-map-sculpture.glb`);
+    if (this.app !== app) return;
+    if (!sculpture) throw new Error('The map sculpture could not be loaded');
+
+    this.station = new StationDioramaScene(app, this.models, this.reveal, log, noop);
     this.station.setPlaces(offlineCatalog.places, this.allPlaces);
     this.station.setPinsShown(false, true);
     this.station.seekReveal(0);
@@ -156,6 +163,7 @@ export class IntroScene {
     window.addEventListener('pointermove', (event) => {
       this.pointer.x = event.clientX / Math.max(1, window.innerWidth) * 2 - 1;
       this.pointer.y = event.clientY / Math.max(1, window.innerHeight) * 2 - 1;
+      if (!this.reducedMotion.matches && event.pointerType === 'mouse') this.wake();
     }, { signal: this.events.signal, passive: true });
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(this.canvas);
@@ -163,20 +171,35 @@ export class IntroScene {
     app.on('update', (dt: number) => this.update(dt));
 
     const stop = STOPS.find((item) => item.stop_id === STOP_ID);
-    const [sculpture, , roomReady] = await Promise.all([
-      this.models.load(`${assetBase}boston-map-sculpture.glb`),
-      stop ? this.station.show(stop) : Promise.resolve(),
-      room,
-    ]);
-    if (!this.app) return false;
-    if (!sculpture) throw new Error('The map sculpture could not be loaded');
-    this.roomReady = roomReady;
-    this.findPins();
-    return roomReady;
+    const station = stop ? this.station.show(stop) : Promise.resolve();
+    void station.then(() => {
+      if (this.app !== app) return;
+      this.findPins();
+      this.cityProgress = this.pinsProgress = -1;
+      this.wake();
+    }).catch(() => {});
+    this.loadRoom = () => {
+      this.loadRoom = undefined;
+      void this.splats.show('room', manifest?.room_asset, this.roomRoot).then((roomReady) => {
+        if (this.app !== app) return;
+        this.roomReady = roomReady;
+        onRoom(roomReady);
+        this.wake();
+      });
+      this.splats.seekReveal('room', 0);
+    };
   }
 
   start(): void {
-    this.app?.start();
+    if (!this.app || this.started) return;
+    this.started = true;
+    this.app.start();
+    this.wake();
+  }
+
+  wake(): void {
+    this.awakeUntil = performance.now() + (this.reducedMotion.matches ? 200 : 2_000);
+    if (this.started && this.app && !this.app.frameRequestId) this.app.requestAnimationFrame();
   }
 
   private addLights(root: pc.Entity): void {
@@ -200,6 +223,7 @@ export class IntroScene {
     device.maxPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
     device.resizeCanvas(width, height);
     this.lens.fov = clamp(44 + (1 - width / height) * 38, 44, 74);
+    this.wake();
   }
 
   private parkStation(): void {
@@ -234,7 +258,7 @@ export class IntroScene {
     return true;
   }
 
-  /** The ramen counter's pin and its neighbours, once the neighbourhood has built them. */
+  /** The Starbucks's pin and its neighbours, once the neighbourhood has built them. */
   private findPins(): void {
     if (this.pin) return;
     const named = (name: string) => this.station.root.findByName(name) as pc.Entity | null;
@@ -333,6 +357,7 @@ export class IntroScene {
   private update(dt: number): void {
     this.clock += dt;
     const scroll = clamp(this.onFrame(dt), 0, 1);
+    if (scroll > 0.67) this.loadRoom?.();
     const p = this.reducedMotion.matches ? reducedScene(scroll) : scroll;
     const dive = progressAt(p, ...DIVE);
     const initial = this.lastDive < 0;
@@ -364,11 +389,18 @@ export class IntroScene {
     this.map.update(dt, this.camera, this.lens, 0);
     if (this.station.root.enabled) this.station.update(this.reducedMotion.matches ? 1 : dt, this.camera);
     this.reveal.update(dt);
+    const app = this.app;
+    if (app?.frameRequestId && performance.now() >= this.awakeUntil) {
+      cancelAnimationFrame(app.frameRequestId);
+      app.frameRequestId = null;
+    }
   }
 
   destroy(): void {
     if (!this.app) return;
     this.events.abort();
+    this.started = false;
+    this.loadRoom = undefined;
     this.resizeObserver?.disconnect();
     this.map?.destroy();
     this.station?.destroy();

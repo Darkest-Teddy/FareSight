@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { crc32, deflateSync } from 'node:zlib';
 
 const defaultOrigin = 'http://localhost:3001';
-const defaultPlace = 'bu-ramen-01';
+const defaultPlace = 'harvard-cafe-01';
 const geminiModel = 'gemini-4-hydrogen';
 const draftTier = 'atlas-draft';
 const spzPrefixes = [Buffer.from('NG'), Buffer.from('1f8b', 'hex')];
@@ -91,7 +91,7 @@ export function demoPhotos() {
     roomPhotos: ['front', 'side'].map((angle, index) => ({
       filename: `dining-room-a-${angle}.png`, mimeType: 'image/png', bytes: png([100, 80, 100 + index]),
     })),
-    dishPhoto: { filename: 'dish-ramen.png', mimeType: 'image/png', bytes: png([210, 110, 40]) },
+    dishPhoto: { filename: 'dish-preview.png', mimeType: 'image/png', bytes: png([210, 110, 40]) },
   };
 }
 

@@ -57,6 +57,8 @@ function roomCatalog() {
       publishable: r.publishable,
       evidence: r.score_evidence ?? null,
       tiers: [
+        { id: 'fixed-100k', label: '100k SOG, opacity fixed (Quest)', url: file(`rooms/outputs/opacity-check/${basename(r.directory)}/fixed-100k.sog`) },
+        { id: 'fixed-native', label: 'Native SOG, opacity fixed', url: file(`rooms/outputs/opacity-check/${basename(r.directory)}/fixed-native.sog`) },
         { id: '100k', label: '100k SOG (Quest)', url: file(`${dir}/room-100000.sog`) },
         { id: '250k', label: '250k SOG', url: file(`${dir}/room-250000.sog`) },
         { id: 'raw', label: 'Raw PLY', url: file(`${dir}/gaussians.ply`) },
@@ -93,8 +95,88 @@ function roomCatalog() {
     }];
   });
 
-  return [...configs, ...baselines].sort((a, b) =>
+  return [...bostonCatalog(), ...atlasCatalog(), ...configs, ...baselines].sort((a, b) =>
+    (b.boston ?? 0) - (a.boston ?? 0) ||
     a.roomId.localeCompare(b.roomId) || a.photos - b.photos || (a.resolution ?? 0) - (b.resolution ?? 0));
+}
+
+// World Labs Atlas reconstructions of the Boston rooms: photos + generated gap views, refined splats.
+function atlasCatalog() {
+  const manifest = readJson(join(ROOT, 'boston/sources/manifest.json'), []);
+  let rooms = [];
+  try { rooms = readdirSync(join(ROOT, 'atlas'), { withFileTypes: true }).filter((d) => d.isDirectory()); } catch { return []; }
+  return rooms.flatMap((d) => {
+    const dir = `atlas/${d.name}/viewer`;
+    const meta = readJson(join(ROOT, dir, 'viewer.json'), null);
+    const poses = readJson(join(ROOT, dir, 'render-poses.json'), null);
+    if (!meta || !poses) return [];
+    const photos = new Map((manifest.find((m) => m.id === meta.room_id)?.photos ?? []).map((p) => [p.id, p]));
+    const m = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(n % 1e6 ? 1 : 0)}M` : `${Math.round(n / 1e3)}k`);
+    return [{
+      id: `${meta.room_id}-atlas`,
+      kind: 'splat',
+      boston: 1,
+      method: 'Atlas',
+      rootRoll: 0,
+      generated: meta.generated,
+      roomId: meta.room_id,
+      restaurant: `${meta.restaurant} (Boston)`,
+      photos: meta.photos,
+      resolution: null,
+      costUsd: meta.refine_usd,
+      gaussians: Math.max(...meta.tiers.map((t) => t.count)),
+      scores: {},
+      publishable: null,
+      evidence: `World Labs Atlas: ${meta.photos} photos posed, ${meta.generated} views generated to fill the gaps, refined splat. Cost shown is the $5 refine step; posing and view generation are billed separately.`,
+      tiers: meta.tiers.map((t) => ({ id: `atlas-${t.count}`, label: `${m(t.count)} splats (${(t.bytes / 1e6).toFixed(0)} MB)`, url: file(`${dir}/${t.file}`) })),
+      poses,
+      sources: (meta.photo_ids ?? []).slice(0, 6).map((id) => photos.get(id)).filter(Boolean).map((p) => ({
+        url: file(`boston/${p.path}`), author: p.author, license: p.license, page: null,
+      })),
+    }];
+  });
+}
+
+// The team's own Boston walk-throughs: many photos per room, evaluated by boston/evaluate.py.
+function bostonCatalog() {
+  const results = readJson(join(ROOT, 'boston/results.json'), []);
+  const manifest = readJson(join(ROOT, 'boston/sources/manifest.json'), []);
+  const dropped = new Set(manifest.filter((m) => m.abandoned).map((m) => m.id));
+  return results.filter((r) => r.status === 'succeeded' && !dropped.has(r.room_id)).flatMap((r) => {
+    const dir = `boston/${r.directory}`;
+    const stats = readJson(join(ROOT, dir, 'local-evaluation.json'), null);
+    const poses = readJson(join(ROOT, dir, 'render-poses.json'), null);
+    if (!stats || !poses) return [];
+    const room = manifest.find((m) => m.id === r.room_id);
+    const photos = new Map((room?.photos ?? []).map((p) => [p.id, p]));
+    const m = (n) => `${(n / 1e6).toFixed(n < 1e6 ? 2 : 1)}M`;
+    return [{
+      id: basename(r.directory),
+      kind: 'splat',
+      boston: 1,
+      roomId: r.room_id,
+      restaurant: `${r.restaurant} (Boston)`,
+      photos: r.n_photos,
+      resolution: r.resolution,
+      costUsd: r.cost_usd,
+      predictTimeS: r.predict_time_s,
+      gaussians: stats.raw_gaussians,
+      scores: {},
+      publishable: null,
+      evidence: `Own walk-through photos, sky mask off, opacity fixed. Not yet scored.`,
+      tiers: [
+        { id: 'b-1m', label: '1M SOG (try on Quest)', url: file(`${dir}/room-1000000.sog`) },
+        { id: 'b-500k', label: '500k SOG', url: file(`${dir}/room-500000.sog`) },
+        { id: 'b-native', label: `Full density (${m(stats.raw_gaussians)})`, url: file(`${dir}/room-native.sog`) },
+        { id: 'b-250k', label: '250k SOG', url: file(`${dir}/room-250000.sog`) },
+        { id: 'b-100k', label: '100k SOG', url: file(`${dir}/room-100000.sog`) },
+      ].filter((t) => t.url),
+      poses,
+      sources: (r.photo_ids ?? []).slice(0, 6).map((id) => photos.get(id)).filter(Boolean).map((p) => ({
+        url: file(`boston/${p.path}`), author: p.author, license: p.license, page: null,
+      })),
+    }];
+  });
 }
 
 const PROVIDER_ORDER = ['sam', 'idol', 'trellis', 'idol-space'];

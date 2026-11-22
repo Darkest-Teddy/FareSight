@@ -1,0 +1,88 @@
+{
+  "rooms": [
+    {
+      "file": "room-eljefes-atlas.sog",
+      "kind": "room",
+      "splats": 344961,
+      "bytes": 4428673,
+      "spawn_point": [
+        0.0,
+        1.55,
+        2.0
+      ],
+      "start_photo": "IMG_5087",
+      "scale_applied": 1.0,
+      "photo_camera_height_m": 1.71,
+      "yaw_deg": 137.5,
+      "bounds_m": {
+        "min": [
+          -13.07,
+          -0.5,
+          -16.24
+        ],
+        "max": [
+          16.88,
+          6.0,
+          21.89
+        ]
+      },
+      "spawn_check_render": "atlas/eljefes-kenmore/app-spawn-check.webp"
+    },
+    {
+      "file": "room-shudaxia-atlas.sog",
+      "kind": "room",
+      "splats": 349370,
+      "bytes": 4532101,
+      "spawn_point": [
+        0.0,
+        1.55,
+        2.0
+      ],
+      "start_photo": "IMG_5099",
+      "scale_applied": 1.0,
+      "photo_camera_height_m": 1.48,
+      "yaw_deg": -156.1,
+      "bounds_m": {
+        "min": [
+          -13.85,
+          -0.5,
+          -9.98
+        ],
+        "max": [
+          16.91,
+          4.41,
+          11.59
+        ]
+      },
+      "spawn_check_render": "atlas/shudaxia-hotpot/app-spawn-check.webp"
+    },
+    {
+      "file": "room-starbucks-atlas.sog",
+      "kind": "room",
+      "splats": 349990,
+      "bytes": 4449483,
+      "spawn_point": [
+        0.0,
+        1.55,
+        2.0
+      ],
+      "start_photo": "IMG_5137",
+      "scale_applied": 0.6,
+      "photo_camera_height_m": 1.51,
+      "yaw_deg": 131.2,
+      "bounds_m": {
+        "min": [
+          -9.64,
+          -0.47,
+          -3.96
+        ],
+        "max": [
+          13.62,
+          3.77,
+          9.07
+        ]
+      },
+      "spawn_check_render": "atlas/starbucks-warren/app-spawn-check.webp"
+    }
+  ]
+}

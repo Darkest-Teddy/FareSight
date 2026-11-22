@@ -1,0 +1,60 @@
+submitted starbucks-caff-latte idol 01a20105-f2d2-71a2-b926-f0eb8d87b9d4
+succeeded starbucks-caff-latte idol 5.692556891999857 0.1
+starbucks-caff-latte idol {'30k': {'count': 30000, 'bytes': 381960, 'version': 3, 'decoded_y_range_m': [-0.00042942495201714337, 0.09865117073059082], 'decoded_robust_width_m': 0.08558014295995235, 'decoded_full_width_m': 0.09024833887815475}, '60k': {'count': 60000, 'bytes': 737234, 'version': 3, 'decoded_y_range_m': [-0.0004498930065892637, 0.09867136925458908], 'decoded_robust_width_m': 0.0854480229318142, 'decoded_full_width_m': 0.0902794599533081}}
+OK starbucks-caff-latte succeeded
+submitted starbucks-cappuccino idol 01a20106-6dc1-7d52-8564-c19640d6cf72
+succeeded starbucks-cappuccino idol 5.665890450999996 0.1
+starbucks-cappuccino idol {'30k': {'count': 30000, 'bytes': 386476, 'version': 3, 'decoded_y_range_m': [-4.295063627068885e-05, 0.08629097789525986], 'decoded_robust_width_m': 0.08449326269328594, 'decoded_full_width_m': 0.09017467498779297}, '60k': {'count': 60000, 'bytes': 742156, 'version': 3, 'decoded_y_range_m': [-7.215860387077555e-05, 0.08629097789525986], 'decoded_robust_width_m': 0.08447873536497354, 'decoded_full_width_m': 0.0902237594127655}}
+OK starbucks-cappuccino succeeded
+submitted starbucks-hot-chocolate idol 01a20106-f346-7f80-8d2d-ec11cede2fb5
+succeeded starbucks-hot-chocolate idol 5.721997388999853 0.1
+starbucks-hot-chocolate idol {'30k': {'count': 30000, 'bytes': 390533, 'version': 3, 'decoded_y_range_m': [-0.0007568470318801701, 0.125746488571167], 'decoded_robust_width_m': 0.07416764218360183, 'decoded_full_width_m': 0.09035947173833847}, '60k': {'count': 60000, 'bytes': 750137, 'version': 3, 'decoded_y_range_m': [-0.0007568470318801701, 0.12579073011875153], 'decoded_robust_width_m': 0.07195552736520752, 'decoded_full_width_m': 0.09039102494716644}}
+OK starbucks-hot-chocolate succeeded
+submitted starbucks-caramel-macchiato idol 01a20107-6b3e-7591-81a5-ac2f77a80a0e
+succeeded starbucks-caramel-macchiato idol 5.672844239999904 0.1
+starbucks-caramel-macchiato idol {'30k': {'count': 30000, 'bytes': 387965, 'version': 3, 'decoded_y_range_m': [-5.456321014207788e-05, 0.0993269830942154], 'decoded_robust_width_m': 0.0842624505981803, 'decoded_full_width_m': 0.0902695506811142}, '60k': {'count': 60000, 'bytes': 751253, 'version': 3, 'decoded_y_range_m': [-6.454387767007574e-05, 0.09933003783226013], 'decoded_robust_width_m': 0.08377268388867377, 'decoded_full_width_m': 0.09031455218791962}}
+OK starbucks-caramel-macchiato succeeded
+submitted starbucks-iced-matcha-latte idol 01a20107-e802-7761-bdc3-3902963c9a50
+succeeded starbucks-iced-matcha-latte idol 5.760101309999982 0.1
+starbucks-iced-matcha-latte idol {'30k': {'count': 30000, 'bytes': 391979, 'version': 3, 'decoded_y_range_m': [-0.0007804236374795437, 0.20993641018867493], 'decoded_robust_width_m': 0.08672524262219668, 'decoded_full_width_m': 0.09603960812091827}, '60k': {'count': 60000, 'bytes': 760122, 'version': 3, 'decoded_y_range_m': [-0.000943576917052269, 0.21008354425430298], 'decoded_robust_width_m': 0.08685882817953824, 'decoded_full_width_m': 0.09610649943351746}}
+OK starbucks-iced-matcha-latte succeeded
+submitted starbucks-pink-drink idol 01a20108-6ad3-79e3-b8c3-3bb51f632c91
+succeeded starbucks-pink-drink idol 5.714579819999926 0.1
+starbucks-pink-drink idol {'30k': {'count': 30000, 'bytes': 394455, 'version': 3, 'decoded_y_range_m': [-0.0011050328612327576, 0.2116951048374176], 'decoded_robust_width_m': 0.08624225482344627, 'decoded_full_width_m': 0.0958247184753418}, '60k': {'count': 60000, 'bytes': 766070, 'version': 3, 'decoded_y_range_m': [-0.001110991113819182, 0.21174612641334534], 'decoded_robust_width_m': 0.0865984745323658, 'decoded_full_width_m': 0.09586337208747864}}
+OK starbucks-pink-drink succeeded
+submitted starbucks-caramel-frappuccino-blended-beverage idol 01a20108-e46e-7b10-970e-b46baa3e15df
+succeeded starbucks-caramel-frappuccino-blended-beverage idol 5.852149122 0.1
+starbucks-caramel-frappuccino-blended-beverage idol {'30k': {'count': 30000, 'bytes': 384737, 'version': 3, 'decoded_y_range_m': [-0.000905452820006758, 0.25461795926094055], 'decoded_robust_width_m': 0.08419088888913392, 'decoded_full_width_m': 0.09752564132213593}, '60k': {'count': 60000, 'bytes': 757649, 'version': 3, 'decoded_y_range_m': [-0.000911460374481976, 0.25463739037513733], 'decoded_robust_width_m': 0.08450914546847343, 'decoded_full_width_m': 0.09758780896663666}}
+OK starbucks-caramel-frappuccino-blended-beverage succeeded
+submitted starbucks-mocha-frappuccino-blended-beverage idol 01a2010a-b3ab-75e2-80b5-1dc129a98795
+succeeded starbucks-mocha-frappuccino-blended-beverage idol 5.832775151000078 0.1
+starbucks-mocha-frappuccino-blended-beverage idol {'30k': {'count': 30000, 'bytes': 383677, 'version': 3, 'decoded_y_range_m': [-0.0009286165586672723, 0.2578622102737427], 'decoded_robust_width_m': 0.08598511666059494, 'decoded_full_width_m': 0.09646649658679962}, '60k': {'count': 60000, 'bytes': 742917, 'version': 3, 'decoded_y_range_m': [-0.0009312068577855825, 0.25788119435310364], 'decoded_robust_width_m': 0.086156215518713, 'decoded_full_width_m': 0.09651319682598114}}
+OK starbucks-mocha-frappuccino-blended-beverage succeeded
+submitted starbucks-bacon-gouda-and-egg-sandwich idol 01a2010b-27e9-7e91-b3aa-e0e4612b1faa
+succeeded starbucks-bacon-gouda-and-egg-sandwich idol 5.779823146000126 0.1
+starbucks-bacon-gouda-and-egg-sandwich idol {'30k': {'count': 30000, 'bytes': 397601, 'version': 3, 'decoded_y_range_m': [-0.00010207205195911229, 0.06123786419630051], 'decoded_robust_width_m': 0.09112365934997796, 'decoded_full_width_m': 0.12396356463432312}, '60k': {'count': 60000, 'bytes': 774422, 'version': 3, 'decoded_y_range_m': [-0.00010207205195911229, 0.06123786419630051], 'decoded_robust_width_m': 0.09123326111584901, 'decoded_full_width_m': 0.12399598211050034}}
+OK starbucks-bacon-gouda-and-egg-sandwich succeeded
+submitted starbucks-sausage-cheddar-and-egg-sandwich idol 01a2010b-a43d-77a0-abb9-94d899b08fec
+succeeded starbucks-sausage-cheddar-and-egg-sandwich idol 5.69289025199987 0.1
+starbucks-sausage-cheddar-and-egg-sandwich idol {'30k': {'count': 30000, 'bytes': 401196, 'version': 3, 'decoded_y_range_m': [-0.000126209735753946, 0.05710611119866371], 'decoded_robust_width_m': 0.09879457335919142, 'decoded_full_width_m': 0.12109779566526413}, '60k': {'count': 60000, 'bytes': 767860, 'version': 3, 'decoded_y_range_m': [-0.00012737938959617168, 0.05717005580663681], 'decoded_robust_width_m': 0.09903498869389295, 'decoded_full_width_m': 0.12117213010787964}}
+OK starbucks-sausage-cheddar-and-egg-sandwich succeeded
+submitted starbucks-bacon-and-gruy-re-egg-bites idol 01a2010c-1eca-70a2-aa03-9d4e66ab81de
+succeeded starbucks-bacon-and-gruy-re-egg-bites idol 5.655320025000037 0.1
+starbucks-bacon-and-gruy-re-egg-bites idol {'30k': {'count': 30000, 'bytes': 402738, 'version': 3, 'decoded_y_range_m': [-6.411308277165517e-05, 0.023013636469841003], 'decoded_robust_width_m': 0.09300409611314535, 'decoded_full_width_m': 0.10032601654529572}, '60k': {'count': 60000, 'bytes': 780412, 'version': 3, 'decoded_y_range_m': [-8.654419798403978e-05, 0.023044047877192497], 'decoded_robust_width_m': 0.09329582750797272, 'decoded_full_width_m': 0.10038787126541138}}
+OK starbucks-bacon-and-gruy-re-egg-bites succeeded
+submitted starbucks-cheese-danish idol 01a2010c-935a-7982-80d8-a6e8f8e0c563
+succeeded starbucks-cheese-danish idol 5.708981177000169 0.1
+starbucks-cheese-danish idol {'30k': {'count': 30000, 'bytes': 399552, 'version': 3, 'decoded_y_range_m': [-0.00010376636782893911, 0.019550884142518044], 'decoded_robust_width_m': 0.09665201008319854, 'decoded_full_width_m': 0.11047376692295074}, '60k': {'count': 60000, 'bytes': 774712, 'version': 3, 'decoded_y_range_m': [-0.00010376636782893911, 0.019550884142518044], 'decoded_robust_width_m': 0.09677981957793236, 'decoded_full_width_m': 0.11049400269985199}}
+OK starbucks-cheese-danish succeeded
+submitted starbucks-iced-lemon-loaf idol 01a2010d-0a6e-7b92-837a-64e13978d7d1
+succeeded starbucks-iced-lemon-loaf idol 5.6631943180000235 0.1
+starbucks-iced-lemon-loaf idol {'30k': {'count': 30000, 'bytes': 398135, 'version': 3, 'decoded_y_range_m': [-7.236217061290517e-05, 0.02431762032210827], 'decoded_robust_width_m': 0.08622511103749275, 'decoded_full_width_m': 0.10070790350437164}, '60k': {'count': 60000, 'bytes': 764507, 'version': 3, 'decoded_y_range_m': [-8.903737034415826e-05, 0.024319879710674286], 'decoded_robust_width_m': 0.08635591361671685, 'decoded_full_width_m': 0.10082472860813141}}
+OK starbucks-iced-lemon-loaf succeeded
+submitted starbucks-banana-walnut-and-pecan-loaf idol 01a2010e-765c-7ab3-8d73-df0324818f0c
+succeeded starbucks-banana-walnut-and-pecan-loaf idol 5.745581208000004 0.1
+starbucks-banana-walnut-and-pecan-loaf idol {'30k': {'count': 30000, 'bytes': 401678, 'version': 3, 'decoded_y_range_m': [-0.00020412624871823937, 0.020290885120630264], 'decoded_robust_width_m': 0.08466740604490042, 'decoded_full_width_m': 0.10063928365707397}, '60k': {'count': 60000, 'bytes': 789129, 'version': 3, 'decoded_y_range_m': [-0.00022866242215968668, 0.020291201770305634], 'decoded_robust_width_m': 0.08475264515727758, 'decoded_full_width_m': 0.10064493119716644}}
+OK starbucks-banana-walnut-and-pecan-loaf succeeded
+submitted starbucks-turkey-bacon-cheddar-and-egg-white-sandw idol 01a2010e-fafa-7680-819e-2ea46719151c
+succeeded starbucks-turkey-bacon-cheddar-and-egg-white-sandw idol 5.706368209000175 0.1
+starbucks-turkey-bacon-cheddar-and-egg-white-sandw idol {'30k': {'count': 30000, 'bytes': 402066, 'version': 3, 'decoded_y_range_m': [-0.0005366561817936599, 0.05291430652141571], 'decoded_robust_width_m': 0.08627997431904078, 'decoded_full_width_m': 0.12187837064266205}, '60k': {'count': 60000, 'bytes': 777069, 'version': 3, 'decoded_y_range_m': [-0.0007314778049476445, 0.052949462085962296], 'decoded_robust_width_m': 0.08663488030433654, 'decoded_full_width_m': 0.12196237593889236}}
+OK starbucks-turkey-bacon-cheddar-and-egg-white-sandw succeeded

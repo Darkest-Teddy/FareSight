@@ -84,9 +84,9 @@ export class VRReviewCard {
     if (briefing === this.briefing) return;
     const content = JSON.stringify(briefing);
     const opening = !this.active;
+    if (opening || this.briefing?.id !== briefing.id) this.page = 0;
     this.briefing = briefing;
     if (content !== this.printed || opening) {
-      this.page = 0;
       this.printed = content;
       this.paint();
     }
@@ -213,7 +213,8 @@ export class VRReviewCard {
           case 'reviews':
             for (const review of section.items) {
               paragraph(`“${review.text}”`, true);
-              const attribution = [review.author, review.placeName, review.sample ? 'Sample diner note' : review.unverified ? 'Unverified excerpt' : ''].filter(Boolean).join(' · ');
+              const attribution = [review.author, review.placeName, review.source, review.rating === undefined ? undefined : `${review.rating} / 5`,
+                review.date_label, review.sample ? 'Sample diner note' : review.unverified ? 'Unverified excerpt' : ''].filter(Boolean).join(' · ');
               add(attribution, '700 22px sans-serif', muted, 31, true);
               space(12);
             }

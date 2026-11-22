@@ -1,6 +1,8 @@
-import { randomUUID, timingSafeEqual } from 'node:crypto';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { Config } from '../config.ts';
+import { randomUUID } from 'node:crypto';
+import type { FastifyInstance } from 'fastify';
+import type { PasscodeGuards } from '../services/passcodes.ts';
+import { publishAsset } from '../services/publish.ts';
+import { rejectAsset } from './pipeline.ts';
 import type { PendingReview, Store } from '../db/database.ts';
 
 interface ReviewBody {
@@ -19,19 +21,7 @@ interface DebugLogsBody {
   logs: string[];
 }
 
-export function registerAdminAndCommunity(app: FastifyInstance, store: Store, config: Config) {
-  function verifyAdmin(request: FastifyRequest, reply: FastifyReply): boolean {
-    const expectedPasscode = config.adminPasscode || 'bostonhacks2026';
-    const provided = request.headers['x-admin-passcode'] ?? request.headers.authorization?.replace(/^Bearer /i, '');
-    const expected = Buffer.from(expectedPasscode);
-    if (typeof provided !== 'string' || Buffer.byteLength(provided) !== expected.length
-      || !timingSafeEqual(Buffer.from(provided), expected)) {
-      reply.code(401).send({ error: 'Valid admin passcode is required' });
-      return false;
-    }
-    return true;
-  }
-
+export function registerAdminAndCommunity(app: FastifyInstance, store: Store, guards: PasscodeGuards) {
   app.post<{ Params: { id: string }; Body: ReviewBody }>('/api/restaurants/:id/reviews', {
     schema: {
       body: {
@@ -40,6 +30,7 @@ export function registerAdminAndCommunity(app: FastifyInstance, store: Store, co
         properties: {
           author_label: { type: 'string', minLength: 1, maxLength: 80 },
           text: { type: 'string', minLength: 1, maxLength: 1000 },
+          rating: { type: 'number', minimum: 0, maximum: 5 },
         },
       },
     },
@@ -54,6 +45,7 @@ export function registerAdminAndCommunity(app: FastifyInstance, store: Store, co
       place_id: place.id,
       author_label,
       text,
+      rating: body.rating,
       status: 'pending_review',
       created_at: new Date().toISOString(),
     };
@@ -61,8 +53,7 @@ export function registerAdminAndCommunity(app: FastifyInstance, store: Store, co
     return reply.code(201).send(review);
   });
 
-  app.get('/api/admin/moderation', async (request, reply) => {
-    if (!verifyAdmin(request, reply)) return;
+  app.get('/api/admin/moderation', { onRequest: guards.admin }, async () => {
     const reviews = store.all('reviews').filter((review) => review.status === 'pending_review');
     const uploads = store.all('assets')
       .filter((asset) => asset.status === 'needs_review' || asset.status === 'pending_review')
@@ -80,6 +71,7 @@ export function registerAdminAndCommunity(app: FastifyInstance, store: Store, co
   });
 
   app.post<{ Body: ModerateBody }>('/api/admin/moderation', {
+    onRequest: guards.admin,
     schema: {
       body: {
         type: 'object',
@@ -92,7 +84,6 @@ export function registerAdminAndCommunity(app: FastifyInstance, store: Store, co
       },
     },
   }, async (request, reply) => {
-    if (!verifyAdmin(request, reply)) return;
     const { type, id, action } = request.body;
     if (type === 'review') {
       return store.transaction(() => {
@@ -105,7 +96,7 @@ export function registerAdminAndCommunity(app: FastifyInstance, store: Store, co
           if (place && !place.reviews.some((entry) => entry.id === review.id)) {
             place.reviews.push({
               id: review.id,
-              rating: 5,
+              rating: review.rating ?? 0,
               author: review.author_label,
               text: review.text,
               created_at: review.created_at,
@@ -121,36 +112,16 @@ export function registerAdminAndCommunity(app: FastifyInstance, store: Store, co
       const asset = store.get('assets', id);
       if (!asset) return reply.code(404).send({ error: 'Asset not found' });
       const job = store.get('jobs', id);
-      if (action === 'reject') {
-        asset.status = 'rejected';
-        store.put('assets', asset);
-        if (job) store.updateJob(job, { status_message: 'Asset rejected during moderation' });
-        return asset;
+      if (action === 'approve' && asset.status === 'rejected') return reply.code(409).send({ error: 'Asset has been rejected' });
+      if (job && !store.get('places', job.place_id) && action === 'approve') {
+        return reply.code(409).send({ error: 'The job venue is no longer in the catalog' });
       }
-      asset.status = 'ready';
-      store.put('assets', asset);
-      if (job) {
-        const place = store.get('places', job.place_id);
-        if (place) {
-          if (job.kind === 'room') {
-            for (const room of place.rooms) {
-              if (room.asset_id === place.room_asset_id) room.asset_id = asset.id;
-            }
-            place.room_asset_id = asset.id;
-          } else {
-            const dish = place.dishes.find((entry) => entry.id === job.dish_id
-              || (job.dish_name && entry.name.toLowerCase() === job.dish_name.toLowerCase()));
-            if (dish) dish.asset_id = asset.id;
-          }
-          store.put('places', place);
-        }
-        store.updateJob(job, { status: 'ready', status_message: 'Published', progress: 100 });
-      }
-      return asset;
+      return action === 'reject' ? rejectAsset(store, asset, job) : publishAsset(store, asset, job);
     });
   });
 
   app.post<{ Body: DebugLogsBody }>('/api/debug/logs', {
+    onRequest: guards.admin,
     schema: {
       body: {
         type: 'object',
@@ -166,8 +137,7 @@ export function registerAdminAndCommunity(app: FastifyInstance, store: Store, co
     return reply.code(201).send({ id: entry.id, count: entry.logs.length });
   });
 
-  app.get('/api/debug/logs', async (request, reply) => {
-    if (!verifyAdmin(request, reply)) return;
+  app.get('/api/debug/logs', { onRequest: guards.admin }, async () => {
     return store.all('debug_logs').slice(-25).reverse();
   });
 }

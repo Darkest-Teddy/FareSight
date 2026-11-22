@@ -1,18 +1,18 @@
 import {
-  computeTripEstimate, haversineMeters, ROUTE_COLORS, RIDE_TIMES, type Dish,
-  type GenerationJob, type MbtaSource, type Place, type Stop,
+  buildMbtaTripPlannerUrl, computeTripEstimate, haversineMeters, ROUTE_COLORS, RIDE_TIMES, type Dish,
+  type GenerationJob, type LiveReviewsResponse, type MbtaSource, type Place, type Stop,
 } from '@faresight/shared';
 import { createFareSightEngine, type FareSightSceneEngine, type SceneMode } from '../xr';
 import { SoundEngine } from '../audio/SoundEngine';
 import { api, type PairMessage, type Trip } from '../api/client';
 import { offlineCatalog, offlineManifest } from '../data/fallbackData';
 import { countPreviewsByStop, describe3DCount, isSplat } from '../data/preview3D';
-import { buildComparisonBriefingCard, buildPlaceBriefingCard, loadPlaceDecision, maxBriefingCards, placeDecision, type BriefingCard, type BriefingMode } from '../data/reviewBriefing';
+import { buildComparisonBriefingCard, buildPlaceBriefingCard, loadLiveReviews, loadPlaceDecision, maxBriefingCards, placeDecision, type BriefingCard, type BriefingMode } from '../data/reviewBriefing';
 import { LiveController, type AppControlSurface } from '../live/LiveController';
 import { RealtimeVoice } from '../voice/RealtimeVoice';
 import { AdminModal } from './AdminModal';
 import { attribution } from './AttributionModal';
-import { button, element, errorText, link, message, modal, previewBadge } from './dom';
+import { button, element, errorText, httpUrl, link, message, modal, previewBadge } from './dom';
 import { FilterBar } from './FilterBar';
 import { LiveVoiceDock } from './LiveVoiceDock';
 import { ReviewBriefingModal } from './ReviewBriefingModal';
@@ -63,9 +63,9 @@ export class AppShell {
   private readonly mobile = matchMedia('(max-width: 768px)');
   private engine?: FareSightSceneEngine;
   private engineReady = false;
-  private busyScene = false;
   private sceneVersion = 0;
-  private sceneQueue = Promise.resolve();
+  private navigation = 0;
+  private gpsRequest = 0;
   private stops = offlineCatalog.stops;
   private places = offlineCatalog.places;
   private filtered = this.places;
@@ -127,7 +127,7 @@ export class AppShell {
       viewOnMap: (stopId) => {
         this.dismissReviewCard();
         this.showMap();
-        void this.sceneQueue.then(() => { if (this.mode === 'map') this.engine?.focusMapStopCamera(stopId); });
+        this.engine?.focusMapStopCamera(stopId);
       },
     });
     this.liveController = new LiveController(this.createControlSurface());
@@ -137,7 +137,8 @@ export class AppShell {
         this.engine?.setVoiceState(state);
       },
       onTranscript: (entry) => this.liveDock.appendTranscript(entry),
-      onTool: (name, args) => this.liveController.executeRealtime(name, args),
+      onModel: (model) => this.liveDock.setModel(model),
+      onTool: (name, args, current) => this.liveController.executeRealtime(name, args, current),
       getContext: () => this.liveController.describeContext(),
     });
     this.liveDock = new LiveVoiceDock({
@@ -209,7 +210,7 @@ export class AppShell {
       enterRoom: () => void this.enterRoom(),
       openDish: (dish, compareId, comparePlaceId) => void this.showDish(dish, compareId, comparePlaceId),
       changeFit: (enabled, seating) => void this.setFit(enabled, seating),
-      rotate: (degrees) => { this.rotation = degrees; this.engine?.setDishRotation(degrees * Math.PI / 180); },
+      rotate: (degrees) => this.setDishRotation(degrees),
       table: (useVirtual) => this.setTable(useVirtual),
       sendPlace: () => this.sendCurrent(),
       sendTrip: () => this.sendTrip(),
@@ -224,7 +225,7 @@ export class AppShell {
     });
     this.uploader = new UploadPipelineModal({
       places: () => this.places,
-      published: (job, open) => this.handlePublication(job, open),
+      published: (job, open, current) => this.handlePublication(job, open, current),
     });
     const tabs = element('nav', 'phone-tabs');
     tabs.setAttribute('aria-label', 'Phone companion');
@@ -246,6 +247,7 @@ export class AppShell {
       button('Send debug logs', () => void this.sendDebugLogs(), 'quiet'));
     this.mobile.addEventListener('change', () => this.renderPanels());
     this.sound.setMuted(true);
+    this.sound.onStateChange = () => this.renderAudioState();
     this.filterBar.setStops(this.stops);
     this.renderBreadcrumbs();
     this.applyFilters();
@@ -262,11 +264,18 @@ export class AppShell {
       if (this.stop) void this.refreshStation(false);
       if (this.place) void this.refreshTrip(false);
     }, pollInterval);
-    window.addEventListener('online', () => { void this.loadCatalog(); void this.refreshTransit(); });
+    window.addEventListener('online', () => {
+      void this.loadCatalog();
+      void this.refreshTransit();
+      if ((this.mode === 'venue' || this.mode === 'dish') && this.manifest.offline) void this.refreshManifest();
+    });
     window.addEventListener('resize', () => this.engine?.resize());
     window.addEventListener('pagehide', (event) => {
       this.liveClient.destroy();
-      if (!event.persisted) this.engine?.destroy();
+      if (!event.persisted) {
+        this.sound.destroy();
+        this.engine?.destroy();
+      }
     });
     try {
       this.engine = createFareSightEngine(this.canvas, {
@@ -281,7 +290,7 @@ export class AppShell {
         onCompareDish: (id, placeId) => {
           if (this.mode === 'dish' && this.dish) void this.showDish(this.dish, this.comparison?.dish.id === id ? '' : id, placeId);
         },
-        onNavigateScene: (mode) => { if (!this.busyScene && mode !== this.mode) this.navigate(mode); },
+        onNavigateScene: (mode) => { if (mode !== this.mode) this.navigate(mode); },
         onToggleVoice: () => this.liveClient.toggle(),
         onDismissReviewCard: (cardId) => this.dismissReviewCard(cardId),
         onXrStateChange: (state) => {
@@ -464,11 +473,13 @@ export class AppShell {
 
   private updateFilters(patch: Partial<Filters>) {
     const originChanged = patch.startStopId !== undefined && (patch.startStopId !== this.filters.startStopId || this.origin !== undefined);
-    if (patch.startStopId !== undefined) this.origin = undefined;
+    if (patch.startStopId !== undefined) {
+      ++this.gpsRequest;
+      this.origin = undefined;
+    }
     this.filters = { ...this.filters, ...patch };
     this.applyFilters();
     if (originChanged) void this.refreshTrip();
-    this.syncLiveContext();
   }
 
   private applyFilters() {
@@ -485,8 +496,10 @@ export class AppShell {
 
   private locate() {
     if (!navigator.geolocation) { this.notify('GPS is unavailable in this browser. Choose your start stop.'); return; }
+    const request = ++this.gpsRequest;
     this.notify('Finding the nearest demo stop…');
     navigator.geolocation.getCurrentPosition(({ coords }) => {
+      if (request !== this.gpsRequest) return;
       const distance = (stop: Stop) => haversineMeters(coords.latitude, coords.longitude, stop.lat, stop.lon);
       const nearest = [...this.stops].sort((a, b) => distance(a) - distance(b))[0];
       if (!nearest) { this.notify('No stops are available.'); return; }
@@ -495,7 +508,9 @@ export class AppShell {
       this.applyFilters();
       void this.refreshTrip();
       this.notify(`Starting from ${nearest.name}, your nearest demo stop.`);
-    }, () => this.notify('Could not read your location. Choose a start stop from the list.'), { timeout: 10_000, maximumAge: 60_000 });
+    }, () => {
+      if (request === this.gpsRequest) this.notify('Could not read your location. Choose a start stop from the list.');
+    }, { timeout: 10_000, maximumAge: 60_000 });
   }
 
   private navigate(mode: SceneMode) {
@@ -506,6 +521,7 @@ export class AppShell {
   }
 
   private showMap() {
+    ++this.navigation;
     if (this.mode !== 'map') this.sound.playBack();
     this.mode = 'map';
     this.filterOpen = false;
@@ -513,10 +529,10 @@ export class AppShell {
     this.renderBreadcrumbs();
     this.renderPanels();
     this.renderScene();
-    this.syncLiveContext();
   }
 
   private showStation(stop: Stop) {
+    ++this.navigation;
     const changed = this.stop?.stop_id !== stop.stop_id || this.mode !== 'station';
     // Coming from the map, the drawer waits for the 3D dive and slides in as it lands.
     const arriving = this.mode === 'map';
@@ -543,7 +559,6 @@ export class AppShell {
       void this.refreshStation();
       this.renderScene();
     }
-    this.syncLiveContext();
   }
 
   private updateStationDrawer() {
@@ -584,6 +599,7 @@ export class AppShell {
   }
 
   private async showVenue(place: Place, options?: { inside?: boolean }) {
+    ++this.navigation;
     const changed = this.place?.id !== place.id;
     const cameFromDish = this.mode === 'dish';
     if (changed) {
@@ -612,15 +628,15 @@ export class AppShell {
     this.renderScene();
     void this.refreshTrip();
     if (changed || !this.manifest.data) await this.refreshManifest();
-    this.syncLiveContext();
   }
 
   private async refreshManifest() {
     if (!this.place) return;
     const place = this.place;
+    const navigation = this.navigation;
     const request = ++this.manifestRequest;
     const manifest = await this.loadManifest(place);
-    if (request !== this.manifestRequest || this.place?.id !== place.id) return;
+    if (request !== this.manifestRequest || !this.isCurrentVenue(navigation, place.id)) return;
     this.manifest = manifest;
     this.renderDrawer();
     if (this.mode === 'venue' || this.mode === 'dish') this.renderScene();
@@ -663,6 +679,7 @@ export class AppShell {
       this.engine?.resetCamera();
       return;
     }
+    ++this.navigation;
     this.inside = true;
     this.sound.playSelect();
     this.renderDrawer();
@@ -677,6 +694,7 @@ export class AppShell {
       this.notify('This dish does not have a published 3D preview.');
       return false;
     }
+    const navigation = ++this.navigation;
     let comparison: DishComparison | undefined;
     if (compareId && compareId !== dish.id) {
       const inCurrentMenu = this.manifest.data?.menu_items.some((entry) => entry.dish.id === compareId);
@@ -684,7 +702,7 @@ export class AppShell {
         ? this.places.find((entry) => entry.id === comparePlaceId)
         : inCurrentMenu ? place : this.places.find((entry) => entry.dishes.some((item) => item.id === compareId));
       const manifest = !venue ? undefined : venue.id === place.id ? this.manifest : await this.loadManifest(venue);
-      if (request !== this.dishRequest || this.place?.id !== place.id || this.mode !== mode) return false;
+      if (request !== this.dishRequest || !this.isCurrentVenue(navigation, place.id) || this.mode !== mode) return false;
       const item = manifest?.data?.menu_items.find((entry) => entry.dish.id === compareId);
       if (!venue || !item || !isSplat(item.dish_asset)) {
         this.notify('The comparison dish does not have a published 3D preview.');
@@ -706,7 +724,6 @@ export class AppShell {
     this.renderPanels();
     this.renderDrawer(previous !== dish.id);
     this.renderScene();
-    this.syncLiveContext();
     return true;
   }
 
@@ -733,18 +750,19 @@ export class AppShell {
     });
     if (pairs.length !== this.comparedPlaces.length) return;
     const filters = this.filters;
+    const navigation = this.navigation;
     const request = ++this.comparisonRun;
     this.comparisonLoading = true;
     this.drawer.setComparison(this.comparedPlaces, true);
     try {
       const decisions = await Promise.all(pairs.map(({ place, stop }) => loadPlaceDecision(place, stop, filters)));
-      if (request !== this.comparisonRun) return;
+      if (request !== this.comparisonRun || navigation !== this.navigation) return;
       const controls = this.createControlSurface();
       controls.setHighlightedStops([...new Set(pairs.map(({ stop }) => stop.stop_id))]);
       controls.setHighlightedPlaces(pairs.map(({ place }) => place.id));
       this.showReviewCard(buildComparisonBriefingCard(decisions, this.findStop(filters.startStopId)?.name ?? 'your start stop'));
     } catch (error) {
-      if (request === this.comparisonRun) this.notify(errorText(error));
+      if (request === this.comparisonRun && navigation === this.navigation) this.notify(errorText(error));
     } finally {
       if (request === this.comparisonRun) {
         this.comparisonLoading = false;
@@ -757,13 +775,22 @@ export class AppShell {
     const stop = this.findStop(place.stop_id);
     if (!stop) return;
     const filters = this.filters;
-    const initial = buildPlaceBriefingCard(placeDecision(place, stop, filters));
-    this.showReviewCard(initial);
-    void loadPlaceDecision(place, stop, filters).then((details) => {
-      if (this.briefings.get(initial.id) !== initial) return;
-      this.briefings.set(initial.id, buildPlaceBriefingCard(details));
+    const navigation = this.navigation;
+    let details = placeDecision(place, stop, filters);
+    let web: LiveReviewsResponse | undefined;
+    let card = buildPlaceBriefingCard(details);
+    this.showReviewCard(card);
+    const update = () => {
+      if (!this.isCurrentVenue(navigation, place.id) || this.briefings.get(card.id) !== card) return;
+      card = buildPlaceBriefingCard(details, web);
+      this.briefings.set(card.id, card);
       this.renderReviewCards();
-    }).catch(() => { /* The bundled briefing stays open when supplemental data is unavailable. */ });
+    };
+    void loadPlaceDecision(place, stop, filters).then((fresh) => { details = fresh; update(); }).catch(() => {});
+    void loadLiveReviews(place.id).then((fresh) => {
+      web = fresh;
+      update();
+    }).catch(() => {});
   }
 
   private showReviewCard(card: BriefingCard, mode: BriefingMode = 'add'): void {
@@ -774,7 +801,6 @@ export class AppShell {
     }
     this.briefings.set(card.id, card);
     this.renderReviewCards(card.id);
-    this.syncLiveContext();
   }
 
   private renderReviewCards(activeId?: string): void {
@@ -788,18 +814,23 @@ export class AppShell {
     if (cardId === undefined) this.briefings.clear();
     else this.briefings.delete(cardId);
     this.renderReviewCards();
-    this.syncLiveContext();
   }
 
   private async openBriefingVenue(placeId: string, dishId?: string, compareDishId?: string, comparePlaceId?: string): Promise<void> {
     const place = this.places.find(({ id }) => id === placeId);
     if (!place) return;
     this.dismissReviewCard();
-    await this.showVenue(place, { inside: true });
-    if (!dishId || this.place?.id !== placeId) return;
+    const opening = this.showVenue(place, { inside: true });
+    const navigation = this.navigation;
+    await opening;
+    if (!dishId || !this.isCurrentVenue(navigation, placeId)) return;
     const dish = this.manifest.data?.menu_items.find((item) => item.dish.id === dishId && item.dish_asset)?.dish;
     if (dish) await this.showDish(dish, compareDishId, comparePlaceId);
     else this.notify('This dish does not have a published 3D preview.');
+  }
+
+  private isCurrentVenue(navigation: number, placeId: string): boolean {
+    return this.navigation === navigation && this.place?.id === placeId && (this.mode === 'venue' || this.mode === 'dish');
   }
 
   private setTable(useVirtual: boolean, announce = true) {
@@ -814,28 +845,29 @@ export class AppShell {
     const version = ++this.sceneVersion;
     const { mode, stop, place, dish, comparison, inside } = this;
     const manifest = this.manifest.data;
-    this.sceneQueue = this.sceneQueue.then(async () => {
+    void (async () => {
       const engine = this.engine;
       if (!engine || version !== this.sceneVersion) return;
-      this.busyScene = true;
       try {
         if (mode === 'station' && stop) await engine.focusStop(stop.stop_id);
         else if (mode === 'venue' && place) {
           const preview = manifest && !inside ? { ...manifest, room_asset: null, rooms: [] } : manifest;
           const previewPlace = inside ? place : { ...place, rooms: [] };
-          await engine.openVenue(previewPlace, preview ?? null);
+          const opened = engine.openVenue(previewPlace, preview ?? null);
           engine.setWillWeFit(this.fit && inside, this.filters.groupSize, this.seating);
+          await opened;
         } else if (mode === 'dish' && place && dish && manifest) {
           const otherDish = comparison ? { ...comparison.dish, asset: comparison.asset } : null;
-          await engine.openDish(place, dish, otherDish, manifest, comparison?.place.name);
+          const opened = engine.openDish(place, dish, otherDish, manifest, comparison?.place.name);
           engine.setDishRotation(this.rotation * Math.PI / 180);
           engine.setPassthroughFallback(this.virtualTable);
+          await opened;
         } else await engine.setScene(mode);
       } catch (error) {
         if (version === this.sceneVersion) this.notify('Could not display this 3D view. The details are still available.');
         this.log(errorText(error));
-      } finally { this.busyScene = false; }
-    });
+      }
+    })();
   }
 
   private async launchXR(kind: 'vr' | 'ar') {
@@ -868,12 +900,27 @@ export class AppShell {
   }
 
   private toggleAudio() {
-    this.muted = !this.muted;
+    this.setAudio(this.muted || !this.sound.running);
+  }
+
+  private setAudio(enabled: boolean) {
+    this.muted = !enabled;
     this.sound.setMuted(this.muted);
     this.sound.toggleAmbientHum(!this.muted);
     if (!this.muted) void this.sound.unlock().then(() => this.sound.playSelect()).catch((error) => this.log(errorText(error)));
-    this.audioButton.textContent = this.muted ? 'Audio off' : 'Audio on';
-    this.audioButton.setAttribute('aria-pressed', String(!this.muted));
+    this.renderAudioState();
+  }
+
+  private renderAudioState(): void {
+    const playing = !this.muted && this.sound.running;
+    this.audioButton.textContent = playing ? 'Audio on' : 'Audio off';
+    this.audioButton.setAttribute('aria-pressed', String(playing));
+  }
+
+  private setDishRotation(degrees: number): void {
+    this.rotation = degrees;
+    this.engine?.setDishRotation(degrees * Math.PI / 180);
+    this.drawer.setRotation(degrees);
   }
 
   private sendCurrent() {
@@ -892,10 +939,17 @@ export class AppShell {
     if (message.type === 'open_place' || message.type === 'open_dish') {
       const place = this.places.find((entry) => entry.id === message.place_id);
       if (!place) { this.notify('The paired venue is missing from this catalog.'); return; }
-      await this.showVenue(place);
+      const opening = this.showVenue(place);
+      const navigation = this.navigation;
+      await opening;
+      if (!this.isCurrentVenue(navigation, place.id)) return;
       if (message.type === 'open_dish') {
         const dish = this.manifest.data?.menu_items.find((entry) => entry.dish.id === message.dish_id)?.dish;
-        if (dish) await this.showDish(dish);
+        if (dish) {
+          const openingDish = this.showDish(dish);
+          const dishNavigation = this.navigation;
+          if (!await openingDish || !this.isCurrentVenue(dishNavigation, place.id)) return;
+        }
       }
       this.notify('Opened a view from your paired device.');
     }
@@ -912,22 +966,31 @@ export class AppShell {
       element('p', 'readout', `${trip.total_min} min${stop ? ` to ${stop.name}` : ''}`),
       element('p', '', `Walk ${trip.walk_to_station_min + trip.walk_to_venue_min} min · Wait ${trip.wait_min} min · Ride ${trip.ride_min} min · Transfers ${trip.transfer_min} min`),
     );
-    try { if (trip.planner_url) body.append(link('Open full directions on MBTA', trip.planner_url)); }
-    catch { body.append(message('This trip has no valid directions link.')); }
+    const supplied = typeof trip.planner_url === 'string' ? httpUrl(trip.planner_url) : undefined;
+    const from = this.findStop(trip.from_stop_id);
+    const planner = supplied?.origin === 'https://www.mbta.com' && supplied.pathname === '/trip-planner' &&
+      !supplied.username && !supplied.password ? supplied.href : from && stop ? buildMbtaTripPlannerUrl(from, stop) : undefined;
+    if (planner) body.append(link('Open full directions on MBTA', planner));
     this.incomingTrip.open();
   }
 
-  private async handlePublication(job: GenerationJob, open: boolean) {
+  private async handlePublication(job: GenerationJob, open: boolean, current: () => boolean) {
+    const requestedFrom = this.navigation;
     await this.loadCatalog();
+    if (!current() || requestedFrom !== this.navigation) return;
     const place = this.places.find((entry) => entry.id === job.place_id);
     if (!place) throw new Error('The published venue is missing from the catalog.');
     if (!open) {
       await api.manifest(job.place_id);
-      if (this.place?.id === job.place_id) await this.refreshManifest();
+      if (current() && this.isCurrentVenue(requestedFrom, place.id)) await this.refreshManifest();
       return;
     }
-    await this.showVenue(place);
+    const opening = this.showVenue(place);
+    const navigation = this.navigation;
+    await opening;
+    if (!current() || !this.isCurrentVenue(navigation, place.id)) return;
     await this.refreshManifest();
+    if (!current() || !this.isCurrentVenue(navigation, place.id)) return;
     if (job.kind === 'room' && this.manifest.data?.room_asset?.id === job.asset_id) {
       this.inside = false;
       await this.enterRoom();
@@ -973,7 +1036,7 @@ export class AppShell {
         seating: this.seating,
         rotation: this.rotation,
         virtualTable: this.virtualTable,
-        muted: this.muted,
+        muted: this.muted || !this.sound.running,
         drawerOpen: this.drawerOpen,
         sheetExpanded: this.sheetExpanded,
         filterOpen: this.filterOpen,
@@ -1024,11 +1087,7 @@ export class AppShell {
       setFit: (enabled, seating) => this.setFit(enabled, seating),
       showReviewCard: (card, mode) => this.showReviewCard(card, mode),
       dismissReviewCard: (cardId) => this.dismissReviewCard(cardId),
-      setDishRotation: (degrees) => {
-        this.rotation = degrees;
-        this.engine?.setDishRotation(degrees * Math.PI / 180);
-        this.renderDrawer();
-      },
+      setDishRotation: (degrees) => this.setDishRotation(degrees),
       setTableMode: (useVirtual) => this.setTable(useVirtual),
       orbitCamera: (yawDeltaDeg, pitchDeltaDeg, zoomFactor) => {
         this.engine?.orbitCamera(yawDeltaDeg * Math.PI / 180, pitchDeltaDeg * Math.PI / 180, zoomFactor);
@@ -1044,7 +1103,7 @@ export class AppShell {
       },
       setFilterOpen: (open) => this.setFilterOpen(open),
       setAudioSfx: (enabled) => {
-        if (enabled === this.muted) this.toggleAudio();
+        this.setAudio(enabled);
       },
       openModal: (name) => {
         this.uploader.close();
@@ -1085,10 +1144,6 @@ export class AppShell {
       },
       announce: (text) => this.notify(text),
     };
-  }
-
-  private syncLiveContext() {
-    this.liveClient.updateContext();
   }
 
   private notify(text: string) {

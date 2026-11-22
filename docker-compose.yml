@@ -1,0 +1,19 @@
+# Local stand-ins for Tiger Data (Postgres) and Vultr Object Storage (MinIO), used by the capture
+# tests and for development without cloud credentials. See the "Capture storage" section of the README.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: faresight
+      POSTGRES_PASSWORD: faresight
+      POSTGRES_DB: faresight
+    ports: ['54329:5432']
+    tmpfs: [/var/lib/postgresql/data]
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: faresight
+      MINIO_ROOT_PASSWORD: faresight-secret
+    ports: ['9009:9000']
+    tmpfs: [/data]

@@ -26,17 +26,20 @@ export class PairingModal {
     this.disconnect = button('Disconnect', () => this.closeConnection(), 'quiet');
     const codeForm = element('form', 'form-stack');
     const code = element('input');
-    code.inputMode = 'numeric';
+    code.autocapitalize = 'characters';
+    code.spellcheck = false;
     code.autocomplete = 'off';
-    code.pattern = '[0-9]{4}';
-    code.maxLength = 4;
+    code.pattern = '[A-HJ-NP-Za-hj-np-z2-9]{6}';
+    code.maxLength = 6;
     code.required = true;
-    code.placeholder = '0000';
+    code.placeholder = 'ABCD23';
+    code.addEventListener('input', () => { code.value = code.value.toUpperCase(); });
     const join = element('button', '', 'Join with code');
-    codeForm.append(field('Four-digit code', code), join);
+    codeForm.append(field('Six-character code', code), join);
     codeForm.addEventListener('submit', (event) => {
       event.preventDefault();
-      if (/^\d{4}$/.test(code.value)) this.connect(code.value);
+      const normalized = code.value.toUpperCase();
+      if (/^[A-HJ-NP-Z2-9]{6}$/.test(normalized)) this.connect(normalized);
     });
     const actions = element('div', 'button-row');
     actions.append(this.create, this.disconnect);

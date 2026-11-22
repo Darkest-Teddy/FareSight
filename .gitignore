@@ -1,5 +1,6 @@
 .env
-.env.local
+.env.*
+!.env.example
 node_modules
 dist
 server/data/*.db*
@@ -14,3 +15,10 @@ experiments/**/outputs/
 experiments/*.tar.gz
 __pycache__/
 *.pyc
+experiments/**/vendor/
+experiments/**/venv/
+experiments/**/hf-cache/
+experiments/**/atlas/*-*/
+
+# git-lfs on Windows can write its hooks to a literal "dev/null" path.
+dev/null/

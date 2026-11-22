@@ -1,5 +1,7 @@
 const SHELL = 'faresight-shell-v1';
 const DEMO = 'faresight-demo-v2';
+const MAX_DEMO_ENTRIES = 36;
+let demoWrites = Promise.resolve();
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
@@ -14,26 +16,10 @@ self.addEventListener('activate', (event) => {
     for (const key of await caches.keys()) {
       if (key.startsWith('faresight-') && key !== SHELL && key !== DEMO) await caches.delete(key);
     }
+    await trimDemoCache(await caches.open(DEMO));
     await self.clients.claim();
   })());
 });
-
-self.addEventListener('message', (event) => {
-  if (event.data === 'warm-demo-cache') event.waitUntil(warmDemoCache());
-});
-
-async function warmDemoCache() {
-  try {
-    const index = await fetch('/assets-demo/cache-list.json');
-    if (!index.ok) return;
-    const files = await index.json();
-    for (let i = 0; i < files.length; i += 4) {
-      await Promise.allSettled(files.slice(i, i + 4).filter((path) =>
-        typeof path === 'string' && path.startsWith('/assets-demo/'),
-      ).map((path) => cacheFirst(DEMO, new Request(new URL(path, self.location.origin)))));
-    }
-  } catch { /* Development and older deployments can cache demo files on demand. */ }
-}
 
 self.addEventListener('fetch', (event) => {
   const request = event.request;
@@ -64,11 +50,36 @@ async function captureShell(response) {
 // Regenerated models keep their file names, so demo assets are always checked against the
 // network and the cached copy is only used when the network is unavailable.
 async function networkFirst(key, request) {
-  try {
-    const response = await fetch(request);
-    if (response.ok) return store(await caches.open(key), request, response);
-  } catch { /* Offline: fall through to the cached copy. */ }
-  return cacheFirst(key, request);
+  const cache = await caches.open(key);
+  let response;
+  try { response = await fetch(request); }
+  catch { /* Offline: fall through to the cached copy. */ }
+  if (response?.ok && isDemoAsset(request, response)) {
+    const copy = response.clone();
+    const write = demoWrites.then(async () => {
+      await cache.delete(request);
+      await cache.put(request, copy);
+      await trimDemoCache(cache);
+    });
+    demoWrites = write.catch(() => {});
+    await demoWrites;
+    return response;
+  }
+  return await cache.match(request) ??
+    (response && !response.ok ? response : new Response('Demo asset unavailable', { status: 502 }));
+}
+
+async function trimDemoCache(cache) {
+  const entries = await cache.keys();
+  for (const entry of entries.slice(0, Math.max(0, entries.length - MAX_DEMO_ENTRIES))) {
+    await cache.delete(entry);
+  }
+}
+
+function isDemoAsset(request, response) {
+  const mediaType = (response.headers.get('content-type') ?? '').toLowerCase();
+  return !mediaType.includes('text/html') && !mediaType.includes('application/xhtml+xml') &&
+    (!mediaType.includes('application/json') || new URL(request.url).pathname.toLowerCase().endsWith('.json'));
 }
 
 async function cacheFirst(key, request) {

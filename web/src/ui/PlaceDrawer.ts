@@ -1,11 +1,12 @@
 import {
-  buildMbtaTripPlannerUrl, MBTA_SUBWAY_FARE, ROUTE_COLORS,
+  buildMbtaTripPlannerUrl, formatDishPrice, MBTA_SUBWAY_FARE, ROUTE_COLORS,
   type Asset, type Dish, type MbtaSource, type Place, type RestaurantManifest, type Stop,
 } from '@faresight/shared';
 import { api, type Alert, type Prediction, type Trip } from '../api/client';
 import { has3DDish, has3DRoom, hasDishPreview, isSplat } from '../data/preview3D';
-import { bostonHours, formatHours, week } from '../data/reviewBriefing';
-import { button, element, errorText, field, link, message, money, option, previewBadge, section } from './dom';
+import { bostonHours, formatHours, liveBriefingReview, loadLiveReviews, reviewFacts, week } from '../data/reviewBriefing';
+import { button, element, errorText, field, httpUrl, link, message, money, option, previewBadge, replacePreservingFocus, section } from './dom';
+import { renderBriefingReview } from './ReviewBriefingModal';
 import { oneWayCost, type Filters } from './state';
 
 export type Seating = 'seated' | 'standing';
@@ -251,6 +252,7 @@ export class PlaceDrawer {
     let firstHighlighted: HTMLButtonElement | undefined;
     for (const place of places) {
       const item = button('', () => this.actions.showPlace(place), 'place-row');
+      item.dataset.focusKey = place.id;
       if (highlightedPlaces?.has(place.id)) {
         item.dataset.highlighted = 'true';
         if (!firstHighlighted) firstHighlighted = item;
@@ -266,7 +268,7 @@ export class PlaceDrawer {
       row.append(item, this.compareButton(place));
       list.append(row);
     }
-    this.stationList.replaceChildren(list);
+    replacePreservingFocus(this.stationList, this.title, list);
     if (compareFocus) [...list.querySelectorAll<HTMLButtonElement>('.compare-place')]
       .find((toggle) => toggle.dataset.compareVenue === compareFocus)?.focus({ preventScroll: true });
     if (firstHighlighted) firstHighlighted.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -303,7 +305,7 @@ export class PlaceDrawer {
       if (applicable.length) alerts.append(...applicable.map((alert) => element('p', '', alert.header)));
       else alerts.append(message('No active alerts for this stop.'));
     } else alerts.append(message(data.alerts.error ?? 'Checking service alerts…', Boolean(data.alerts.error)));
-    this.stationDetails.replaceChildren(arrivals, alerts);
+    replacePreservingFocus(this.stationDetails, this.title, arrivals, alerts);
   }
 
   venue(data: ViewData, focus = false) {
@@ -319,7 +321,9 @@ export class PlaceDrawer {
       summary.append(this.venueComparison);
       this.reviewsNode = element('div');
       this.reviewsKey = '';
-      this.content.replaceChildren(summary, ...venueFacts(place), this.costDetails, this.tripDetails, this.modelDetails, this.pairingDetails, this.reviewsNode);
+      const live = element('div');
+      this.content.replaceChildren(summary, ...venueFacts(place), live, this.costDetails, this.tripDetails, this.modelDetails, this.pairingDetails, this.reviewsNode);
+      void this.updateLiveReviews(place, live);
       this.content.scrollTop = 0;
       this.modelKey = '';
     }
@@ -339,7 +343,7 @@ export class PlaceDrawer {
     const reviewsKey = JSON.stringify(place.reviews);
     if (this.reviewsKey !== reviewsKey) {
       this.reviewsKey = reviewsKey;
-      this.reviewsNode?.replaceChildren(this.reviews(place));
+      if (this.reviewsNode) replacePreservingFocus(this.reviewsNode, this.title, this.reviews(place));
     }
     if (focus) {
       this.title.tabIndex = -1;
@@ -347,17 +351,49 @@ export class PlaceDrawer {
     }
   }
 
+  private async updateLiveReviews(place: Place, host: HTMLElement): Promise<void> {
+    const node = section('Live web reviews');
+    const status = message('Checking public reviews…');
+    node.append(status);
+    replacePreservingFocus(host, node.querySelector('h3')!, node);
+    const result = await loadLiveReviews(place.id).catch(() => undefined);
+    if (!host.isConnected) return;
+    if (!result?.live) {
+      status.textContent = 'Live reviews unavailable. Catalog notes are still available below.';
+      node.append(button('Check again', () => { void this.updateLiveReviews(place, host); }, 'quiet'));
+      return;
+    }
+    status.remove();
+    const facts = reviewFacts(place.details, result);
+    for (const { source, rating, count, url } of facts.ratings) {
+      const row = element('p');
+      row.append(url ? link(source, url) : source,
+        ` · ${rating.toFixed(1)} / 5${count ? ` · ${ratingCount.format(count)} reviews` : ''}`);
+      node.append(row);
+    }
+    if (facts.highlights.length) {
+      const highlights = element('ul', 'review-highlights');
+      highlights.append(...facts.highlights.map((text) => element('li', '', text)));
+      node.append(highlights);
+    }
+    if (result.reviews?.length) {
+      node.append(...result.reviews.slice(0, 3).map((review) => renderBriefingReview(liveBriefingReview(review))));
+    } else node.append(element('p', 'muted', 'No attributed customer excerpts found.'));
+  }
+
   private updateCost({ place, filters, trip, dish }: ViewData) {
     const node = section('Total cost');
     const group = filters.groupSize;
     const roomPrice = !dish && place.rooms.find((room) => /hour/i.test(room.price_unit));
     const price = dish?.price ?? place.typical_price;
+    const spendLabel = dish && dish.price == null ? 'Typical venue spend (estimate)'
+      : dish || place.category === 'restaurant' ? 'Food' : 'Typical venue spend';
     const fare = trip.data?.fare ?? (filters.startStopId === place.stop_id ? 0 : MBTA_SUBWAY_FARE);
     const roundTrip = trip.data?.round_trip_fare ?? fare * 2;
     const food = roomPrice ? roomPrice.price / group : price;
     node.append(element('p', 'cost-total price', `${money(food + fare)} ${group > 1 ? 'per person' : 'one way'}`));
     node.append(breakdown([
-      [roomPrice ? 'Room hire' : dish || place.category === 'restaurant' ? 'Food' : 'Typical venue spend', roomPrice ? `${money(roomPrice.price)} / hour` : money(price)],
+      [roomPrice ? 'Room hire' : spendLabel, roomPrice ? `${money(roomPrice.price)} / hour` : money(price)],
       ['T fare, one way', money(fare)],
       ['T fare, round trip', money(roundTrip)],
       [group > 1 ? 'Round trip per person' : 'Total with round trip', money(food + roundTrip)],
@@ -388,10 +424,9 @@ export class PlaceDrawer {
     if (trip.error || trip.offline) node.append(button('Refresh trip estimate', this.actions.retryTrip, 'quiet'));
     if (originName && stop) {
       const fallback = buildMbtaTripPlannerUrl(`${originName}, Boston`, { lat: place.lat, lon: place.lon });
-      try { node.append(link('Open full directions on MBTA', trip.data?.planner_url || fallback)); }
-      catch { node.append(link('Open full directions on MBTA', fallback)); }
+      node.append(link('Open full directions on MBTA', httpUrl(trip.data?.planner_url)?.href ?? fallback));
     }
-    this.tripDetails.replaceChildren(node);
+    replacePreservingFocus(this.tripDetails, this.title, node);
   }
 
   private updateModels(data: ViewData) {
@@ -400,7 +435,6 @@ export class PlaceDrawer {
       manifest.error, manifest.offline, highlightedDishId]);
     if (this.modelKey === key && this.modelManifest === manifest.data && this.modelPlace === place
         && this.modelComparison === comparison && this.modelCatalog === data.places) return;
-    const previousFocus = this.modelDetails.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.control : undefined;
     this.modelKey = key;
     this.modelManifest = manifest.data;
     this.modelPlace = place;
@@ -424,32 +458,35 @@ export class PlaceDrawer {
       if (dish) {
         const active = menu.find((entry) => entry.dish.id === dish.id)?.dish_asset;
         if (active) badgeAsset(active, node);
+        node.append(element('p', 'price', formatDishPrice(dish.price)));
         if (dish.portion_note) node.append(element('p', '', dish.portion_note));
 
         const compare = element('select');
         compare.dataset.control = 'compare';
         compare.append(option('', 'One dish'));
-        for (const entry of menu) {
-          if (entry.dish.id !== dish.id && isSplat(entry.dish_asset)) compare.append(option(entry.dish.id, entry.dish.name));
-        }
-        const others = element('optgroup');
-        others.label = 'Other Boston restaurants';
+        const addVenue = (venue: Place, dishes: readonly Dish[]) => {
+          if (!dishes.length) return;
+          const group = element('optgroup');
+          group.label = venue.name;
+          for (const entry of dishes) {
+            const choice = option(entry.id, entry.name);
+            choice.dataset.placeId = venue.id;
+            group.append(choice);
+          }
+          compare.append(group);
+        };
+        addVenue(place, menu.filter((entry) => entry.dish.id !== dish.id && isSplat(entry.dish_asset)).map((entry) => entry.dish));
         for (const venue of data.places) {
           if (venue.id === place.id) continue;
-          for (const entry of venue.dishes.filter(hasDishPreview)) {
-            const choice = option(entry.id, `${venue.name} — ${entry.name}`);
-            choice.dataset.placeId = venue.id;
-            others.append(choice);
-          }
+          addVenue(venue, venue.dishes.filter(hasDishPreview));
         }
-        if (others.children.length) compare.append(others);
         compare.value = comparison?.dish.id ?? '';
         compare.disabled = compare.options.length < 2;
         compare.addEventListener('change', () => this.actions.openDish(dish, compare.value, compare.selectedOptions[0]?.dataset.placeId));
         node.append(field('Compare side-by-side', compare));
         if (compare.disabled) node.append(message('No other published 3D dish previews are available.'));
         if (comparison) {
-          node.append(element('p', '', `${comparison.dish.name} · ${comparison.place.name}`));
+          node.append(element('p', '', `${comparison.dish.name} · ${comparison.place.name} · ${formatDishPrice(comparison.dish.price)}`));
           badgeAsset(comparison.asset, node);
           if (comparison.offline) node.append(message('The comparison uses a bundled preview.'));
           if (active?.scale_status !== 'measured' || comparison.asset.scale_status !== 'measured') {
@@ -463,10 +500,8 @@ export class PlaceDrawer {
         slider.value = String(data.rotation);
         slider.dataset.control = 'rotation';
         const degrees = element('output', 'muted', slider.value + '°');
-        slider.addEventListener('input', () => {
-          degrees.value = slider.value + '°';
-          this.actions.rotate(Number(slider.value));
-        });
+        degrees.dataset.rotationReadout = '';
+        slider.addEventListener('input', () => this.actions.rotate(Number(slider.value)));
         node.append(field('Turntable rotation', slider), degrees);
         const tableMode = element('select');
         tableMode.dataset.control = 'table';
@@ -515,15 +550,26 @@ export class PlaceDrawer {
         const label = element('div');
         const name = element('strong', '', entry.dish.name);
         if (hasDishPreview(entry.dish) || isSplat(entry.dish_asset)) name.append(previewBadge());
-        label.append(name, element('p', 'price', money(entry.dish.price)));
+        label.append(name, element('p', 'price', formatDishPrice(entry.dish.price)));
         row.append(label);
-        if (entry.dish_asset) row.append(button('View dish on table', () => this.actions.openDish(entry.dish)));
+        if (entry.dish_asset) {
+          const open = button('View dish on table', () => this.actions.openDish(entry.dish));
+          open.setAttribute('aria-label', `View ${entry.dish.name} on the table`);
+          open.dataset.focusKey = entry.dish.id;
+          row.append(open);
+        }
         else row.append(element('span', 'muted', 'No 3D preview'));
         node.append(row);
       }
     }
-    this.modelDetails.replaceChildren(node);
-    if (previousFocus) node.querySelector<HTMLElement>(`[data-control="${previousFocus}"]`)?.focus({ preventScroll: true });
+    replacePreservingFocus(this.modelDetails, this.title, node);
+  }
+
+  setRotation(degrees: number): void {
+    const slider = this.modelDetails.querySelector<HTMLInputElement>('[data-control="rotation"]');
+    const readout = this.modelDetails.querySelector<HTMLOutputElement>('[data-rotation-readout]');
+    if (slider) slider.value = String(degrees);
+    if (slider && readout) readout.value = `${slider.value}°`;
   }
 
   private reviews(place: Place) {

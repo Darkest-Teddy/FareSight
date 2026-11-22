@@ -24,7 +24,7 @@ interface ResponseData { data: Resource[]; included?: Resource[] }
 
 const textOrNull = (value: unknown) => typeof value === 'string' ? value : null;
 const relation = (item: Resource, key: string) => item.relationships?.[key]?.data?.id ?? null;
-const routeIds = (query: Query) => query.route?.split(',') ?? routes;
+const routeIds = (query: Query) => query.route ? [...new Set(query.route.split(','))] : routes;
 
 function toPrediction(item: Resource, trips: Map<string, string>, lastTrip = false): MbtaPrediction {
   const attrs = item.attributes;
@@ -69,21 +69,53 @@ const querySchema = {
 export function registerMbta(app: FastifyInstance, config: Config, store: Store) {
   const cache = new Map<string, { expires: number; data: Promise<{ source: MbtaSource; items: unknown[] }> }>();
 
-  async function fetchMbta(service: Service, params: Record<string, string>): Promise<ResponseData> {
-    const url = new URL(`https://api-v3.mbta.com/${service}`);
-    url.search = new URLSearchParams(params).toString();
-    const response = await fetch(url, {
-      headers: config.mbtaKey ? { 'x-api-key': config.mbtaKey } : undefined,
-      signal: AbortSignal.timeout(3500),
-    });
-    if (!response.ok) throw new Error(`MBTA HTTP ${response.status}`);
-    const result = await response.json() as ResponseData;
-    if (!Array.isArray(result.data)) throw new Error('Invalid MBTA response');
-    return result;
+  let inFlight = 0;
+  let cooldownUntil = 0;
+  const waiting: (() => void)[] = [];
+
+  async function acquire() {
+    if (Date.now() < cooldownUntil || waiting.length >= 32) throw new Error('MBTA capacity unavailable');
+    if (inFlight >= 8) await new Promise<void>((resolve) => waiting.push(resolve));
+    else inFlight++;
   }
 
-  async function queryCached<T>(service: Service, key: Query, live: () => Promise<T[]>, demo: () => T[]) {
-    const id = JSON.stringify([service, key.stop, key.route, key.direction, key.date]);
+  function release() {
+    const next = waiting.shift();
+    if (next) next();
+    else inFlight--;
+  }
+
+  async function fetchMbta(service: Service, params: Record<string, string>): Promise<ResponseData> {
+    await acquire();
+    try {
+      if (Date.now() < cooldownUntil) throw new Error('MBTA capacity unavailable');
+      const url = new URL(`https://api-v3.mbta.com/${service}`);
+      url.search = new URLSearchParams(params).toString();
+      const response = await fetch(url, {
+        headers: config.mbtaKey ? { 'x-api-key': config.mbtaKey } : undefined,
+        signal: AbortSignal.timeout(3500),
+        redirect: 'error',
+      });
+      if (response.status === 429) {
+        const retry = response.headers.get('retry-after');
+        const now = Date.now();
+        const deadline = retry && /^\d+$/.test(retry) ? now + Number(retry) * 1000 : Date.parse(retry ?? '');
+        cooldownUntil = Math.max(cooldownUntil, Number.isFinite(deadline) ? deadline : now + 30_000);
+      }
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new Error(`MBTA HTTP ${response.status}`);
+      }
+      const result = await response.json() as ResponseData;
+      if (!Array.isArray(result?.data)) throw new Error('Invalid MBTA response');
+      return result;
+    } finally {
+      release();
+    }
+  }
+
+  async function queryCached<T>(service: Service, key: Query, live: () => Promise<T[] | { partial: T[] }>, demo: () => T[]) {
+    const id = JSON.stringify([service, key.stop, [...routeIds(key)].sort(), key.direction, key.date]);
     const found = cache.get(id);
     if (found && found.expires > Date.now()) return found.data as Promise<{ source: MbtaSource; items: T[] }>;
     if (cache.size >= 256) cache.delete(cache.keys().next().value!);
@@ -93,7 +125,10 @@ export function registerMbta(app: FastifyInstance, config: Config, store: Store)
 
     async function resolve(): Promise<{ source: MbtaSource; items: T[] }> {
       try {
-        return { source: 'live', items: await live() };
+        const result = await live();
+        if (Array.isArray(result)) return { source: 'live', items: result };
+        entry.expires = Date.now() + 10_000;
+        return { source: 'live', items: result.partial };
       } catch {
         entry.expires = Date.now() + Math.min(ttl[service], 10_000);
         return { source: 'simulated', items: demo() };
@@ -136,7 +171,7 @@ export function registerMbta(app: FastifyInstance, config: Config, store: Store)
 
   app.get<{ Querystring: Query }>('/api/mbta/predictions', { schema: { querystring: querySchema } }, async ({ query }, reply) => {
     if (routeIds(query).some((route) => !routes.includes(route))) return reply.code(400).send({ error: 'Unknown subway route' });
-    const result = await predictions(query);
+    const result = await predictions({ stop: query.stop, route: query.route, direction: query.direction });
     return { source: result.source, predictions: result.items };
   });
 
@@ -164,14 +199,17 @@ export function registerMbta(app: FastifyInstance, config: Config, store: Store)
     const selectedRoutes = stationRoutes(query);
     const directions = query.direction === undefined ? [0, 1] : [query.direction];
     return queryCached('schedules', query, async () => {
-      const schedules = await Promise.all(selectedRoutes.flatMap((route) => directions.map(async (direction) => {
+      const schedules = await Promise.allSettled(selectedRoutes.flatMap((route) => directions.map(async (direction) => {
         const data = await fetchMbta('schedules', {
           ...params({ stop, route, direction }), 'filter[date]': date,
           'page[limit]': '1', sort: '-departure_time', include: 'trip',
         });
         return data.data.map((item) => toPrediction(item, tripHeadsigns(data), true));
       })));
-      return schedules.flat();
+      const successful = schedules.filter((result) => result.status === 'fulfilled');
+      if (schedules.length && !successful.length) throw new Error('MBTA schedules unavailable');
+      const items = successful.flatMap((result) => result.value);
+      return successful.length === schedules.length ? items : { partial: items };
     }, () => demoSchedules(stop, selectedRoutes, date, query.direction));
   }
 
@@ -179,7 +217,7 @@ export function registerMbta(app: FastifyInstance, config: Config, store: Store)
     if (routeIds(query).some((route) => !routes.includes(route))) return reply.code(400).send({ error: 'Unknown subway route' });
     const stop = query.stop ?? 'place-bucen';
     const date = query.date ?? serviceDate();
-    const result = await schedules({ ...query, stop, date });
+    const result = await schedules({ stop, date, direction: query.direction, route: stationRoutes({ ...query, stop }).join(',') || query.route });
     return { source: result.source, stop_id: stop, service_date: date, schedules: result.items };
   });
 

@@ -60,6 +60,7 @@ export class CanvasSurface {
   destroy(): void {
     this.material.destroy();
     this.texture.destroy();
+    this.canvas.width = this.canvas.height = 0;
   }
 }
 

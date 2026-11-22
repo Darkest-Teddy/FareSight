@@ -10,6 +10,7 @@ const AIM_DEGREES = 7;
 const STEADY_SPEED = 16;
 const FAST_SPEED = 80;
 const HOLD_MS = 450;
+const MOTION_TIMEOUT_MS = 400;
 const POP_MS = 420;
 // Long-side field of view the dots are drawn with. It is wider than the camera's own (about 64°) on purpose:
 // at camera scale a phone in portrait shows one dot at a time, and the person could not see what comes next.
@@ -52,7 +53,10 @@ class GuidedScan {
   private targets: Target[] = [];
   private pose?: Pose;
   private sensorPose?: Pose;
+  private sensorAt = -Infinity;
   private stream?: MediaStream;
+  private connecting = false;
+  private videoInterrupted = true;
   private audio?: AudioContext;
   /** Development stand-in for the sensors and camera, steered by dragging. */
   private simulated?: { yaw: number; pitch: number; frame: HTMLCanvasElement };
@@ -63,6 +67,7 @@ class GuidedScan {
   private settled = false;
   private held = 0;
   private speed = 0;
+  private captureEpoch = 0;
   private last = 0;
   private raf = 0;
 
@@ -71,6 +76,16 @@ class GuidedScan {
     this.video.playsInline = true;
     this.video.muted = true;
     this.video.setAttribute('aria-hidden', 'true');
+    for (const type of ['pause', 'waiting', 'emptied']) {
+      this.video.addEventListener(type, () => {
+        this.videoInterrupted = true;
+        this.resetAim();
+      });
+    }
+    this.video.addEventListener('playing', () => {
+      this.videoInterrupted = false;
+      this.resetAim();
+    });
     this.dome.setAttribute('aria-hidden', 'true');
     this.count.setAttribute('aria-live', 'polite');
     const top = el('header', 'sweep-top');
@@ -135,25 +150,23 @@ class GuidedScan {
     const camera = window.isSecureContext && Boolean(navigator.mediaDevices?.getUserMedia);
     // Motion access is asked first: iOS refuses it once the tap is no longer the direct cause.
     const allowed = await requestMotion();
-    window.addEventListener('deviceorientation', this.onOrientation);
-    const sensed = allowed && await this.firstReading();
+    if (this.settled) return;
+    document.addEventListener('visibilitychange', this.onVisibility);
+    if (allowed) window.addEventListener('deviceorientation', this.onOrientation);
+    const sensed = allowed && camera && await this.firstReading();
+    if (this.settled) return;
     if (import.meta.env.DEV && (!camera || !sensed)) this.simulate();
     else if (!camera) return this.fail('This page cannot open the camera. The scan needs a secure (https) connection.');
     else if (!sensed) return this.fail('This device did not share its motion sensors, which the scan uses to know where the phone points. Allow motion access for this site and try again.');
     else {
       try {
-        // 1080p keeps 32 photos light to upload and is what every phone browser can deliver.
-        this.stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-        });
-        this.video.srcObject = this.stream;
-        await this.video.play();
+        await this.connectCamera();
+        if (this.settled) return;
       } catch {
+        if (this.settled) return;
         return this.fail('The camera could not be opened. Allow camera access for this site and try again.');
       }
     }
-    if (this.settled) return this.release();
     const pose = this.readPose();
     if (!pose) return this.fail('This device stopped sharing its motion sensors.');
     // A phone pointing at the floor or ceiling has no heading of its own, so its top edge stands in.
@@ -170,15 +183,102 @@ class GuidedScan {
   }
 
   private readonly onOrientation = (event: DeviceOrientationEvent) => {
-    if (event.alpha === null || event.beta === null || event.gamma === null) return;
-    this.sensorPose = poseFromOrientation(event.alpha, event.beta, event.gamma);
+    const { alpha, beta, gamma } = event;
+    if (document.hidden || alpha === null || beta === null || gamma === null
+      || ![alpha, beta, gamma].every(Number.isFinite)) return;
+    const now = performance.now();
+    if (now - this.sensorAt > MOTION_TIMEOUT_MS) this.resetAim();
+    this.sensorAt = now;
+    this.sensorPose = poseFromOrientation(alpha, beta, gamma);
+  };
+
+  private readonly onVisibility = () => {
+    this.sensorAt = -Infinity;
+    this.resetAim();
+    if (!document.hidden && this.scanning && this.stream && this.video.paused) {
+      void this.video.play().catch(() => {
+        if (this.scanning && !this.settled && !document.hidden) this.showCameraRetry();
+      });
+    }
   };
 
   private async firstReading() {
     for (let waited = 0; waited < 1200 && !this.sensorPose; waited += 50) {
       await new Promise((resolve) => window.setTimeout(resolve, 50));
+      if (this.settled) return false;
     }
     return Boolean(this.sensorPose);
+  }
+
+  private async connectCamera() {
+    this.disconnectCamera();
+    this.connecting = true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      });
+      if (this.settled) {
+        for (const track of stream.getTracks()) track.stop();
+        return;
+      }
+      this.stream = stream;
+      for (const track of stream.getVideoTracks()) {
+        track.addEventListener('mute', this.resetAim);
+        track.addEventListener('ended', this.resetAim);
+      }
+      this.video.srcObject = stream;
+      await this.video.play();
+      if (this.settled) return;
+    } catch (error) {
+      this.disconnectCamera();
+      throw error;
+    } finally {
+      this.connecting = false;
+    }
+  }
+
+  private disconnectCamera() {
+    for (const track of this.stream?.getTracks() ?? []) {
+      track.removeEventListener('mute', this.resetAim);
+      track.removeEventListener('ended', this.resetAim);
+      track.stop();
+    }
+    this.stream = undefined;
+    this.videoInterrupted = true;
+    this.video.srcObject = null;
+  }
+
+  private cameraStopped() {
+    if (this.simulated || this.connecting) return false;
+    return !this.stream?.getVideoTracks().some((track) => track.readyState === 'live');
+  }
+
+  private cameraPaused() {
+    if (this.simulated) return false;
+    return this.videoInterrupted || this.video.paused || this.video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
+      || !this.stream?.getVideoTracks().some((track) => track.readyState === 'live' && track.enabled && !track.muted);
+  }
+
+  private showCameraRetry() {
+    const files = this.captured;
+    this.pause({
+      title: 'Camera disconnected',
+      lines: [files.length ? 'The photos you took are still in this scan.' : 'Reconnect to keep scanning.'],
+      primary: ['Reconnect camera', () => void this.reconnectCamera()],
+      secondary: files.length >= this.minimum ? [`Use ${files.length} photos`, () => this.settle(files)] : undefined,
+    });
+  }
+
+  private async reconnectCamera() {
+    this.show();
+    this.hint.textContent = 'Reconnecting the camera…';
+    try {
+      await this.connectCamera();
+      if (!this.settled && this.card.hidden) this.resume();
+    } catch {
+      if (!this.settled && this.card.hidden) this.showCameraRetry();
+    }
   }
 
   private simulate() {
@@ -192,7 +292,7 @@ class GuidedScan {
     this.canvas.addEventListener('pointermove', (event) => {
       if (!from) return;
       view.yaw -= (event.clientX - from.x) * 0.25;
-      view.pitch = Math.max(-80, Math.min(80, view.pitch + (event.clientY - from.y) * 0.25));
+      view.pitch = Math.max(-90, Math.min(90, view.pitch + (event.clientY - from.y) * 0.25));
       from = { x: event.clientX, y: event.clientY };
     });
     for (const type of ['pointerup', 'pointercancel']) this.canvas.addEventListener(type, () => { from = undefined; });
@@ -231,18 +331,41 @@ class GuidedScan {
     if (!reading || !this.pose) return;
     const dt = Math.min(0.1, Math.max(0.001, (now - this.last) / 1000));
     this.last = now;
-    const next = this.simulated ? reading : blend(this.pose, reading, 0.5);
-    this.speed += (angleBetween(next.forward, this.pose.forward) / dt - this.speed) * 0.2;
-    this.pose = next;
-    if (this.scanning) this.track(dt);
+    if (this.scanning) {
+      const paused = this.capturePaused(now);
+      if (this.cameraStopped()) this.showCameraRetry();
+      else if (paused) {
+        this.resetAim();
+        if (this.hint.textContent !== paused) this.hint.textContent = paused;
+      } else {
+        const next = this.simulated ? reading : blend(this.pose, reading, 0.5);
+        this.speed += (angleBetween(next.forward, this.pose.forward) / dt - this.speed) * 0.2;
+        this.pose = next;
+        this.track(dt);
+      }
+    }
     this.draw(now);
     this.drawDome();
+  };
+
+  private capturePaused(now: number) {
+    if (document.hidden) return 'Return to the scan to keep going';
+    if (this.cameraPaused()) return 'Waiting for the camera…';
+    if (!this.simulated && now - this.sensorAt > MOTION_TIMEOUT_MS) return 'Waiting for motion sensors…';
+  }
+
+  private readonly resetAim = () => {
+    this.aimed = undefined;
+    this.held = 0;
+    this.speed = 0;
+    this.last = performance.now();
+    this.captureEpoch++;
   };
 
   private track(dt: number) {
     const pose = this.pose!;
     const open = this.targets.filter((target) => !target.file);
-    const upright = Boolean(this.simulated) || !this.landscape.matches;
+    const upright = Boolean(this.simulated) || !this.landscape.matches || Math.abs(pitchOf(pose.forward)) > 80;
     let aimed: Target | undefined;
     let nearest = AIM_DEGREES;
     if (upright) {
@@ -281,6 +404,7 @@ class GuidedScan {
     if (this.speed > FAST_SPEED) return 'Slow down';
     const spot = this.place(this.guide);
     if (spot.visible) return 'Aim at the glowing dot';
+    if (Math.abs(this.guide.pitch) === 90) return this.guide.pitch > 0 ? 'Tilt up' : 'Tilt down';
     const [x, y] = spot.side;
     if (!spot.front || Math.abs(x) >= Math.abs(y)) return x >= 0 ? 'Turn right' : 'Turn left';
     return y > 0 ? 'Tilt up' : 'Tilt down';
@@ -295,19 +419,30 @@ class GuidedScan {
   }
 
   private async capture(target: Target) {
+    if (this.capturePaused(performance.now())) return;
+    const epoch = this.captureEpoch;
     const source = this.simulated ? this.simulatedFrame() : this.video;
     const width = this.simulated ? source.width : this.video.videoWidth;
     const height = this.simulated ? source.height : this.video.videoHeight;
     if (!width || !height) return;
-    this.capturing = true;
     const shot = document.createElement('canvas');
     shot.width = width;
     shot.height = height;
-    shot.getContext('2d')?.drawImage(source, 0, 0, width, height);
-    const blob = await new Promise<Blob | null>((resolve) => shot.toBlob(resolve, 'image/jpeg', 0.9));
-    this.capturing = false;
-    this.held = 0;
-    if (!blob || !this.scanning || target.file) return;
+    const context = shot.getContext('2d');
+    if (!context) return;
+    this.capturing = true;
+    let blob: Blob | null;
+    try {
+      context.drawImage(source, 0, 0, width, height);
+      blob = await new Promise<Blob | null>((resolve) => shot.toBlob(resolve, 'image/jpeg', 0.9));
+    } catch {
+      return;
+    } finally {
+      this.capturing = false;
+      this.held = 0;
+    }
+    if (!blob || !this.scanning || this.settled || epoch !== this.captureEpoch
+      || this.capturePaused(performance.now()) || target.file) return;
     const number = String(this.targets.indexOf(target) + 1).padStart(2, '0');
     target.file = new File([blob], `scan-360-${number}.jpg`, { type: 'image/jpeg' });
     target.capturedAt = performance.now();
@@ -344,8 +479,7 @@ class GuidedScan {
 
   private pause(card: Card) {
     this.scanning = false;
-    this.aimed = undefined;
-    this.held = 0;
+    this.resetAim();
     this.hint.textContent = '';
     this.show(card);
   }
@@ -398,9 +532,8 @@ class GuidedScan {
     cancelAnimationFrame(this.raf);
     window.removeEventListener('deviceorientation', this.onOrientation);
     window.removeEventListener('resize', this.resize);
-    for (const track of this.stream?.getTracks() ?? []) track.stop();
-    this.stream = undefined;
-    this.video.srcObject = null;
+    document.removeEventListener('visibilitychange', this.onVisibility);
+    this.disconnectCamera();
     void this.audio?.close().catch(() => undefined);
     this.audio = undefined;
   }
@@ -477,11 +610,12 @@ class GuidedScan {
     }
 
     // When the next dot is out of view, an arrow at the edge shows which way to turn.
-    if (!this.scanning || !this.guide) return;
+    if (!this.scanning || this.capturePaused(now) || !this.guide) return;
     const spot = this.place(this.guide);
     if (spot.visible) return;
     let [x, y] = spot.side;
-    if (!spot.front && Math.hypot(x, y) < 0.2) [x, y] = [1, 0];
+    if (!spot.front && Math.abs(this.guide.pitch) === 90) [x, y] = [0, Math.sign(this.guide.pitch)];
+    else if (!spot.front && Math.hypot(x, y) < 0.2) [x, y] = [1, 0];
     if (!spot.front) y *= 0.35;
     const length = Math.hypot(x, y) || 1;
     const [dx, dy] = [x / length, -y / length];
@@ -518,7 +652,7 @@ class GuidedScan {
     context.fill();
     for (const target of this.targets) {
       // The ceiling ring sits nearest the centre and the floor ring at the rim.
-      const radius = reach * (90 - target.pitch) / 125;
+      const radius = reach * (90 - target.pitch) / 180;
       const angle = (yawOf(target.direction) - heading - 90) * RAD;
       context.beginPath();
       context.arc(center + radius * Math.cos(angle), center + radius * Math.sin(angle), target.file ? 1.6 : target === this.guide ? 4 : 2.8, 0, Math.PI * 2);

@@ -15,11 +15,7 @@ const stationRef = {
   'place-chncl': [42.352547, -71.062752, 'Orange', '005'],
 };
 const gaussians = {
-  'room-ramen-house': [24000, 5, 4, 2.75],
-  'room-karaoke-suite': [22000, 4.2, 3.4, 2.62],
   'room-study-cafe': [20000, 5.5, 4.5, 3],
-  'dish-tonkotsu-ramen': [14000, 0.24, 0.24, 0.15],
-  'dish-katsu-curry': [13000, 0.26, 0.26 * 0.83, 0.065],
   'dish-matcha-tiramisu': [10000, 0.18, 0.18, 0.075],
 };
 const uiModels = [
@@ -59,12 +55,12 @@ const expected = [
   ...Object.keys(gaussians).map((n) => n + '.ply'),
   ...jsonNames.map((n) => n + '.json'),
 ].sort();
-assert.deepEqual(
-  readdirSync(dir)
-    .filter((n) => /\.(ply|glb|json)$/.test(n))
-    .sort(),
-  expected,
-);
+const generated = readdirSync(dir).filter((n) => /\.(ply|glb|json)$/.test(n)).sort();
+assert.deepEqual(generated, expected);
+const published = readdirSync(new URL('../web/public/assets-demo/', import.meta.url))
+  .filter((n) => !/^(room-.+-atlas|dish-.+)\.sog$/.test(n))
+  .sort();
+assert.deepEqual(published, generated, 'Run pnpm assets:sync to publish the generated assets');
 const load = (n) => JSON.parse(readFileSync(dir + n + '.json'));
 const stations = load('station-anchors'),
   segments = load('segment-anchors'),
@@ -435,6 +431,7 @@ let movedCount = 0;
 let venueCount = 0,
   offDeckCount = 0,
   roofCount = 0;
+assert.equal(new Set(places.map(({ id }) => id)).size, places.length, 'Catalog venue IDs must be unique');
 for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
   const a = stations[id],
     s = segments[id];
@@ -490,10 +487,10 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
   // which become markers on the turf rim. Every venue must be exactly one of the two, and any
   // venue within 0.4 m of the deck centre must be on the island.
   const allPlaces = places.filter((place) => place.stop_id === id);
-  const stopPlaces = allPlaces.filter((place) => place.id in s.placeAnchors);
-  const farPlaces = allPlaces.filter((place) => place.id in s.offDeck);
-  assert.equal(stopPlaces.length + farPlaces.length, allPlaces.length);
-  assert.equal(Object.keys(s.placeAnchors).length + Object.keys(s.offDeck).length, allPlaces.length);
+  const stopPlaces = allPlaces.filter((place) => Object.hasOwn(s.placeAnchors, place.id));
+  const farPlaces = allPlaces.filter((place) => Object.hasOwn(s.offDeck, place.id));
+  const anchorIds = [...Object.keys(s.placeAnchors), ...Object.keys(s.offDeck)];
+  assert.deepEqual(anchorIds.sort(), allPlaces.map((place) => place.id).sort(), id + ' venue anchors');
   const turf = new Map([['turf', meshes.get('Island turf')]]);
   for (const place of farPlaces) {
     const { position, distanceM, compass } = s.offDeck[place.id];
@@ -593,7 +590,7 @@ for (const [id, [lat, lon, line, code]] of Object.entries(stationRef)) {
     minSpace.toFixed(6),
   );
 }
-assert.equal(venueCount + offDeckCount, 28);
+assert.equal(venueCount + offDeckCount, places.length);
 console.log(
   venueCount +
     ' venue pins (' + movedCount + ' door points moved onto their building), ' +

@@ -18,7 +18,7 @@ export class LiveVoiceDock {
   private readonly triggerDot = element('span', 'voice-dot');
   private readonly triggerLabel = element('span', '', 'GPT Live');
   private readonly statusBadge = element('span', 'voice-state', 'Ready');
-  private readonly modelMeta = element('span', 'voice-model', 'gpt-realtime');
+  private readonly modelMeta = element('span', 'voice-model', 'gpt-live-1.1');
   private readonly errorNote = element('p', 'message error');
   private readonly feed = element('div', 'voice-feed');
   private readonly connectBtn: HTMLButtonElement;
@@ -96,11 +96,18 @@ export class LiveVoiceDock {
   }
 
   setOpen(open: boolean): void {
+    const restore = !open && !this.root.hidden && this.root.contains(document.activeElement);
     this.root.hidden = !open;
     this.trigger.setAttribute('aria-expanded', String(open));
+    if (restore) this.trigger.focus({ preventScroll: true });
+  }
+
+  setModel(model: string): void {
+    this.modelMeta.textContent = model;
   }
 
   setState(state: VoiceState, detail?: string): void {
+    if (state === 'idle') this.setOpen(false);
     this.state = state;
     this.root.dataset.state = state;
     this.trigger.dataset.state = state;
@@ -121,8 +128,6 @@ export class LiveVoiceDock {
       this.setOpen(true);
     } else if (state === 'connecting') {
       this.renderEmptyFeed();
-    } else if (state === 'idle') {
-      this.setOpen(false);
     }
   }
 
@@ -132,9 +137,18 @@ export class LiveVoiceDock {
   }
 
   appendTranscript(entry: VoiceTranscript): void {
+    if (entry.id) {
+      const text = this.feed.querySelector<HTMLParagraphElement>(`[data-entry-id="${CSS.escape(entry.id)}"] p`);
+      if (text) {
+        text.textContent = entry.text;
+        this.feed.scrollTop = this.feed.scrollHeight;
+        return;
+      }
+    }
     if (!this.hasTranscript) this.feed.replaceChildren();
     this.hasTranscript = true;
     const row = element('div', `voice-entry voice-entry-${entry.kind}`);
+    if (entry.id) row.dataset.entryId = entry.id;
     const who = entry.kind === 'user' ? 'You' : entry.kind === 'assistant' ? 'FareSight' : 'Action';
     row.append(element('span', 'voice-who', who), element('p', '', entry.text));
     this.feed.append(row);
@@ -145,7 +159,7 @@ export class LiveVoiceDock {
   private renderEmptyFeed(): void {
     this.hasTranscript = false;
     this.feed.replaceChildren(
-      element('p', 'message', 'Try “Open Tsuru Tonkotsu Ramen” or “Show me two 3D dishes to compare.”'),
+      element('p', 'message', 'Try “Open Shu Daxia Hot Pot” or “Show me two 3D dishes to compare.”'),
     );
   }
 }
