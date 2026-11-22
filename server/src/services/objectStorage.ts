@@ -8,7 +8,7 @@ import type { CaptureConfig } from '../config.ts';
 export const PRESIGN_SECONDS = 15 * 60;
 
 /** S3-compatible object storage (Vultr Object Storage in production, MinIO locally). */
-export function createObjectStorage(config: CaptureConfig) {
+export function createObjectStorage(config: Pick<CaptureConfig, 'endpoint' | 'region' | 'accessKey' | 'secretKey'>) {
   const connect = (region: string) => new S3Client({
     endpoint: config.endpoint, region, forcePathStyle: true,
     credentials: { accessKeyId: config.accessKey, secretAccessKey: config.secretKey },
@@ -42,12 +42,16 @@ export function createObjectStorage(config: CaptureConfig) {
       return Buffer.from(await Body.transformToByteArray());
     },
 
-    async put(bucket: string, key: string, body: Buffer, contentType: string, options: { public?: boolean } = {}) {
+    async put(bucket: string, key: string, body: Buffer, contentType: string, options: { public?: boolean; cacheControl?: string } = {}) {
       await client.send(new PutObjectCommand({
         Bucket: bucket, Key: key, Body: body, ContentType: contentType,
-        // Public objects are keyed by job, so a URL's content never changes.
-        ...(options.public ? { ACL: 'public-read' as const, CacheControl: 'public, max-age=31536000, immutable' } : {}),
+        // Public objects are keyed by job unless the caller says otherwise, so a URL's content never changes.
+        ...(options.public ? { ACL: 'public-read' as const, CacheControl: options.cacheControl ?? 'public, max-age=31536000, immutable' } : {}),
       }));
+    },
+
+    async remove(bucket: string, key: string) {
+      await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
     },
 
     /** Deletes every object under a prefix and returns how many there were. */

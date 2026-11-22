@@ -16,6 +16,9 @@
 // plate is its own surface ('Ground plate'); the renderer draws it after everything opaque and
 // without writing depth.
 //
+// The Charles is in the sheet too (water.mjs): a blue tint at the plate's own level, drawn after
+// the plate and before the shadows.
+//
 // The same surface carries the contact shadows: a soft strip under each track and a halo round the
 // foot of each building. They are darker ink on the same sheet, lifted a hair above it, and they
 // come after the plate in the index buffer so that within the one draw call they blend over it.
@@ -50,6 +53,13 @@ const SOLID = SKIRT * 0.55;
  * the ease is drawn as this many straight pieces; six is past the point where the eye finds them.
  */
 const RIM_STEPS = [3, 3];
+
+/**
+ * The river. A soft map blue, well short of the Blue Line's, laid into the plate at this opacity
+ * where the plate is solid; like everything else on the plate it fades out with the rim.
+ */
+export const WATER_COLOUR = '#4F86C6';
+export const WATER_ALPHA = 0.5;
 
 /** Ink of every contact shadow. Neutral and near black, so it darkens without tinting. */
 export const SHADOW_INK = '#22252B';
@@ -198,6 +208,26 @@ export function groundPlate(surface, lines, y) {
 
   return {
     coverage,
+
+    /**
+     * Water, as `points` ([x, z]) and `triangles` over them (water.mjs). It is a tint in the sheet
+     * itself, at the plate's own level, so call this before anything casts a shadow: the shadows
+     * then fall across the water as they do across the ground.
+     */
+    water({ points, triangles }) {
+      const cover = points.map(([x, z]) => coverage(x, z));
+      const placed = new Map();
+      const corner = (i) => {
+        if (!placed.has(i))
+          placed.set(i, surface.vertex([points[i][0], y, points[i][1]], UP, WATER_COLOUR, undefined, WATER_ALPHA * cover[i]));
+        return placed.get(i);
+      };
+      for (const [a, b, c] of triangles) {
+        // Past the rim there is no plate to tint, and nothing to draw.
+        if (cover[a] + cover[b] + cover[c] === 0) continue;
+        triUp(surface, corner(a), corner(b), corner(c));
+      }
+    },
 
     /**
      * The shadow of one track: a strip along its centreline, darkest under the middle of the

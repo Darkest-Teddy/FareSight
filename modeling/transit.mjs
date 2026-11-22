@@ -5,7 +5,6 @@ import {
   face,
   loft,
   circle,
-  rect,
   sweep,
   spline,
   norm,
@@ -19,6 +18,8 @@ import {
 } from './geometry.mjs';
 import { cityBlocks } from './city.mjs';
 import { groundPlate } from './ground.mjs';
+import { buildLandmarks, placeLandmarks } from './landmarks.mjs';
+import { charlesRiver } from './water.mjs';
 
 // ---------------------------------------------------------------------------------------------
 // Colour of the map sculpture. The model sits on a light, warm backdrop, so the hierarchy runs
@@ -64,21 +65,6 @@ const MARKER_GLOW = '#0b0c0e';
 /** Width of the ink ring round an ordinary bead, and how far its outer edge dips. */
 const beadInkWidth = 0.0012;
 const beadInkDip = 0.0005;
-
-/**
- * Landmarks, in the same slate as the city but a step darker and bluer than the blocks round
- * them, so the Prudential still reads as the Prudential without lighting itself.
- */
-const LANDMARK = {
-  post: '#73809A',
-  plinth: '#8A96AF',
-  shaft: '#98A5BE',
-  tower: '#8F9CB8',
-  glassTower: '#8499BE',
-  granite: '#AAB4C8',
-  graniteTip: '#BFC8D9',
-  crown: '#B9C6DC',
-};
 
 // Station coordinate snapshot from api-v3.mbta.com/stops, parent stations only.
 const stops = JSON.parse(readFileSync(new URL('stops.json', import.meta.url)));
@@ -383,97 +369,6 @@ function drum(surface, [x, , z], bottom, top, radius, color, sides = 14) {
 }
 
 /**
- * A handful of iconic Boston landmarks, placed by real coordinates at the sculpture's own scale
- * (6500 m per unit). Deliberately a short list of silhouettes people recognise rather than an
- * attempt at a city: the network is still the subject, and these just give it somewhere to be.
- *
- * Heights are real metres. At this scale a 230 m tower is ~0.035 units — about three track layers
- * tall, which is enough to read without competing with the lines.
- */
-const METRES = 1 / 6500;
-/**
- * True scale makes landmarks invisible: the Prudential is 229 m, which at 6500 m per unit is
- * 0.035 units — about three track plates tall and lost against the background. Cartographic
- * models routinely exaggerate vertical scale for exactly this reason, so landmarks are drawn
- * 2.6x their real height. Footprints stay true, so each still reads as the right shape.
- */
-const landmarkLift = 2.6;
-/**
- * Footprints need the same treatment. A 64 m tower is 0.0098 units wide — narrower than a track
- * plate (0.015), which is why true-scale landmarks read as slivers rather than buildings. Widened
- * so they sit sensibly against the network they stand beside.
- */
-const landmarkWidth = 3.2;
-const landmarkList = [
-  // name,                  lat,      lon,       w,  d,   height(m), form
-  ['Prudential Tower',      42.34725, -71.08215, 64, 64,  229, 'taper'],
-  ['200 Clarendon',         42.34880, -71.07513, 58, 32,  241, 'slab'],
-  ['Custom House Tower',    42.35940, -71.05360, 32, 32,  151, 'clock'],
-  ['Bunker Hill Monument',  42.37635, -71.06082, 15, 15,   67, 'obelisk'],
-  ['Citgo Sign',            42.34875, -71.09540, 26, 10,   58, 'sign'],
-];
-
-function landmarks(surface, accent, ground) {
-  for (const [, lat, lon, w, d, metres, form] of landmarkList) {
-    const [x, , z] = project(lat, lon, 0);
-    const base = slabTop;
-    const h = metres * METRES * landmarkLift;
-    const width = w * METRES * landmarkWidth;
-    const depth = d * METRES * landmarkWidth;
-    // Every landmark stands in a contact shadow the shape of its own foot.
-    const foot = (fw, fd) => ground.footprintShadow(rect(x, 0, z, fw, fd).map((p) => [p[0], p[2]]));
-
-    if (form === 'sign') {
-      // A billboard on a slim gantry: unmistakable at Kenmore, and cheap.
-      const postH = h * 0.45;
-      box(surface, x, base + postH / 2, z, 0.0012, postH, 0.0012, LANDMARK.post);
-      box(accent, x, base + postH + (h - postH) / 2, z, width, h - postH, 0.0015, LANDMARK.crown);
-      continue;
-    }
-
-    if (form === 'obelisk') {
-      // Square shaft tapering to a pyramidion.
-      loft(surface, [
-        rect(x, base, z, width, depth),
-        rect(x, base + h * 0.88, z, width * 0.62, depth * 0.62),
-      ], LANDMARK.granite);
-      loft(surface, [
-        rect(x, base + h * 0.88, z, width * 0.62, depth * 0.62),
-        rect(x, base + h, z, width * 0.06, depth * 0.06),
-      ], LANDMARK.graniteTip);
-      foot(width, depth);
-      continue;
-    }
-
-    if (form === 'clock') {
-      // Stepped base, shaft, then a lighter crown that reads as the clock stage.
-      const shaft = h * 0.68;
-      box(surface, x, base + shaft * 0.18, z, width * 1.5, shaft * 0.36, depth * 1.5, LANDMARK.plinth);
-      loft(surface, [
-        rect(x, base + shaft * 0.36, z, width, depth),
-        rect(x, base + shaft, z, width * 0.86, depth * 0.86),
-      ], LANDMARK.shaft);
-      box(accent, x, base + shaft + (h - shaft) * 0.4, z, width * 0.74, (h - shaft) * 0.8, depth * 0.74, LANDMARK.crown);
-      foot(width * 1.5, depth * 1.5);
-      continue;
-    }
-
-    if (form === 'taper') {
-      loft(surface, [
-        rect(x, base, z, width, depth),
-        rect(x, base + h, z, width * 0.78, depth * 0.78),
-      ], LANDMARK.tower);
-      foot(width, depth);
-      continue;
-    }
-
-    // slab: a plain rectangular prism, the Hancock read.
-    box(surface, x, base + h / 2, z, width, h, depth, LANDMARK.glassTower);
-    foot(width, depth);
-  }
-}
-
-/**
  * A station bead: a white disc with the line's colour inset on top and an ink ring round it.
  *
  * Both discs are raised clear of the plate so neither z-fights with it, and the white ring is
@@ -562,6 +457,7 @@ export function mapSculpture(dir) {
     shells = new Map(),
     marked = new Set(),
     levels = new Map(),
+    beads = [],
     drums = [];
   for (const [id, routeId, name, color, , knots] of routes) {
     if (!shells.has(color)) {
@@ -606,6 +502,7 @@ export function mapSculpture(dir) {
         // track plate (0.0084 across) so every stop reads as a bead on the line rather than a
         // bump in it.
         stationDot(marker, enamel, p, p[1] + trackThickness / 2);
+        beads.push(p);
         continue;
       }
       // Explorable stop: a white-rimmed drum on the deck with the line colour on top.
@@ -672,13 +569,28 @@ export function mapSculpture(dir) {
   // The ground, then everything that casts a shadow on it, in that order: the shadows share the
   // plate's surface and blend over it only because they follow it in the index buffer.
   const ground = groundPlate(plate, lines, slabTop - 0.0006);
+  // The Charles goes into the plate before any shadow, so shadows fall across it.
+  const river = charlesRiver();
+  ground.water(river.mesh);
   for (const line of lines) ground.trackShadow(line.points);
   for (const p of drums) ground.discShadow(p[0], p[2], 0.0192, 0.009, undefined, 40);
-  landmarks(stone, glint, ground);
+  // Landmarks stand where they really are (landmarks.mjs), moved only as far as it takes to clear a
+  // track or a station that is drawn many times its real width.
+  const placed = placeLandmarks(project, { tracks: lines, beads, drums });
+  const landmarkAnchors = buildLandmarks(stone, glint, placed, slabTop, ground);
+  if (process.env.FARESIGHT_VERBOSE)
+    for (const { landmark, moved, cleared } of placed)
+      console.log('landmark', landmark.name, moved < 0.5 ? 'at its true position' : 'moved ' + moved.toFixed(0) + ' m clear of ' + cleared.join(', '));
 
-  // The city goes in last: it needs every centreline so it can avoid building on the tracks.
-  const blocks = cityBlocks(city, lines, slabTop, ground);
-  if (process.env.FARESIGHT_VERBOSE) console.log('city blocks placed:', blocks);
+  // The city goes in last: it needs every centreline so it can avoid building on the tracks, and
+  // every landmark so it can leave them standing in the open.
+  const blocks = cityBlocks(city, lines, slabTop, ground, {
+    keepOut: placed.flatMap((p) => p.keepOut),
+    water: river.reaches,
+    stations: [...beads, ...drums].map((p) => [p[0], p[2]]),
+    drums: drums.map((p) => [p[0], p[2]]),
+  });
+  if (process.env.FARESIGHT_VERBOSE) console.log('city blocks:', blocks.kept, 'kept of', blocks.placed);
 
   // Transfer posts tie stacked platforms of different lines together.
   for (const platforms of levels.values()) {
@@ -695,6 +607,7 @@ export function mapSculpture(dir) {
   }
   m.save(dir + 'boston-map-sculpture.glb');
   json(dir + 'station-anchors.json', anchors);
+  json(dir + 'landmark-anchors.json', landmarkAnchors);
   json(dir + 'mbta-3d-paths.json', { lines });
 }
 export function accessories(dir) {

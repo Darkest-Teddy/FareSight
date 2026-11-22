@@ -3,13 +3,20 @@ import { countPreviewsByStop } from '../data/preview3D';
 import type { XRPlaceData, XRStopData, XRVehicleData } from './bridgeTypes';
 import { PhysicalPlaque } from './CanvasPanel3D';
 import { jarvisPoints, type JarvisReveal } from './JarvisReveal';
-import { MapLabels } from './MapLabels';
+import { MapLabels, type KeepClear } from './MapLabels';
 import { assetBase, brass, child, clamp, damp, fetchAssetJson, highlightInk, ink, material, project, shape, target,
   type DebugLog, type HitTarget, type ModelLibrary, type XYZ } from './sceneSupport';
 
 interface StationAnchor {
   topPos: XYZ;
   segmentFile: string;
+}
+
+/** One landmark of the sculpture and the box it fills, in map space (modeling/landmarks.mjs). */
+interface LandmarkAnchor {
+  id: string;
+  min: XYZ;
+  max: XYZ;
 }
 
 interface PathFile {
@@ -123,6 +130,9 @@ export class MapSculptureScene {
   private lineSurfaces = new Map<string, LineSurface>();
   private tracks = new Map<string, Track[]>();
   private anchors: Record<string, StationAnchor> = {};
+  /** Landmark boxes in map space, and the same corners in world space for the labels to avoid. */
+  private landmarks: pc.Vec3[][] = [];
+  private landmarkCorners: KeepClear[] = [];
   private places: XRPlaceData[] = [];
   private filtered = new Set<string>();
   private vehicles: XRVehicleData[] = [];
@@ -179,6 +189,12 @@ export class MapSculptureScene {
       if (!anchors || !this.alive) return;
       this.anchors = anchors;
       this.positionBeacons();
+    });
+    void fetchAssetJson<LandmarkAnchor[]>(`${assetBase}landmark-anchors.json`, signal, log).then((landmarks) => {
+      if (!Array.isArray(landmarks) || !this.alive) return;
+      this.landmarks = landmarks.map(({ min, max }) =>
+        [0, 1, 2, 3, 4, 5, 6, 7].map((n) => new pc.Vec3(n & 1 ? max[0] : min[0], n & 2 ? max[1] : min[1], n & 4 ? max[2] : min[2])));
+      this.landmarkCorners = this.landmarks.map((corners) => corners.map(() => new pc.Vec3()));
     });
     void fetchAssetJson<PathFile>(`${assetBase}mbta-3d-paths.json`, signal, log).then((data) => {
       if (!Array.isArray(data?.lines) || !this.alive) return;
@@ -488,7 +504,14 @@ export class MapSculptureScene {
     this.clock += dt;
     const visible = this.root.enabled;
     const worldOf = (id: string) => this.beacons.find((beacon) => beacon.stop.stop_id === id)?.root.getPosition();
-    this.labels.update(lens, worldOf, visible && !this.immersive ? labelOpacity : 0);
+    const labelled = visible && !this.immersive && labelOpacity > 0.01;
+    if (labelled) {
+      // The map can be moved and scaled, so the landmark boxes are carried into world space here.
+      const world = this.root.getWorldTransform();
+      this.landmarks.forEach((corners, i) =>
+        corners.forEach((corner, j) => world.transformPoint(corner, this.landmarkCorners[i][j])));
+    }
+    this.labels.update(lens, worldOf, labelled ? labelOpacity : 0, this.landmarkCorners);
     if (!visible) return;
 
     const focus = this.hovered ?? undefined;

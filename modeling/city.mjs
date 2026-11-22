@@ -9,7 +9,9 @@
 // Footprints are scaled to the sculpture, not to reality: at true scale a city block is a speck
 // beside a 0.015-wide track plate. The shape and proportions are authentic; absolute size is not.
 import { readFileSync } from 'node:fs';
-import { face, norm, rgb, rng, sub } from './geometry.mjs';
+import { Surface, earClip, face, norm, rgb, rng, sub } from './geometry.mjs';
+import { ringDistance } from './landmarks.mjs';
+import { inWater } from './water.mjs';
 
 // ---------------------------------------------------------------------------------------------
 // The colour of the city. One material, one hue family: a light slate with a blue bias, pale
@@ -182,54 +184,6 @@ function footprintLibrary() {
     });
   }
   return library;
-}
-
-/**
- * Ear clipping, so concave outlines — Boston has many — cap correctly. A naive triangle fan folds
- * over itself on anything non-convex, which is most L-shaped and stepped footprints.
- */
-function earClip(poly) {
-  const live = poly.map((_, i) => i);
-  const turn = (a, b, c) =>
-    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-  let signed = 0;
-  for (let i = 0; i < poly.length; i++) {
-    const a = poly[i];
-    const b = poly[(i + 1) % poly.length];
-    signed += a[0] * b[1] - b[0] * a[1];
-  }
-  if (signed < 0) live.reverse();
-  const tris = [];
-  let guard = poly.length * poly.length + 16;
-  while (live.length > 3 && guard-- > 0) {
-    let cut = false;
-    for (let i = 0; i < live.length; i++) {
-      const ai = live[(i + live.length - 1) % live.length];
-      const bi = live[i];
-      const ci = live[(i + 1) % live.length];
-      const a = poly[ai];
-      const b = poly[bi];
-      const c = poly[ci];
-      if (turn(a, b, c) <= 0) continue;
-      let clear = true;
-      for (const j of live) {
-        if (j === ai || j === bi || j === ci) continue;
-        const q = poly[j];
-        if (turn(a, b, q) >= 0 && turn(b, c, q) >= 0 && turn(c, a, q) >= 0) {
-          clear = false;
-          break;
-        }
-      }
-      if (!clear) continue;
-      tris.push([ai, bi, ci]);
-      live.splice(i, 1);
-      cut = true;
-      break;
-    }
-    if (!cut) break;
-  }
-  if (live.length === 3) tris.push([live[0], live[1], live[2]]);
-  return tris;
 }
 
 /**
@@ -464,7 +418,100 @@ function build(surface, template, x, z, size, spin, height, tone, edge, slabTop,
   }
 }
 
-export function cityBlocks(surface, lines, slabTop, ground) {
+// ---------------------------------------------------------------------------------------------
+// Thinning. The layout below fills four bands either side of every line, which is the right way to
+// find places for buildings and far too many buildings to look at: at that density the blocks hide
+// the lines they are there to give a setting to, and a landmark is lost among them.
+//
+// So the layout is kept exactly as it was -- same seed, same places, same shapes -- and only some
+// of what it lays out is built. Which ones is decided over the whole city at once: the most
+// substantial buildings are taken first, and each one taken clears a space round itself, so what
+// is left is evenly spread and made of blocks big enough to read as buildings. Landmarks and the
+// explorable stations get a clearing of their own, and the river is kept clear to its banks.
+// ---------------------------------------------------------------------------------------------
+
+/** Open ground left round a landmark's foot, beyond the building's own reach. */
+const LANDMARK_CLEARING = 0.016;
+
+/** Open ground left round an explorable station's drum (radius 0.0192), likewise. */
+const DRUM_CLEARING = 0.0192 + 0.014;
+
+/**
+ * The gap two neighbouring buildings must leave between them, at the heart of the network and at
+ * its rim. The layout's own gap is 0.009 everywhere; these are what thin it. Wider at the rim, so
+ * the city trails off instead of stopping.
+ */
+const SPACING_HEART = 0.0105;
+const SPACING_RIM = 0.032;
+
+/** Ground left open between a building and the river bank, beyond the building's own reach. */
+const BANK = 0.004;
+
+/** Buildings with less reach than this are specks at map scale, and go first. */
+const SMALLEST_REACH = 0.0085;
+
+/**
+ * Which of the laid-out buildings to build. `blocks` is every building the layout placed, in
+ * order; the result is the set of their indices that survive.
+ */
+function thin(blocks, { keepOut = [], drums = [], water = [] }) {
+  const standing = blocks.filter((b) => {
+    if (b.reach < SMALLEST_REACH) return false;
+    // Nothing is built in the river, or with a corner over the bank.
+    if (inWater(water, b.x, b.z)) return false;
+    for (let n = 0; n < 12; n++) {
+      const a = (n / 12) * Math.PI * 2;
+      if (inWater(water, b.x + Math.cos(a) * (b.reach + BANK), b.z + Math.sin(a) * (b.reach + BANK))) return false;
+    }
+    for (const ring of keepOut) if (ringDistance(ring, b.x, b.z) < b.reach + LANDMARK_CLEARING) return false;
+    for (const [x, z] of drums) if (Math.hypot(b.x - x, b.z - z) < b.reach + DRUM_CLEARING) return false;
+    return true;
+  });
+  // Substance first: a broad or tall building says more about the city than a small low one. But
+  // not strictly, or only the big blocks would survive and the city would lose its grain: each
+  // building's weight is scaled by a number fixed by its place in the layout, so some modest ones
+  // outrank their neighbours. Nothing here is random, and the index breaks ties, so the choice is
+  // the same on every run.
+  const luck = (index) => (Math.imul(index + 1, 2654435761) >>> 0) / 4294967296;
+  const weight = (b) => b.reach * (1 + b.height / 0.03) * (0.55 + 0.9 * luck(b.index));
+  standing.sort((a, b) => weight(b) - weight(a) || a.index - b.index);
+  const kept = [];
+  for (const b of standing) {
+    const spacing = SPACING_RIM + (SPACING_HEART - SPACING_RIM) * b.edge;
+    if (kept.every((k) => Math.hypot(k.x - b.x, k.z - b.z) >= k.reach + b.reach + spacing)) kept.push(b);
+  }
+  return new Set(kept.map((b) => b.index));
+}
+
+/** A surface and a ground that take a building and keep nothing: where the thinned ones go. */
+const nowhere = { surface: new Surface(0, 'Unbuilt'), ground: { footprintShadow() {} } };
+
+/**
+ * Lay the city out and build what survives the thinning. `clear` says what to leave room for:
+ * `keepOut`, the plan outlines of the landmarks; `drums`, the explorable stations; and `water`,
+ * the reaches of the river.
+ *
+ * The layout runs twice on the same seed. The first pass builds nothing and only reports where
+ * every building would go; the second builds the survivors. Running the whole layout both times is
+ * what keeps each surviving building identical to the one the unthinned city had in that place:
+ * every building draws from one random stream, so skipping one would reshuffle all that follow.
+ */
+export function cityBlocks(surface, lines, slabTop, ground, clear = {}) {
+  const blocks = [];
+  layOut(lines, slabTop, (block) => {
+    blocks.push(block);
+    return nowhere;
+  });
+  const kept = thin(blocks, clear);
+  layOut(lines, slabTop, (block) => (kept.has(block.index) ? { surface, ground } : nowhere));
+  return { placed: blocks.length, kept: kept.size };
+}
+
+/**
+ * The layout itself. `site(block)` is asked, for each building in turn, which surface and ground
+ * it should be built on.
+ */
+function layOut(lines, slabTop, site) {
   const random = rng(20260221);
   const library = footprintLibrary();
   // Boston is a low-rise city with a small cluster of towers, and the OSM sample says so:
@@ -567,6 +614,7 @@ export function cityBlocks(surface, lines, slabTop, ground) {
           // The building's own tone. The fade toward the rim is not here: slate() does it, from
           // how central the building stands.
           const tone = district.tone[0] + random() * district.tone[1];
+          const { surface, ground } = site({ index: count, x, z, reach, height, edge });
           build(surface, template, x, z, size, spin, height, tone, edge, slabTop, random, ground);
 
           const k = bucket(x, z);

@@ -11,6 +11,7 @@
     "worker": "pnpm --filter @faresight/shared build && node src/worker/main.ts",
     "migrate": "node src/scripts/migrate.ts",
     "buckets": "node src/scripts/setupBuckets.ts",
+    "deploy-web": "node src/scripts/deployWeb.ts",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {

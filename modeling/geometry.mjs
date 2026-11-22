@@ -346,6 +346,54 @@ export function ellipsoid(s, center, radii, c, lon = 10, lat = 6) {
       if (j < lat - 1) s.indices.push(a[k], b[k], b[i]);
     }
 }
+/**
+ * Ear clipping, so concave outlines — Boston has many — cap correctly. A naive triangle fan folds
+ * over itself on anything non-convex, which is most L-shaped and stepped footprints.
+ */
+export function earClip(poly) {
+  const live = poly.map((_, i) => i);
+  const turn = (a, b, c) =>
+    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  let signed = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    signed += a[0] * b[1] - b[0] * a[1];
+  }
+  if (signed < 0) live.reverse();
+  const tris = [];
+  let guard = poly.length * poly.length + 16;
+  while (live.length > 3 && guard-- > 0) {
+    let cut = false;
+    for (let i = 0; i < live.length; i++) {
+      const ai = live[(i + live.length - 1) % live.length];
+      const bi = live[i];
+      const ci = live[(i + 1) % live.length];
+      const a = poly[ai];
+      const b = poly[bi];
+      const c = poly[ci];
+      if (turn(a, b, c) <= 0) continue;
+      let clear = true;
+      for (const j of live) {
+        if (j === ai || j === bi || j === ci) continue;
+        const q = poly[j];
+        if (turn(a, b, q) >= 0 && turn(b, c, q) >= 0 && turn(c, a, q) >= 0) {
+          clear = false;
+          break;
+        }
+      }
+      if (!clear) continue;
+      tris.push([ai, bi, ci]);
+      live.splice(i, 1);
+      cut = true;
+      break;
+    }
+    if (!cut) break;
+  }
+  if (live.length === 3) tris.push([live[0], live[1], live[2]]);
+  return tris;
+}
+
 // Centripetal Catmull–Rom with reflected endpoint controls, preserving every knot.
 export function spline(pts, step = 0.019) {
   const out = [];

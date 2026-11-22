@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { places } from '../server/src/db/seed.ts';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { ringDistance } from './landmarks.mjs';
+import { charlesRiver, inWater } from './water.mjs';
 
 const dir = fileURLToPath(new URL('output/', import.meta.url));
 const { areas } = JSON.parse(
@@ -41,7 +43,7 @@ const genModels = [
   ...uiModels,
   ...Object.keys(stationRef).map((k) => 'segment-' + k),
 ];
-const jsonNames = ['station-anchors', 'segment-anchors', 'mbta-3d-paths'];
+const jsonNames = ['station-anchors', 'segment-anchors', 'mbta-3d-paths', 'landmark-anchors'];
 const expected = [
   ...genModels.map((n) => n + '.glb'),
   ...Object.keys(gaussians).map((n) => n + '.ply'),
@@ -371,6 +373,57 @@ for (const [color, count] of offsets) {
     if (name !== 'Ground plate') assert.equal(mat.alphaMode ?? 'OPAQUE', 'OPAQUE', name);
     if (/^(City blocks|Landmark)/.test(name)) assert.ok(!mat.emissiveFactor, name + ' is self-lit');
   }
+}
+// Landmarks stand where they really are. An anchor's coordinates, projected, must land exactly as
+// far from where the landmark was built as the generator says it moved it; that move is only ever
+// the little it takes to clear the oversized network; and afterwards nothing stands on a line:
+// every foot is clear of every track by more than the half-width of a plate and its casing.
+{
+  const landmarks = load('landmark-anchors');
+  const ids = landmarks.map((l) => l.id);
+  assert.equal(new Set(ids).size, ids.length, 'landmark ids');
+  for (const id of ['citgo', 'fenway', 'prudential', 'clarendon', 'statehouse', 'customhouse', 'bunkerhill'])
+    assert.ok(ids.includes(id), 'landmark ' + id);
+  const stone = ['Landmark stone', 'Landmark glass'].map((name) => map.meshes.get(name));
+  assert.ok(stone.every(Boolean), 'landmark surfaces');
+  for (const l of landmarks) {
+    const x = ((l.lon + 71.095) * 111320 * Math.cos((42.354 * Math.PI) / 180)) / 6500;
+    const z = (-(l.lat - 42.354) * 110540) / 6500;
+    const moved = Math.hypot(l.position[0] - x, l.position[2] - z) * 6500;
+    approx(moved, l.movedMetres, 1, l.id + ' is not where its coordinates put it');
+    assert.ok(l.movedMetres <= 100, l.id + ' moved ' + l.movedMetres + ' m from its true position');
+    assert.ok(l.min[1] >= 0.04 - 1e-6 && l.max[1] > l.min[1] + 0.004 && l.max[1] <= 0.18, l.id + ' height');
+    for (const line of paths)
+      for (let i = 1; i < line.points.length; i++)
+        for (let step = 0; step <= 8; step++) {
+          const px = line.points[i - 1][0] + ((line.points[i][0] - line.points[i - 1][0]) * step) / 8;
+          const pz = line.points[i - 1][2] + ((line.points[i][2] - line.points[i - 1][2]) * step) / 8;
+          for (const ring of l.foot)
+            assert.ok(ringDistance(ring, px, pz) > 0.0054 + 0.001, l.id + ' stands on ' + line.name);
+        }
+  }
+}
+// The Charles is the surveyed river, in the right place: points known to be on the water are in
+// it, points known to be on its banks are not, and no landmark but the bridge stands in it.
+{
+  const river = charlesRiver();
+  const at = (lat, lon) => [
+    ((lon + 71.095) * 111320 * Math.cos((42.354 * Math.PI) / 180)) / 6500,
+    (-(lat - 42.354) * 110540) / 6500,
+  ];
+  for (const [name, lat, lon, wet] of [
+    ['mid-span of the Longfellow Bridge', 42.3615, -71.0752, true],
+    ['mid-span of the Harvard Bridge', 42.3545, -71.0915, true],
+    ['the basin off MIT', 42.3555, -71.09, true],
+    ['the Weeks Footbridge', 42.3683, -71.1187, true],
+    ['the MIT Great Dome', 42.359756, -71.092061, false],
+    ['the Hatch Shell', 42.3573, -71.0737, false],
+    ['Kenmore station', 42.348949, -71.095169, false],
+  ])
+    assert.equal(inWater(river.reaches, ...at(lat, lon)), wet, name + (wet ? ' should be water' : ' should be land'));
+  for (const l of load('landmark-anchors'))
+    if (l.id !== 'zakim')
+      for (const [x, z] of l.foot.flat()) assert.ok(!inWater(river.reaches, x, z), l.id + ' stands in the river');
 }
 function topAt(meshes, x, z) {
   let height = -Infinity;
