@@ -1,3 +1,4 @@
+import './styles/motion.css';
 import { AppShell } from './ui/AppShell';
 import './styles/tokens.css';
 import './styles/app.css';

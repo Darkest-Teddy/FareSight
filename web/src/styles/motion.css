@@ -1,0 +1,13 @@
+.icon > * { transform-box: fill-box; transform-origin: center; }
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-tactile-pressed=true] { scale: .96; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after, dialog::backdrop {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

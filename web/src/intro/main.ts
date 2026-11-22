@@ -1,3 +1,6 @@
+import '../styles/motion.css';
+import { attachIconMotion, icon } from '../ui/icons';
+import { attachTactileSpring, springBump, springHide, springText, stepSpring } from '../ui/motion';
 import { IntroScene, ROOM_START } from './IntroScene';
 
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -9,6 +12,12 @@ const meter = document.querySelector<HTMLElement>('.meter')!;
 const status = document.querySelector<HTMLElement>('.status')!;
 const roomTag = document.querySelector<HTMLElement>('.room-tag')!;
 const chapterLinks = [...document.querySelectorAll<HTMLAnchorElement>('.chapters a')];
+for (const link of document.querySelectorAll<HTMLAnchorElement>('.pill, .wordmark, .chapters a')) {
+  attachTactileSpring(link);
+  if (!link.classList.contains('pill')) continue;
+  link.append(icon('forward'));
+  attachIconMotion(link);
+}
 
 interface Beat {
   node: HTMLElement;
@@ -43,6 +52,7 @@ measure();
 
 const scrolled = () => Math.max(0, Math.min(window.scrollY / travel, 1));
 let eased = scrolled();
+const meterSpring = { value: eased, velocity: 0 };
 let chapter = '';
 let lookState = '';
 
@@ -76,13 +86,20 @@ function frame(dt: number): number {
   const interior = body.dataset.room === 'ready' ? ramp(eased, ROOM_START, 0.98) : 0;
   veil.style.opacity = (interior * 0.5 * (1 - away)).toFixed(3);
   root.style.setProperty('--interior', interior.toFixed(3));
-  meter.style.transform = `scaleX(${eased.toFixed(4)})`;
+  if (reducedMotion.matches) {
+    meterSpring.value = goal;
+    meterSpring.velocity = 0;
+  } else stepSpring(meterSpring, goal, dt);
+  meter.style.transform = `scaleX(${Math.max(0, Math.min(1, meterSpring.value)).toFixed(4)})`;
   const current = eased < 0.36 ? 'map' : eased < 0.82 ? 'station' : eased < 0.955 ? 'place' : 'inside';
   if (current !== chapter) {
+    const changed = !!chapter;
     chapter = current;
     for (const link of chapterLinks) {
-      if (link.dataset.chapter === current) link.setAttribute('aria-current', 'true');
-      else link.removeAttribute('aria-current');
+      if (link.dataset.chapter === current) {
+        link.setAttribute('aria-current', 'true');
+        if (changed) springBump(link);
+      } else link.removeAttribute('aria-current');
     }
   }
   return eased;
@@ -113,7 +130,7 @@ function tick(now: number) {
   fallbackFrame = 0;
   frame(Math.min(0.1, (now - last) / 1000));
   last = now;
-  if (eased !== scrolled()) fallbackFrame = requestAnimationFrame(tick);
+  if (eased !== scrolled() || meterSpring.value !== scrolled()) fallbackFrame = requestAnimationFrame(tick);
 }
 
 const observer = new ResizeObserver(() => { measure(); wake(); });
@@ -132,7 +149,7 @@ scene.init((roomReady) => {
   fallbackFrame = 0;
   stageReady = true;
   body.dataset.state = 'ready';
-  status.hidden = true;
+  springHide(status, { from: 'translateY(-5px)', preset: 'gentle' });
   scene.start();
 }).catch((error: unknown) => {
   if (events.signal.aborted) return;
@@ -142,7 +159,7 @@ scene.init((roomReady) => {
   body.dataset.state = 'ready';
   body.dataset.stage = 'missing';
   roomTag.textContent = '3D interior unavailable';
-  status.textContent = 'The 3D model could not load on this device. The app still works.';
+  springText(status, 'The 3D model could not load on this device. The app still works.');
   wake();
 });
 window.addEventListener('pagehide', (event) => {

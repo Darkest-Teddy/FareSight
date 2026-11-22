@@ -1,5 +1,7 @@
 import type { VoiceState, VoiceTranscript } from '../voice/RealtimeVoice';
 import { button, element, icon } from './dom.ts';
+import { animateIcon, attachIconMotion, type IconName } from './icons.ts';
+import { labelSpring, playSpring, springBump, springShake, springShow, springText, springVisible } from './motion.ts';
 
 export interface LiveVoiceDockActions {
   startVoice(): void;
@@ -14,9 +16,15 @@ const stateLabels: Record<VoiceState, string> = {
   idle: 'GPT Live', connecting: 'Connecting…', listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking', error: 'GPT Live',
 };
 
+const stateIcons: Record<VoiceState, IconName> = {
+  idle: 'mic', connecting: 'loading', listening: 'mic', thinking: 'thinking', speaking: 'sound', error: 'alert',
+};
+const panelMotion = { from: 'translate(-5px, 8px) scale(.975)' };
+
 export class LiveVoiceDock {
   readonly trigger: HTMLButtonElement;
   readonly root = element('section', 'voice-dock panel');
+  private readonly glyph = element('span', 'voice-glyph');
   private readonly triggerLabel = element('span', 'voice-label', 'GPT Live');
   private readonly statusBadge = element('span', 'voice-state', 'Ready');
   private readonly modelMeta = element('span', 'voice-model', 'gpt-live-1.1');
@@ -30,6 +38,7 @@ export class LiveVoiceDock {
   private readonly form = element('form', 'voice-input-row');
   private readonly input = element('input');
   private readonly sendBtn: HTMLButtonElement;
+  private opened = false;
   private state: VoiceState = 'idle';
   private hasMic = false;
   private requestingMic = false;
@@ -41,17 +50,16 @@ export class LiveVoiceDock {
 
   constructor(actions: LiveVoiceDockActions) {
     this.actions = actions;
-    this.trigger = button('', () => this.setOpen(this.root.hidden), 'voice-trigger');
+    this.trigger = button('', () => this.setOpen(!this.opened), 'voice-trigger');
     this.trigger.setAttribute('aria-expanded', 'false');
     this.trigger.setAttribute('aria-controls', 'faresight-voice-dock');
     this.trigger.setAttribute('aria-label', 'GPT Live');
     this.trigger.dataset.state = 'idle';
-    const glyph = element('span', 'voice-glyph');
-    const bars = element('span', 'voice-bars');
-    bars.append(element('i'), element('i'), element('i'));
-    glyph.setAttribute('aria-hidden', 'true');
-    glyph.append(icon('mic'), element('span', 'voice-spinner'), bars, icon('alert'));
-    this.trigger.append(glyph, this.triggerLabel);
+    this.glyph.setAttribute('aria-hidden', 'true');
+    this.glyph.append(icon('mic'));
+    this.trigger.append(this.glyph, this.triggerLabel);
+    labelSpring(this.trigger);
+    attachIconMotion(this.trigger);
 
     this.root.id = 'faresight-voice-dock';
     this.root.setAttribute('aria-label', 'Vantage Live Voice Assistant');
@@ -112,21 +120,28 @@ export class LiveVoiceDock {
   }
 
   setOpen(open: boolean): void {
-    if (open === !this.root.hidden) return;
+    if (open === this.opened) return;
     const restore = !open && this.root.contains(document.activeElement);
-    this.root.hidden = !open;
+    this.opened = open;
+    springVisible(this.root, open, panelMotion);
     this.trigger.setAttribute('aria-expanded', String(open));
     if (restore) this.trigger.focus({ preventScroll: true });
     if (open) this.actions.opened?.();
   }
 
   setModel(model: string): void {
-    this.modelMeta.textContent = model;
+    springText(this.modelMeta, model);
   }
 
   setState(state: VoiceState, detail?: string): void {
-    if (state === 'connecting' && this.state !== state) this.renderEmptyFeed();
-    this.state = state;
+    if (this.state !== state) {
+      if (state === 'connecting') this.renderEmptyFeed();
+      this.state = state;
+      const glyph = icon(stateIcons[state]);
+      this.glyph.replaceChildren(glyph);
+      animateIcon(glyph, 'state');
+      if (state !== 'speaking') this.setAudioLevel(0);
+    }
     this.root.dataset.state = state;
     this.trigger.dataset.state = state;
     if (detail || state === 'idle' || state === 'connecting') this.setNotice(detail);
@@ -134,9 +149,17 @@ export class LiveVoiceDock {
     if (state === 'error') this.setOpen(true);
   }
 
+  setAudioLevel(level: number): void {
+    const strength = this.state === 'speaking' ? Math.min(1, level * 5) : 0;
+    this.glyph.style?.setProperty('--voice-level', String(1 + strength * .2));
+  }
+
   setNotice(detail?: string): void {
-    this.errorNote.textContent = detail ?? '';
-    this.errorNote.hidden = !detail;
+    if (!detail) { springVisible(this.errorNote, false); return; }
+    const text = detail.replaceAll('—', '–');
+    const changed = text !== this.errorNote.textContent;
+    this.errorNote.textContent = text;
+    if (springShow(this.errorNote, { from: 'translateY(-4px)' }) || changed) springShake(this.errorNote);
   }
 
   restoreDraft(text: string): void {
@@ -151,7 +174,7 @@ export class LiveVoiceDock {
   }
 
   setAudioBlocked(blocked: boolean): void {
-    this.audioBtn.hidden = !blocked;
+    this.showControl(this.audioBtn, blocked);
   }
 
   setPaused(paused: boolean): void {
@@ -159,34 +182,41 @@ export class LiveVoiceDock {
     this.renderControls();
   }
 
+  private showControl(control: HTMLButtonElement, visible: boolean) {
+    if (!visible && document.activeElement === control) this.input.focus({ preventScroll: true });
+    springVisible(control, visible, { from: 'translateY(4px) scale(.965)', preset: 'snappy' });
+  }
+
   private renderControls(): void {
     const { state } = this;
     const live = state === 'listening' || state === 'thinking' || state === 'speaking';
     const started = live || state === 'connecting';
-    this.connectBtn.hidden = this.hasMic || state === 'connecting';
+    this.showControl(this.connectBtn, !this.hasMic && state !== 'connecting');
     this.connectBtn.disabled = this.requestingMic;
-    this.connectBtn.textContent = this.requestingMic ? 'Waiting for mic…' : live ? 'Enable mic' : 'Start voice';
-    this.muteBtn.hidden = !live || !this.hasMic;
-    this.muteBtn.textContent = this.muted ? 'Unmute mic' : 'Mute mic';
-    this.muteBtn.setAttribute('aria-pressed', String(this.muted));
-    this.endBtn.hidden = !started;
-    this.endBtn.textContent = state === 'connecting' ? 'Cancel' : 'End session';
+    springText(this.connectBtn, this.requestingMic ? 'Waiting for mic…' : live ? 'Enable mic' : 'Start voice');
+    this.showControl(this.muteBtn, live && this.hasMic);
+    springText(this.muteBtn, this.muted ? 'Unmute mic' : 'Mute mic');
+    const pressed = String(this.muted);
+    if (this.muteBtn.getAttribute?.('aria-pressed') !== pressed) springBump(this.glyph);
+    this.muteBtn.setAttribute('aria-pressed', pressed);
+    this.showControl(this.endBtn, started);
+    springText(this.endBtn, state === 'connecting' ? 'Cancel' : 'End session');
     this.sendBtn.disabled = state === 'connecting' || state === 'thinking' || state === 'speaking';
     const micActive = this.hasMic && !this.muted && !this.paused;
     const label = state === 'listening' && !micActive ? 'GPT Live' : stateLabels[state];
-    this.triggerLabel.textContent = label;
+    springText(this.triggerLabel, label);
     this.trigger.setAttribute('aria-label', label === 'GPT Live' ? label : `${label}, GPT Live`);
     this.trigger.dataset.micActive = String(micActive);
-    this.statusBadge.textContent = state === 'idle' ? 'Ready' : state === 'error' ? 'Connection error'
+    springText(this.statusBadge, state === 'idle' ? 'Ready' : state === 'error' ? 'Connection error'
       : state === 'listening' && !this.hasMic ? 'Text chat' : state === 'listening' && this.muted ? 'Mic muted'
-        : state === 'listening' && this.paused ? 'Standby' : stateLabels[state];
+        : state === 'listening' && this.paused ? 'Standby' : stateLabels[state]);
   }
 
   appendTranscript(entry: VoiceTranscript): void {
     if (entry.id) {
       const text = this.feed.querySelector<HTMLParagraphElement>(`[data-entry-id="${CSS.escape(entry.id)}"] p`);
       if (text) {
-        text.textContent = entry.text;
+        text.textContent = entry.text.replaceAll('—', '–');
         this.feed.scrollTop = this.feed.scrollHeight;
         return;
       }
@@ -198,6 +228,7 @@ export class LiveVoiceDock {
     const who = entry.kind === 'user' ? 'You' : entry.kind === 'assistant' ? 'Vantage' : 'Action';
     row.append(element('span', 'voice-who', who), element('p', '', entry.text));
     this.feed.append(row);
+    if (this.opened) playSpring(row, 'entry', [{ opacity: 0, translate: '0 6px' }, { opacity: 1, translate: '0 0' }]);
     if (this.feed.childElementCount > 40) this.feed.firstElementChild?.remove();
     this.feed.scrollTop = this.feed.scrollHeight;
   }

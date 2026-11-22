@@ -1,4 +1,5 @@
 import { api, assetUrl, type ModerationKind, type ModerationItem } from '../api/client';
+import { springShake, springStagger, springText } from './motion';
 import { button, element, errorText, field, link, message, modal, section } from './dom';
 
 export class AdminModal {
@@ -18,12 +19,12 @@ export class AdminModal {
     form.addEventListener('submit', (event) => { event.preventDefault(); void this.load(); });
     this.surface.body.append(form, this.entries);
     this.surface.dialog.addEventListener('close', () => {
-      if (!this.surface.dialog.open) this.reset();
+      if (!this.surface.isOpen()) this.reset();
     });
   }
 
   open() {
-    if (!this.surface.dialog.open) this.reset();
+    if (!this.surface.isOpen()) this.reset();
     this.surface.open();
   }
 
@@ -35,19 +36,26 @@ export class AdminModal {
   }
 
   private current(generation: number) {
-    return this.surface.dialog.open && this.generation === generation;
+    return this.surface.isOpen() && this.generation === generation;
   }
 
   private async load() {
-    if (this.busy || !this.surface.dialog.open) return;
+    if (this.busy || !this.surface.isOpen()) return;
     const generation = this.generation;
     this.busy = this.submit.disabled = true;
     this.entries.replaceChildren(message('Loading moderation queue…'));
     try {
       const { reviews, uploads } = await api.moderation(this.passcode.value);
-      if (this.current(generation)) this.entries.replaceChildren(this.list('Visit notes', 'review', reviews), this.list('Uploads', 'upload', uploads));
+      if (this.current(generation)) {
+        this.entries.replaceChildren(this.list('Visit notes', 'review', reviews), this.list('Uploads', 'upload', uploads));
+        springStagger(this.entries.querySelectorAll<HTMLElement>('.detail-section, .moderation-row'));
+      }
     } catch (error) {
-      if (this.current(generation)) this.entries.replaceChildren(message('Could not load the queue. ' + errorText(error), true));
+      if (this.current(generation)) {
+        const failure = message('Could not load the queue. ' + errorText(error), true);
+        this.entries.replaceChildren(failure);
+        springShake(failure);
+      }
     } finally { if (this.current(generation)) this.busy = this.submit.disabled = false; }
   }
 
@@ -75,14 +83,15 @@ export class AdminModal {
           if (!this.current(generation)) return;
           const buttons = Array.from(actions.querySelectorAll('button'));
           buttons.forEach((control) => { control.disabled = true; });
-          feedback.textContent = 'Saving decision…';
+          springText(feedback, 'Saving decision…');
           try {
             await api.moderate(type, item.id, action, this.passcode.value);
             this.onUpdate();
             if (this.current(generation)) await this.load();
           } catch (error) {
             if (!this.current(generation)) return;
-            feedback.textContent = errorText(error);
+            springText(feedback, errorText(error));
+            springShake(feedback);
             feedback.classList.add('error');
             buttons.forEach((control) => { control.disabled = false; });
           }

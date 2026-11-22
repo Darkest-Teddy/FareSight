@@ -1,5 +1,6 @@
 import type { PairingMessage } from '@faresight/shared';
 import { api, connectPair, type PairMessage } from '../api/client';
+import { springBump, springShake, springText, springVisible } from './motion';
 import { button, element, errorText, field, modal } from './dom';
 
 export class PairingModal {
@@ -49,16 +50,16 @@ export class PairingModal {
 
   open() { this.surface.open(); }
 
-  close() { if (this.surface.dialog.open) this.surface.dialog.close(); }
+  close() { this.surface.close(); }
 
   send(message: PairingMessage) {
     if (this.socket?.readyState === WebSocket.OPEN && this.peers > 1) {
       this.socket.send(JSON.stringify(message));
-      this.feedback.textContent = message.type === 'send_trip' ? 'Trip sent.' : 'Venue sent.';
+      springText(this.feedback, message.type === 'send_trip' ? 'Trip sent.' : 'Venue sent.');
       return true;
     }
     this.pending = message;
-    this.feedback.textContent = 'Pair a device to send this view.';
+    springText(this.feedback, 'Pair a device to send this view.');
     this.open();
     return false;
   }
@@ -134,12 +135,16 @@ export class PairingModal {
   }
 
   private render(label: string, isError = false) {
-    this.status.textContent = label;
+    if (springText(this.status, label) && isError) springShake(this.status);
     this.status.classList.toggle('error', isError);
     this.create.disabled = this.creating;
-    this.disconnect.hidden = !this.code;
-    this.codeReadout.hidden = !this.code;
-    this.codeReadout.value = this.code;
+    if (!this.code && document.activeElement === this.disconnect) this.create.focus({ preventScroll: true });
+    if (this.code && this.codeReadout.value !== this.code) {
+      this.codeReadout.value = this.code;
+      springBump(this.codeReadout);
+    }
+    springVisible(this.disconnect, !!this.code);
+    springVisible(this.codeReadout, !!this.code, { from: 'translateY(4px) scale(.96)', preset: 'pop' });
     this.onChange(this.peers > 1);
   }
 }

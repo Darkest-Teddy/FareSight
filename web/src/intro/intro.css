@@ -6,9 +6,9 @@
 :root {
   color-scheme: light;
   /* Same paper, ink and card tones as the app (web/src/styles/tokens.css). */
-  --bg: #F5F0E6;
+  --bg: #FBF9F4;
   --card: #FFFDF8;
-  --ink: #22252B;
+  --ink: #141413;
   --dim: rgb(34 37 43 / 78%);
   --faint: rgb(34 37 43 / 66%);
   --edge: rgb(34 37 43 / 16%);
@@ -56,9 +56,9 @@ body[data-stage=missing] #stage { display: none; }
   position: fixed; inset: 0; z-index: 1; pointer-events: none;
   opacity: calc(1 - .67 * var(--interior, 0));
   background:
-    radial-gradient(120% 85% at 50% 42%, transparent 50%, rgb(245 240 230 / 62%) 100%),
-    linear-gradient(to top, rgb(245 240 230 / 86%), transparent 36%),
-    linear-gradient(to bottom, rgb(245 240 230 / 70%), transparent 16%);
+    radial-gradient(120% 85% at 50% 42%, transparent 50%, rgb(251 249 244 / 62%) 100%),
+    linear-gradient(to top, rgb(251 249 244 / 86%), transparent 36%),
+    linear-gradient(to bottom, rgb(251 249 244 / 70%), transparent 16%);
 }
 .veil {
   position: fixed; inset: 0; z-index: 2; pointer-events: none; opacity: 0;
@@ -71,6 +71,7 @@ body[data-stage=missing] #stage { display: none; }
   display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 1.5rem;
 }
 .wordmark { display: inline-flex; align-items: center; gap: .4rem; justify-self: start; font-size: 1.06rem; font-weight: 650; letter-spacing: -.02em; color: var(--bar-ink); }
+.wordmark, .chapters a { display: inline-flex; align-items: center; min-height: 44px; }
 .wordmark svg { width: 1.375rem; height: 1.375rem; flex: none; }
 .chapters { display: flex; gap: clamp(1rem, 2.4vw, 2.25rem); font-size: .8rem; letter-spacing: -.005em; white-space: nowrap; }
 .chapters a { padding: .5rem 0; color: color-mix(in srgb, var(--bar-ink) 68%, transparent); transition: color .35s ease; }
@@ -84,16 +85,16 @@ body[data-stage=missing] #stage { display: none; }
 
 .pill {
   display: inline-flex; align-items: center; justify-content: center;
-  height: 2.25rem; padding: 0 1.05rem;
+  height: 44px; padding: 0 .875rem; gap: .375rem;
   border: 1px solid var(--edge); border-radius: .625rem;
   font-size: .8rem; font-weight: 550; white-space: nowrap;
   color: var(--ink); background: rgb(255 253 248 / 72%);
   box-shadow: 0 4px 14px rgb(80 60 30 / 10%);
   -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
-  transition: background .25s ease, border-color .25s ease, transform .15s ease;
+  transition: background .25s ease, border-color .25s ease;
 }
 .pill:hover { background: var(--card); border-color: rgb(34 37 43 / 30%); }
-.pill:active { transform: scale(.975); }
+.pill .icon { width: 1rem; height: 1rem; flex: none; }
 .pill.solid { height: 2.9rem; padding: 0 1.5rem; font-size: .95rem; color: var(--card); background: var(--ink); border-color: var(--ink); }
 .pill.solid:hover { background: #33373F; border-color: #33373F; }
 
@@ -148,11 +149,8 @@ body[data-room=ready] .look-hint { display: block; }
 }
 body[data-state=loading] .status::after {
   content: ''; display: block; width: 7rem; height: 1px; margin: .9rem auto 0;
-  background: linear-gradient(90deg, transparent, var(--ink), transparent);
-  background-size: 50% 100%; background-repeat: no-repeat;
-  animation: sweep 1.5s cubic-bezier(.45, 0, .55, 1) infinite;
+  background: var(--edge);
 }
-@keyframes sweep { from { background-position: -100% 0; } to { background-position: 200% 0; } }
 
 /* Tall and narrow screens: the model rides high, all copy reads from the bottom left. */
 @media (max-width: 860px) {
@@ -165,17 +163,12 @@ body[data-state=loading] .status::after {
   .lead { max-width: 30ch; }
   .shade {
     background:
-      linear-gradient(to top, rgb(245 240 230 / 94%), rgb(245 240 230 / 70%) 30%, transparent 56%),
-      linear-gradient(to bottom, rgb(245 240 230 / 72%), transparent 14%);
+      linear-gradient(to top, rgb(251 249 244 / 94%), rgb(251 249 244 / 70%) 30%, transparent 56%),
+      linear-gradient(to bottom, rgb(251 249 244 / 72%), transparent 14%);
   }
   .veil { background: radial-gradient(ellipse 90vw 32vh at 36% 82%, var(--room) 12%, transparent 92%); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  #stage { transition: none; }
-  body[data-state=loading] .status::after { animation: none; }
-  .pill { transition: none; }
-}
 @media (prefers-reduced-transparency: reduce) {
   .pill { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--card); }
 }

@@ -1,3 +1,4 @@
+import { playSpring, springBump, springShake, springText, springVisible } from './motion';
 import { MAX_ROOM_PHOTOS, ROOM_PHOTO_REQUIREMENT } from '@faresight/shared';
 import type { Asset, GenerationJob, IntakeSelectionResult, JobStage, Place, RoomModelTier } from '@faresight/shared';
 import { api, assetUrl, type Upload } from '../api/client';
@@ -126,7 +127,7 @@ export class UploadPipelineModal {
   }
 
   open(placeId?: string) {
-    if (!this.surface.dialog.open) {
+    if (!this.surface.isOpen()) {
       ++this.generation;
       ++this.jobRequest;
       this.busy = false;
@@ -136,7 +137,7 @@ export class UploadPipelineModal {
     void this.loadJobs();
   }
 
-  close() { if (this.surface.dialog.open) this.surface.dialog.close(); }
+  close() { this.surface.close(); }
 
   private reconcilePlaces(placeId?: string) {
     const old = this.place.value;
@@ -170,7 +171,7 @@ export class UploadPipelineModal {
     this.auto.disabled = this.busy || !this.uploads.length;
     this.roomTier.disabled = this.dish.disabled = this.dishName.disabled = this.busy;
     this.dishPrice.disabled = this.diameter.disabled = this.busy;
-    this.newDishField.hidden = this.dish.value !== '';
+    springVisible(this.newDishField, this.dish.value === '', { from: 'translateY(-4px)' });
     this.roomButton.disabled = this.busy || this.roomIds.size < 2 || this.roomIds.size > MAX_ROOM_PHOTOS;
     this.dishButton.disabled = this.busy || !this.dishId || (!this.dish.value && !this.dishName.value.trim())
       || !this.dishPrice.value.trim() || !this.dishPrice.checkValidity();
@@ -181,16 +182,16 @@ export class UploadPipelineModal {
   }
 
   private note(text: string, problem = false) {
-    this.feedback.textContent = text;
+    if (springText(this.feedback, text) && problem) springShake(this.feedback);
     this.feedback.classList.toggle('error', problem);
   }
 
   private async run(action: (current: () => boolean) => Promise<void>, trackJob = false) {
-    if (this.busy || !this.place.value || !this.surface.dialog.open) return;
+    if (this.busy || !this.place.value || !this.surface.isOpen()) return;
     const generation = this.generation;
     const place = this.place.value;
     const selection = this.jobSelection;
-    const current = () => this.surface.dialog.open && generation === this.generation && place === this.place.value &&
+    const current = () => this.surface.isOpen() && generation === this.generation && place === this.place.value &&
       (!trackJob || selection === this.jobSelection);
     this.busy = true;
     this.refreshControls();
@@ -325,13 +326,13 @@ export class UploadPipelineModal {
     if (!current) this.monitor.replaceChildren(message('Loading generation jobs…'));
     try {
       const jobs = await api.jobs();
-      if (generation !== this.generation || !this.surface.dialog.open) return;
+      if (generation !== this.generation || !this.surface.isOpen()) return;
       for (const job of jobs) if (this.jobs.get(job.id) === previous.get(job.id)) this.jobs.set(job.id, job);
       const selected = this.selectedJob || this.jobs.keys().next().value || '';
       this.renderHistory(selected);
       await this.selectJob(selected);
     } catch (error) {
-      if (generation !== this.generation || !this.surface.dialog.open || current !== this.selectedJob) return;
+      if (generation !== this.generation || !this.surface.isOpen() || current !== this.selectedJob) return;
       if (!current) this.monitor.replaceChildren(message('Could not list jobs. ' + errorText(error), true), button('Reload jobs', () => void this.loadJobs()));
       else this.schedulePoll();
     }
@@ -359,27 +360,27 @@ export class UploadPipelineModal {
     if (changed) this.monitor.replaceChildren(message('Loading job…'));
     try {
       const job = known ?? await api.job(id);
-      if (request !== this.jobRequest || !this.surface.dialog.open) return;
+      if (request !== this.jobRequest || !this.surface.isOpen()) return;
       this.jobs.set(id, job);
       if (job.asset_id && this.selectedAsset?.id !== job.asset_id) {
         try {
           const asset = await api.asset(job.asset_id);
-          if (request !== this.jobRequest || !this.surface.dialog.open) return;
+          if (request !== this.jobRequest || !this.surface.isOpen()) return;
           this.selectedAsset = asset;
         } catch { /* The job remains inspectable while its asset metadata is unavailable. */ }
       }
-      if (request !== this.jobRequest || !this.surface.dialog.open) return;
+      if (request !== this.jobRequest || !this.surface.isOpen()) return;
       this.renderJob(job);
       this.schedulePoll();
     } catch (error) {
-      if (request !== this.jobRequest || !this.surface.dialog.open) return;
+      if (request !== this.jobRequest || !this.surface.isOpen()) return;
       this.monitor.replaceChildren(message('Could not refresh job. ' + errorText(error), true), button('Retry job status', () => void this.selectJob(id)));
     }
   }
 
   private schedulePoll() {
     const job = this.jobs.get(this.selectedJob);
-    if (this.surface.dialog.open && job && pollingStages.has(job.status)) {
+    if (this.surface.isOpen() && job && pollingStages.has(job.status)) {
       this.pollTimer = window.setTimeout(() => void this.selectJob(job.id), 1400);
     }
   }
@@ -444,10 +445,18 @@ export class UploadPipelineModal {
       publish.append(message('Published to the restaurant manifest.'), button('Open in 3D viewer', () => void this.run(async (current) => {
         if (job.id !== this.selectedJob) return;
         await this.actions.published(job, true, current);
-        if (current()) this.surface.dialog.close();
+        if (current()) this.surface.close();
       }, true), 'accent'));
     } else publish.append(message('The asset becomes publishable after conversion and review.'));
+    const previousStage = this.monitor.querySelector('[aria-current=step]')?.textContent;
+    const previousStatus = this.monitor.querySelector('.readout')?.textContent;
     this.monitor.replaceChildren(steps, progress, status, overlay, images, publish);
+    const currentStep = steps.querySelector<HTMLElement>('[aria-current=step]');
+    if (currentStep && currentStep.textContent !== previousStage) springBump(currentStep);
+    if (status.textContent !== previousStatus) {
+      if (job.error) springShake(status);
+      else playSpring(status, 'status', [{ translate: '0 3px' }, { translate: '0 0' }]);
+    }
     this.refreshControls();
   }
 }
