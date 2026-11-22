@@ -433,6 +433,7 @@ test('provider request contracts and TRELLIS retry preserve the paid prediction'
   const ply = fixturePly();
   let imageId;
   let trellisSubmissions = 0;
+  let measurements = 0;
   let previewDownloads = 0;
   let plyDownloads = 0;
   const json = (body) => Response.json(body);
@@ -444,6 +445,18 @@ test('provider request contracts and TRELLIS retry preserve the paid prediction'
       assert.equal(init.headers['x-goog-api-key'], 'test-gemini');
       assert.equal(payload.generationConfig.responseMimeType, 'application/json');
       assert.deepEqual(payload.contents[0].parts[2].inlineData, { mimeType: 'image/png', data: image.toString('base64') });
+      // A dish job asks for the dish's size before its build is submitted.
+      if (payload.contents[0].parts[0].text.startsWith('You are measuring one dish')) {
+        measurements++;
+        assert.equal(trellisSubmissions, 0);
+        assert.match(payload.contents[0].parts[0].text, /Dish name: "Other dish"/);
+        assert.deepEqual(payload.contents[0].parts[1], { text: 'Photo 1' });
+        // Depth is given wider than width, and the photo number is out of range: both get put right.
+        return json({ candidates: [{ content: { parts: [{ thought: true, text: 'thinking' }, { text: JSON.stringify({
+          width_m: 0.2, depth_m: 0.3, height_m: 0.06, vessel: 'plate', vessel_diameter_m: 0.3, confidence: 0.7,
+          basis: 'A dinner fork beside the plate.', best_photo: 4, guidance: 'A 30 cm plate of food, 6 cm tall.',
+        }) }] } }] });
+      }
       return json({ candidates: [{ content: { parts: [{ text: JSON.stringify({
         restaurant_id: placeId,
         room_groups: [{ group_id: 'room', label: 'Room', upload_ids: [imageId], confidence: 0.95, reason: 'Matching dining tables' }],
@@ -511,7 +524,18 @@ test('provider request contracts and TRELLIS retry preserve the paid prediction'
   const moderation = (action) => server.request('/api/admin/moderation', {
     body: { type: 'upload', action, id: dishReview.asset_id },
   });
+  // The dish was measured once, before the build, and the retry did not measure it again.
+  assert.equal(measurements, 1);
+  assert.deepEqual(dishReview.dish_measure, {
+    width_m: 0.3, depth_m: 0.2, height_m: 0.06, vessel: 'plate', vessel_diameter_m: 0.3, confidence: 0.7,
+    basis: 'A dinner fork beside the plate.', best_photo: 0, guidance: 'A 30 cm plate of food, 6 cm tall.', model: 'gemini-4-hydrogen',
+  });
   const approved = await moderation('approve');
+  // Nobody gave a plate size, so the splat is drawn at the width judged from the photo and says so.
+  assert.equal(approved.scale_status, 'estimated');
+  assert.equal(approved.scale_label, 'Estimated size (about 30 cm wide, judged from the photos)');
+  assert.equal(approved.plate_diameter_m, 0.3);
+  assert.ok(Math.abs(approved.scale_factor - 0.3 / approved.metadata.measured_width) < 1e-9);
   const manifestUrl = `/api/restaurants/${placeId}/manifest`;
   const published = await server.request(manifestUrl);
   assert.equal(published.menu_items.find(({ dish }) => dish.name === 'Other dish').dish_asset.id, approved.id);
@@ -945,6 +969,16 @@ test('an uploaded food photo must carry the dish name and its menu price', async
   });
   assert.equal(job.dish_price, 8.5);
   assert.equal(job.dish_name, 'Street corn');
+  // A dish may be photographed from several sides.
+  const side = await server.request('/api/uploads', {
+    body: { filename: 'plate-side.png', mimeType: 'image/png', dataBase64: secondImage.toString('base64'), place_id: placeId },
+    status: 201,
+  });
+  const around = await server.request('/api/jobs', {
+    body: { ...base, upload_ids: [upload.id, side.id], dish_name: 'Street corn, all round', dish_price: 8.5 }, status: 202,
+  });
+  assert.equal(around.kind, 'dish');
+  assert.equal(around.dish_name, 'Street corn, all round');
   // A room job carries no dish fields at all.
   const room = await server.request('/api/jobs', { body: { kind: 'room', place_id: placeId, upload_ids: [upload.id] }, status: 202 });
   assert.equal(room.dish_price, null);

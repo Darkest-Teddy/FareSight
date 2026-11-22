@@ -9,6 +9,7 @@ import { downloadAtlasSplat, pollAtlasPose, pollAtlasSplats, submitAtlasPose, su
 import { publishSplats } from '../services/captures.ts';
 import type { Captures } from '../services/captures.ts';
 import { findDemoAsset } from '../services/demoAssets.ts';
+import { measureDish } from '../services/dishMeasure.ts';
 import { MAX_IMAGE_BYTES } from '../services/imagePrep.ts';
 import { downloadFile, ProviderHttpError, TerminalProviderError, type CommitFile } from '../services/providerHttp.ts';
 import { publishAsset } from '../services/publish.ts';
@@ -60,6 +61,19 @@ async function advance(store: Store, config: Config, initialJob: JobRecord, leas
     if (!store.get('places', job.place_id)) throw new TerminalProviderError('The job venue is no longer in the catalog');
     if (String(job.provider) === 'marble-1.1') throw new Error('This Marble job used a retired API. Create a new Atlas room job.');
     if (job.status === 'queued') {
+      // A dish is measured from its photos before the build starts. The size sets how big the splat is drawn.
+      // Measuring never stops a job: without an answer the dish is built anyway and shown at an approximate size.
+      if (job.kind === 'dish' && job.provider !== 'demo-sim' && job.dish_measure === undefined) {
+        const photos = inputs();
+        let note = 'Measuring is switched off, so the dish size will be approximate';
+        const dish_measure = await measureDish(config, job.dish_name, photos).catch((error: unknown) => {
+          note = `Could not measure the dish (${error instanceof Error ? error.message : 'no answer'}), so its size will be approximate`;
+          return null;
+        });
+        if (dish_measure) note = `Measured the dish: about ${Math.round(dish_measure.width_m * 100)} cm wide, ${Math.round(dish_measure.height_m * 100)} cm tall`;
+        set({ dish_measure, progress: 5, status_message: note });
+        return;
+      }
       next('generating', 'Generating spatial preview', job.provider === 'demo-sim' ? { provider_task_id: `demo-${job.id}` } : {});
       return;
     }
@@ -102,7 +116,7 @@ async function advance(store: Store, config: Config, initialJob: JobRecord, leas
       } else {
         if (!job.provider_task_id) {
           if (job.submission_pending) throw new Error(failedSubmission);
-          const provider_task_id = await submitTrellis(config, inputs()[0], assertCurrent, () => set({ submission_pending: true }));
+          const provider_task_id = await submitTrellis(config, inputs(), assertCurrent, () => set({ submission_pending: true }));
           set({ provider_task_id, submission_pending: false, progress: 25 });
           return;
         }
@@ -158,7 +172,13 @@ async function advance(store: Store, config: Config, initialJob: JobRecord, leas
       const original = job.original_spz_path ?? job.original_ply_path;
       if (!original) throw new TerminalProviderError('Original splat checkpoint is missing');
       const converted = await convertSplat(config, job.id, job.kind, original, commit);
-      const scale = measureScale(job.plate_diameter_m, converted.metadata.measured_width);
+      // The size judged from the photos sets the scale. A size sent with the job overrides it, and the
+      // figure the catalog lists for the dish is used only when the photos could not be measured.
+      const width = converted.metadata.measured_width;
+      const listed = job.dish_id ? store.get('places', job.place_id)?.dishes.find((dish) => dish.id === job.dish_id)?.plate_diameter_m : undefined;
+      const scale = job.plate_diameter_m ? measureScale(job.plate_diameter_m, width)
+        : job.dish_measure ? measureScale(job.dish_measure.width_m, width, true)
+        : measureScale(listed, width);
       const spawn_point: Vector3 | null = job.kind === 'room' ? [0, 1.55, 2] : null;
       // A capture's splat is served from the splat bucket. Other jobs keep serving it from this server's disk.
       assertCurrent();
@@ -210,7 +230,9 @@ async function advance(store: Store, config: Config, initialJob: JobRecord, leas
 
   async function useReferencePreview() {
     if (job.preview_image_path && existsSync(job.preview_image_path)) return;
-    const upload = inputs()[0];
+    // The clearest view of the dish, when the measuring step picked one.
+    const photos = inputs();
+    const upload = photos[job.dish_measure?.best_photo ?? 0] ?? photos[0];
     const file = resolve(config.outputs, `${job.id}-preview${extname(upload.file)}`);
     const preview_image_path = await copyAtomically(resolve(config.uploads, upload.file), file, commit);
     set({ preview_image_path, preview_download_pending: false });

@@ -23,7 +23,7 @@ export interface XRAssetData {
   id: string;
   kind: 'room' | 'dish' | 'seat_view' | 'photo_gallery';
   provenance_label: string;
-  scale_status: 'measured' | 'approximate' | 'unknown';
+  scale_status: 'measured' | 'estimated' | 'approximate' | 'unknown';
   scale_label: string;
   scale_factor: number;
   plate_diameter_m?: number | null;

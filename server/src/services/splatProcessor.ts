@@ -278,11 +278,17 @@ async function readSpzHeader(path: string) {
   return { count, version: header.readUInt32LE(4) };
 }
 
-export function measureScale(plateDiameter: number | null | undefined, width: number | undefined) {
+/**
+ * The factor that brings a dish splat to its real width. `estimated` says the size was judged from
+ * the photos instead of given by a person, and the label says so.
+ */
+export function measureScale(plateDiameter: number | null | undefined, width: number | undefined, estimated = false) {
   if (plateDiameter && width && width > 0) {
     return {
-      scale_factor: plateDiameter / width, scale_status: 'measured' as const,
-      scale_label: `Actual size (${Number((plateDiameter * 100).toFixed(1))} cm plate)`, plate_diameter_m: plateDiameter,
+      scale_factor: plateDiameter / width, scale_status: estimated ? 'estimated' as const : 'measured' as const,
+      scale_label: estimated ? `Estimated size (about ${Math.round(plateDiameter * 100)} cm wide, judged from the photos)`
+        : `Actual size (${Number((plateDiameter * 100).toFixed(1))} cm plate)`,
+      plate_diameter_m: plateDiameter,
     };
   }
   return { scale_factor: 1, scale_status: 'approximate' as const, scale_label: 'Approximate size', plate_diameter_m: plateDiameter ?? null };

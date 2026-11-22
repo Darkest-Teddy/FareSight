@@ -20,29 +20,34 @@ function trellisRequest(config: Config, path = '', body?: unknown): Promise<Pred
   }, body);
 }
 
-export async function submitTrellis(
-  config: Config, upload: Upload, assertCurrent: () => void, beforeSubmit: () => void,
-): Promise<string> {
+/** One photo as TRELLIS takes it: inline when small, as a Replicate file otherwise. */
+async function trellisImage(config: Config, upload: Upload, assertCurrent: () => void): Promise<string> {
   const bytes = await readFile(resolve(config.uploads, upload.file));
   assertCurrent();
-  let image = `data:${upload.mime_type};base64,${bytes.toString('base64')}`;
-  if (bytes.length > 256 * 1024) {
-    const form = new FormData();
-    form.set('content', new Blob([bytes], { type: upload.mime_type }), upload.filename);
-    const result = await providerRequest<{ urls?: { get?: string } }>('https://api.replicate.com/v1/files', 'Replicate file upload', {
-      Authorization: `Bearer ${config.replicateKey}`,
-    }, form);
-    const fileUrl = typeof result?.urls?.get === 'string' ? URL.parse(result.urls.get) : null;
-    if (fileUrl?.origin !== 'https://api.replicate.com' || !fileUrl.pathname.startsWith('/v1/files/')) {
-      throw new TerminalProviderError('Replicate did not return a file URL');
-    }
-    image = fileUrl.href;
+  if (bytes.length <= 256 * 1024) return `data:${upload.mime_type};base64,${bytes.toString('base64')}`;
+  const form = new FormData();
+  form.set('content', new Blob([bytes], { type: upload.mime_type }), upload.filename);
+  const result = await providerRequest<{ urls?: { get?: string } }>('https://api.replicate.com/v1/files', 'Replicate file upload', {
+    Authorization: `Bearer ${config.replicateKey}`,
+  }, form);
+  const fileUrl = typeof result?.urls?.get === 'string' ? URL.parse(result.urls.get) : null;
+  if (fileUrl?.origin !== 'https://api.replicate.com' || !fileUrl.pathname.startsWith('/v1/files/')) {
+    throw new TerminalProviderError('Replicate did not return a file URL');
   }
+  return fileUrl.href;
+}
+
+/** Starts one dish build. Several photos of the same dish, taken around it, go in as views of one object. */
+export async function submitTrellis(
+  config: Config, uploads: Upload[], assertCurrent: () => void, beforeSubmit: () => void,
+): Promise<string> {
+  const images: string[] = [];
+  for (const upload of uploads) images.push(await trellisImage(config, upload, assertCurrent));
   beforeSubmit();
   const prediction = await trellisRequest(config, '', {
     version: TRELLIS_VERSION,
     input: {
-      images: [image],
+      images,
       save_gaussian_ply: true,
       generate_model: false,
       generate_color: false,

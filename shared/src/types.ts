@@ -179,7 +179,8 @@ export interface Asset {
   provenance: 'ai_spatial_preview' | 'trellis_dish_splat' | 'demo_splat' | 'photo_gallery';
   provenance_label: string;
   backend: string;
-  scale_status: 'measured' | 'approximate' | 'unknown';
+  /** `measured`: a person gave the size. `estimated`: judged from the photos. Both are drawn at that size. */
+  scale_status: 'measured' | 'estimated' | 'approximate' | 'unknown';
   scale_label: string;
   scale_factor: number;
   plate_diameter_m?: number | null;
@@ -209,6 +210,30 @@ export const ROOM_MODEL_TIERS = ['atlas-draft', 'atlas-refined'] as const;
 export type RoomModelTier = typeof ROOM_MODEL_TIERS[number];
 export type MarbleTier = RoomModelTier;
 export const MAX_ROOM_PHOTOS = 32;
+/** A dish can be photographed from a few sides. Its size is judged from all of them. */
+export const MAX_DISH_PHOTOS = 8;
+
+/** The real-world size of a dish as served, judged from its photos before the 3D build starts. */
+export interface DishMeasure {
+  /** Widest horizontal extent, seen from above, with the plate, bowl or cup included. Metres. */
+  width_m: number;
+  /** Horizontal extent at a right angle to the width. Metres. */
+  depth_m: number;
+  /** From the table to the highest point of the food. Metres. */
+  height_m: number;
+  vessel: 'plate' | 'bowl' | 'cup' | 'glass' | 'basket' | 'tray' | 'board' | 'wrapper' | 'none' | 'other';
+  /** Rim diameter of the vessel when it is round, in metres. */
+  vessel_diameter_m: number | null;
+  /** How sure the estimate is, 0 to 1. Low when nothing of a known size is in the photos. */
+  confidence: number;
+  /** What in the photos the size was judged against. */
+  basis: string;
+  /** Index into the job's photos of the clearest view of the whole dish. The 3D build starts from it. */
+  best_photo: number;
+  /** One sentence giving the dish, its shape and its size, written as a prompt for a 3D generator. */
+  guidance: string;
+  model: string;
+}
 export const ROOM_PHOTO_REQUIREMENT = 'Atlas room reconstruction requires 2 to 32 overlapping photos.';
 
 export interface GenerationJob {
@@ -227,6 +252,8 @@ export interface GenerationJob {
   provider_task_id?: string | null;
   input_upload_ids: string[];
   plate_diameter_m?: number | null;
+  /** Dish jobs only: the size judged from the photos. Null when it could not be judged, absent until tried. */
+  dish_measure?: DishMeasure | null;
   model_tier?: RoomModelTier;
   progress: number;
   status_message: string;

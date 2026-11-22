@@ -136,7 +136,9 @@ export class SplatLoader {
     }
     const entity = new pc.Entity(data.id, this.app);
     entity.addComponent('gsplat', { asset, unified: true, layers: [slot === 'room' ? this.roomLayer : pc.LAYERID_WORLD] });
-    const scale = data.scale_status === 'measured' && Number.isFinite(data.scale_factor) && data.scale_factor > 0
+    // A size given by a person and a size judged from the photos are both drawn. Anything else stays as built.
+    const sized = data.scale_status === 'measured' || data.scale_status === 'estimated';
+    const scale = sized && Number.isFinite(data.scale_factor) && data.scale_factor > 0
       ? data.scale_factor : 1;
     entity.setLocalScale(scale, scale, scale);
     parent.addChild(entity);

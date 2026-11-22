@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { MAX_ROOM_PHOTOS, ROOM_MODEL_TIERS, ROOM_PHOTO_REQUIREMENT } from '@faresight/shared';
+import { MAX_DISH_PHOTOS, MAX_ROOM_PHOTOS, ROOM_MODEL_TIERS, ROOM_PHOTO_REQUIREMENT } from '@faresight/shared';
 import type { Asset, RoomModelTier } from '@faresight/shared';
 import type { FastifyInstance } from 'fastify';
 import { pipelineProvider } from '../config.ts';
@@ -161,8 +161,8 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
       const dishId = body.dish_id ?? (!dishName ? uploads[0].dish_id : null);
       const dish = dishId ? place.dishes.find((entry) => entry.id === dishId)
         : place.dishes.find((entry) => entry.name.toLowerCase() === dishName?.toLowerCase());
-      if (body.kind === 'dish' && (uploads.length !== 1 || (body.dish_id && !dish))) {
-        return reply.code(400).send({ error: 'Dish generation requires one image and any supplied dish_id must belong to the place' });
+      if (body.kind === 'dish' && (uploads.length > MAX_DISH_PHOTOS || (body.dish_id && !dish))) {
+        return reply.code(400).send({ error: `Dish generation takes 1 to ${MAX_DISH_PHOTOS} photos of one dish, and any supplied dish_id must belong to the place` });
       }
       // A food photo carries its own menu price, so nothing reaches the catalog unpriced.
       if (body.kind === 'dish' && body.dish_price === undefined) {
@@ -181,7 +181,8 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
         dish_name: body.kind === 'dish' ? dish?.name ?? (dishName || 'Untitled dish') : null,
         dish_price: body.kind === 'dish' ? body.dish_price ?? null : null,
         input_upload_ids: body.upload_ids, status: 'queued', progress: 0, provider, provider_task_id: null,
-        plate_diameter_m: body.kind === 'dish' ? body.plate_diameter_m ?? dish?.plate_diameter_m ?? null : null,
+        // Only a size sent with this request. The dish is otherwise measured from its photos by the worker.
+        plate_diameter_m: body.kind === 'dish' ? body.plate_diameter_m ?? null : null,
         model_tier: body.kind === 'room' ? body.model_tier ?? 'atlas-draft' : undefined,
         status_message: provider === 'demo-sim' ? 'Demo simulation · Queued' : 'Queued',
         created_at: now, updated_at: now, idempotency_key: keyHeader, request_fingerprint: fingerprint,
