@@ -38,9 +38,10 @@ export interface PendingReview {
   place_id: string;
   author_label: string;
   text: string;
+  /** Stars out of five, when the diner gave any. */
+  rating?: number;
   status: 'pending_review' | 'approved' | 'rejected';
   sample?: boolean;
-  rating?: number;
   created_at: string;
 }
 

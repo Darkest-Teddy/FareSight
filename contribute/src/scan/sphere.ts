@@ -43,17 +43,25 @@ export function poseFromOrientation(alpha: number, beta: number, gamma: number):
   };
 }
 
-/** Camera axes for an upright camera turned to a yaw and pitch. */
-export function poseFromYawPitch(yaw: number, pitch: number): Pose {
+/** Camera axes for a camera turned to a yaw and pitch, and tilted sideways by `roll` degrees. */
+export function poseFromYawPitch(yaw: number, pitch: number, roll = 0): Pose {
   const forward = direction(yaw, pitch);
-  const right: Vec3 = [Math.cos(yaw * RAD), -Math.sin(yaw * RAD), 0];
-  const up: Vec3 = [
-    right[1] * forward[2] - right[2] * forward[1],
-    right[2] * forward[0] - right[0] * forward[2],
-    right[0] * forward[1] - right[1] * forward[0],
+  const level: Vec3 = [Math.cos(yaw * RAD), -Math.sin(yaw * RAD), 0];
+  const upright: Vec3 = [
+    level[1] * forward[2] - level[2] * forward[1],
+    level[2] * forward[0] - level[0] * forward[2],
+    level[0] * forward[1] - level[1] * forward[0],
   ];
-  return { right, up, forward };
+  const cos = Math.cos(roll * RAD), sin = Math.sin(roll * RAD);
+  return {
+    right: level.map((value, index) => value * cos + upright[index] * sin) as Vec3,
+    up: upright.map((value, index) => value * cos - level[index] * sin) as Vec3,
+    forward,
+  };
 }
+
+/** How far a camera is tilted sideways, in degrees: 0 when the horizon runs straight across the picture. */
+export const rollOf = (pose: Pose) => Math.atan2(pose.right[2], pose.up[2]) / RAD;
 
 export function blend(from: Pose, to: Pose, amount: number): Pose {
   const mix = (a: Vec3, b: Vec3): Vec3 => {

@@ -57,7 +57,7 @@ export class App {
     const brand = button('', () => this.go('#/'), 'wordmark');
     const mark = el('span', 'brand-mark');
     mark.setAttribute('aria-hidden', 'true');
-    brand.append(mark, el('span', '', 'FareSight'), el('span', 'brand-tag', 'Contribute'));
+    brand.append(mark);
     brand.setAttribute('aria-label', 'FareSight Contribute, back to the map');
     this.codeButton = iconButton('key', codeLabels.unknown, () => void codeSheet.ask(), 'code-button');
     bar.append(brand, this.codeButton);
@@ -89,6 +89,7 @@ export class App {
     this.renderCode();
     this.renderBadge();
     void catalog.load();
+    catalog.watch();
     void inviteCode.refresh();
     scans.start();
     window.addEventListener('online', () => {

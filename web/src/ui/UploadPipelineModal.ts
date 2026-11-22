@@ -28,6 +28,7 @@ export class UploadPipelineModal {
   private readonly dish = element('select');
   private readonly dishName = element('input');
   private readonly newDishField = field('New dish name', this.dishName);
+  private readonly dishPrice = element('input');
   private readonly diameter = element('input');
   private readonly history = element('select');
   private readonly monitor = element('div', 'job-monitor');
@@ -86,9 +87,21 @@ export class UploadPipelineModal {
     select.append(this.auto, this.intakeDetails, this.photoList);
 
     const generate = section('3. Generate a 3D preview');
-    this.dish.addEventListener('change', () => this.refreshControls());
+    this.dish.addEventListener('change', () => {
+      // Start from the catalog price when there is one; the operator still confirms or corrects it.
+      const known = this.actions.places().find((entry) => entry.id === this.place.value)
+        ?.dishes.find((entry) => entry.id === this.dish.value)?.price;
+      if (known != null) this.dishPrice.value = known.toFixed(2);
+      this.refreshControls();
+    });
     this.dishName.maxLength = 120;
     this.dishName.addEventListener('input', () => this.refreshControls());
+    this.dishPrice.type = 'number';
+    this.dishPrice.min = '0.25';
+    this.dishPrice.max = '500';
+    this.dishPrice.step = '0.01';
+    this.dishPrice.placeholder = 'Required, for example 12.95';
+    this.dishPrice.addEventListener('input', () => this.refreshControls());
     this.diameter.type = 'number';
     this.diameter.min = '0.1';
     this.diameter.max = '200';
@@ -100,7 +113,8 @@ export class UploadPipelineModal {
     const generateActions = element('div', 'button-row');
     generateActions.append(this.roomButton, this.dishButton);
     generate.append(field('Room quality', this.roomTier), element('p', 'muted', ROOM_PHOTO_REQUIREMENT),
-      field('Dish to publish', this.dish), this.newDishField, field('Known plate diameter (cm)', this.diameter), generateActions);
+      field('Dish to publish', this.dish), this.newDishField, field('Menu price (USD)', this.dishPrice),
+      field('Known plate diameter (cm)', this.diameter), generateActions);
 
     const monitor = section('4. Monitor and review');
     this.history.addEventListener('change', () => { ++this.jobSelection; void this.selectJob(this.history.value); });
@@ -139,6 +153,7 @@ export class UploadPipelineModal {
     this.roomIds.clear();
     this.dishId = '';
     this.dishName.value = '';
+    this.dishPrice.value = '';
     this.diameter.value = '';
     const place = this.actions.places().find((entry) => entry.id === this.place.value);
     this.dish.replaceChildren(...(place?.dishes.map((entry) => option(entry.id, entry.name)) ?? []), option('', 'New dish'));
@@ -153,10 +168,12 @@ export class UploadPipelineModal {
     this.place.disabled = this.busy || !this.place.options.length;
     this.file.disabled = this.sample.disabled = this.busy || !this.place.value || this.uploads.length >= maxUploads;
     this.auto.disabled = this.busy || !this.uploads.length;
-    this.roomTier.disabled = this.dish.disabled = this.dishName.disabled = this.diameter.disabled = this.busy;
+    this.roomTier.disabled = this.dish.disabled = this.dishName.disabled = this.busy;
+    this.dishPrice.disabled = this.diameter.disabled = this.busy;
     this.newDishField.hidden = this.dish.value !== '';
     this.roomButton.disabled = this.busy || this.roomIds.size < 2 || this.roomIds.size > MAX_ROOM_PHOTOS;
-    this.dishButton.disabled = this.busy || !this.dishId || (!this.dish.value && !this.dishName.value.trim());
+    this.dishButton.disabled = this.busy || !this.dishId || (!this.dish.value && !this.dishName.value.trim())
+      || !this.dishPrice.value.trim() || !this.dishPrice.checkValidity();
     this.photoList.querySelectorAll('input').forEach((input) => { input.disabled = this.busy; });
     this.monitor.querySelectorAll<HTMLButtonElement>('[data-mutation]').forEach((control) => {
       control.disabled = this.busy;
@@ -275,6 +292,11 @@ export class UploadPipelineModal {
     const dish = kind === 'dish';
     if (!dish && (ids.length < 2 || ids.length > MAX_ROOM_PHOTOS)) throw new Error(ROOM_PHOTO_REQUIREMENT);
     const diameter = this.diameter.valueAsNumber;
+    const price = this.dishPrice.valueAsNumber;
+    // Every uploaded food photo states its menu price, so no dish is published unpriced.
+    if (dish && (!this.dishPrice.value.trim() || !this.dishPrice.checkValidity())) {
+      throw new Error('Enter the menu price, between $0.25 and $500.');
+    }
     if (dish && this.diameter.validity.badInput) throw new Error('Enter a valid diameter in centimeters.');
     if (dish && this.diameter.value && !this.diameter.checkValidity()) throw new Error('Enter a plate diameter between 0.1 and 200 cm.');
     this.note(`Queuing ${kind} generation…`);
@@ -283,6 +305,7 @@ export class UploadPipelineModal {
       kind, place_id: this.place.value, upload_ids: ids,
       dish_id: dish && this.dish.value ? this.dish.value : undefined,
       dish_name: dish && !this.dish.value ? this.dishName.value.trim() : undefined,
+      dish_price: dish ? Math.round(price * 100) / 100 : undefined,
       plate_diameter_m: dish && Number.isFinite(diameter) ? diameter / 100 : undefined,
       model_tier: dish ? undefined : this.roomTier.value as RoomModelTier,
     }, this.passcode.value);

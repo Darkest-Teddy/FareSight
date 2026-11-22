@@ -4,6 +4,8 @@ import { STOPS } from './transit.js';
 import type { Asset, Category, CategoryGroup, Dish, Place, Vector3 } from './types.js';
 
 const demoDate = '2026-11-21';
+/** When the price agent last filled the prices these venues do not publish themselves. */
+const priceLookupDate = '2026-11-22';
 const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 const group: Record<Category, CategoryGroup> = {
   restaurant: 'A', study: 'B', shop: 'B', market: 'B', music: 'C', activity: 'C',
@@ -38,7 +40,7 @@ const listings: Listing[][] = [
     ['kenmore-jefes-01', "El Jefe's Taqueria", 'restaurant', 42.34926, -71.09680, 160, 12, '10:00', '04:00', ['tacos', 'burritos', 'late night'], 'Build-your-own tacos and burritos before or after a game.', true, true],
     ['kenmore-eastern-01', 'Eastern Standard Kitchen and Drinks', 'restaurant', 42.34722, -71.10131, 660, 34, '16:00', '23:00', ['brasserie', 'burgers', 'dinner'], 'Brasserie booths and a long bar near Fenway.', true, true],
     ['kenmore-esplanade-01', 'Charles River Esplanade', 'outdoor', 42.35096, -71.09561, 610, 0, '06:00', '22:00', ['river walk', 'picnic', 'sunset'], 'Riverside paths with a view across the Charles toward Cambridge.', true],
-    ['kenmore-shudaxia-01', 'Shu Daxia Hot Pot', 'restaurant', 42.34969, -71.10026, 420, 36, '12:00', '22:30', ['hot pot', 'sichuan', 'groups'], 'Sichuan hot pot dining room on Commonwealth Ave with ornate woodwork and group tables.', true, true],
+    ['kenmore-shudaxia-01', 'Shu Daxia Hot Pot', 'restaurant', 42.34880, -71.09952, 370, 36, '12:00', '22:30', ['hot pot', 'sichuan', 'groups'], 'Sichuan hot pot dining room on Commonwealth Ave with ornate woodwork and group tables.', true, true],
   ],
   [
     ['harvard-cafe-01', 'Charles & Folio Study Café', 'study', 42.37364, -71.11832, 120, 9.25, '08:00', '20:00', ['matcha', 'tiramisu', 'study'], 'Window seats and long tables for a study break.', true],
@@ -182,7 +184,9 @@ addDish(cafe, 'harvard-matcha-tiramisu', 'Ceremonial Matcha Tiramisu + Latte', 9
 
 for (const { venueId, pricingUrl, dishes } of restaurantDishMenus) {
   const place = byId(venueId);
+  // Prices come either from the venue's own ordering page or from a cited lookup, each with its own date.
   if (pricingUrl && dishes.some(({ price }) => price !== null)) place.price_checked_on = demoDate;
+  else if (dishes.some(({ price, priceUrl }) => price !== null && priceUrl)) place.price_checked_on = priceLookupDate;
   for (const { id, name, price, diameter, file, portion, splats, photoUrl } of dishes) {
     addDish(place, id, name, price, diameter, file, portion, { splats, photoUrl });
   }
@@ -193,6 +197,13 @@ export const demoDishPhotoSources = restaurantDishMenus.map(({ venueId, pricingU
   pricingUrl,
   items: dishes.map(({ name, photoUrl }) => ({ name, url: photoUrl })),
 }));
+
+/** Dishes whose price the price agent found, with the page it read the amount from. */
+export const demoDishPriceSources = restaurantDishMenus.map(({ venueId, dishes }) => ({
+  venue: byId(venueId).name,
+  items: dishes.flatMap(({ name, price, priceSource, priceUrl }) => price !== null && priceUrl
+    ? [{ name, price, source: priceSource ?? 'Menu listing', url: priceUrl }] : []),
+})).filter(({ items }) => items.length);
 
 byId('kenmore-fenway-01').seat_views = [{
   id: 'fenway-seat-demo', place_id: 'kenmore-fenway-01', section: 'Grandstand 18',

@@ -92,6 +92,29 @@ export interface LiveReviewsResponse {
   reviews: LiveReviewItem[];
 }
 
+/** A menu price the price agent found published for one dish, with the page it came from. */
+export interface LiveDishPrice {
+  dish_id: string;
+  price: number;
+  source: string;
+  url: string;
+}
+
+/** Why a dish still has no price after a lookup, so the UI can say more than "Not listed". */
+export interface UnpricedDish {
+  dish_id: string;
+  reason: string;
+}
+
+export interface LiveMenuPricesResponse {
+  place_id: string;
+  live: boolean;
+  fetched_at: string;
+  currency: 'USD';
+  prices: LiveDishPrice[];
+  unpriced: UnpricedDish[];
+}
+
 export interface Dish {
   id: string;
   place_id: string;
@@ -183,6 +206,8 @@ export interface GenerationJob {
   capture_id?: string | null;
   dish_id?: string | null;
   dish_name?: string | null;
+  /** Menu price the contributor entered with the photo. Required for dish jobs. */
+  dish_price?: number | null;
   status: JobStage;
   provider: 'atlas-v2' | 'trellis-replicate' | 'demo-sim';
   pose_operation_id?: string | null;

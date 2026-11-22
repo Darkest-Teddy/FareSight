@@ -1,6 +1,6 @@
 import { button, el, haptic, iconButton, motion } from '../dom';
 import {
-  angleBetween, blend, createTargets, pitchOf, poseFromOrientation, poseFromYawPitch, project, yawOf,
+  angleBetween, blend, createTargets, pitchOf, poseFromOrientation, poseFromYawPitch, project, rollOf, yawOf,
   type Pose, type Target, type Vec3,
 } from '../scan/sphere';
 
@@ -10,6 +10,21 @@ const AIM_DEGREES = 7;
 const STEADY_SPEED = 16;
 const FAST_SPEED = 80;
 const HOLD_MS = 450;
+// A photo is only taken while the phone's own motion sensors read below both limits: how fast it is
+// turning, in degrees per second, and how hard it is being moved, in metres per second squared.
+// A hand holding a phone still stays well under these; sliding or shaking it from side to side does not.
+const STEADY_TURN = 10;
+const STEADY_SHAKE = 0.5;
+// The level. A photo is only taken while the phone is upright: tilted sideways by no more than this many degrees.
+const LEVEL_DEGREES = 4;
+// Leaving the spot. A web page cannot follow where the phone is in the room, but walking shows in the
+// motion sensors as a run of up-and-down jolts, one per step. A few of them close together pause the scan.
+// Turning on the spot swings the phone sideways, not up and down, so it does not count.
+const STEP_JOLT = 1.4;
+const STEP_GAP_MS = 250;
+const WALK_WINDOW_MS = 2500;
+const WALK_STEPS = 3;
+const AMBER = '255 181 71';
 const MOTION_TIMEOUT_MS = 400;
 const POP_MS = 420;
 // Long-side field of view the dots are drawn with. It is wider than the camera's own (about 64°) on purpose:
@@ -29,10 +44,19 @@ interface Card {
 
 /** iOS only hands out motion readings after the page asks from inside a tap. */
 async function requestMotion() {
-  const sensor = window.DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> } | undefined;
-  if (!sensor) return false;
-  if (typeof sensor.requestPermission !== 'function') return true;
-  try { return await sensor.requestPermission() === 'granted'; } catch { return false; }
+  type Gated = { requestPermission?: () => Promise<string> } | undefined;
+  const ask = async (sensor: Gated) => {
+    if (!sensor) return false;
+    if (typeof sensor.requestPermission !== 'function') return true;
+    try { return await sensor.requestPermission() === 'granted'; } catch { return false; }
+  };
+  // Both are asked in the same breath, while the tap still counts. Orientation aims the scan;
+  // motion feeds the stabilizer, and the scan still works without it.
+  const [orientation] = await Promise.all([
+    ask(window.DeviceOrientationEvent as unknown as Gated),
+    ask(window.DeviceMotionEvent as unknown as Gated),
+  ]);
+  return orientation;
 }
 
 /**
@@ -58,8 +82,8 @@ class GuidedScan {
   private connecting = false;
   private videoInterrupted = true;
   private audio?: AudioContext;
-  /** Development stand-in for the sensors and camera, steered by dragging. */
-  private simulated?: { yaw: number; pitch: number; frame: HTMLCanvasElement };
+  /** Development stand-in for the sensors and camera, steered by dragging. Shift-drag tilts it sideways. */
+  private simulated?: { yaw: number; pitch: number; roll: number; frame: HTMLCanvasElement };
   private aimed?: Target;
   private guide?: Target;
   private scanning = false;
@@ -67,6 +91,11 @@ class GuidedScan {
   private settled = false;
   private held = 0;
   private speed = 0;
+  /** Smoothed readings of the phone's gyroscope and accelerometer, once they start arriving. */
+  private motion?: { turn: number; shake: number };
+  /** When the last few step-like jolts were felt, and whether one is still under way. */
+  private steps: number[] = [];
+  private stepping = false;
   private captureEpoch = 0;
   private last = 0;
   private raf = 0;
@@ -106,7 +135,7 @@ class GuidedScan {
     this.show({
       title: 'Scan the space in 360°',
       lines: [
-        'Stand in the middle of the room.',
+        'Stand in the middle of the room and stay on that spot.',
         'Hold the phone upright and turn slowly on the spot.',
         'Aim at each dot and hold still until it pops.',
       ],
@@ -153,6 +182,7 @@ class GuidedScan {
     if (this.settled) return;
     document.addEventListener('visibilitychange', this.onVisibility);
     if (allowed) window.addEventListener('deviceorientation', this.onOrientation);
+    window.addEventListener('devicemotion', this.onMotion);
     const sensed = allowed && camera && await this.firstReading();
     if (this.settled) return;
     if (import.meta.env.DEV && (!camera || !sensed)) this.simulate();
@@ -201,6 +231,59 @@ class GuidedScan {
       });
     }
   };
+
+  private readonly onMotion = (event: DeviceMotionEvent) => {
+    const rate = event.rotationRate;
+    const push = event.acceleration;
+    if (rate?.alpha == null || push?.x == null) return;
+    const turn = Math.hypot(rate.alpha, rate.beta ?? 0, rate.gamma ?? 0);
+    const shake = Math.hypot(push.x, push.y ?? 0, push.z ?? 0);
+    const motion = this.motion ??= { turn, shake };
+    // A jolt registers at once; calm has to last a moment before it counts.
+    motion.turn = Math.max(turn, motion.turn + (turn - motion.turn) * 0.25);
+    motion.shake = Math.max(shake, motion.shake + (shake - motion.shake) * 0.25);
+
+    const pull = event.accelerationIncludingGravity;
+    if (pull?.x == null || pull.y == null || pull.z == null) return;
+    // The two readings differ by gravity, which tells which way is down for the phone however it is held.
+    const down = [pull.x - push.x, pull.y - (push.y ?? 0), pull.z - (push.z ?? 0)];
+    const weight = Math.hypot(down[0], down[1], down[2]) || 1;
+    this.feelStep(Math.abs(push.x * down[0] + (push.y ?? 0) * down[1] + (push.z ?? 0) * down[2]) / weight);
+  };
+
+  /** Counts step-like jolts, given how hard the phone is moving up or down, and stops the scan when they add up to walking. */
+  private feelStep(bounce: number) {
+    const now = performance.now();
+    if (bounce < STEP_JOLT / 2) this.stepping = false;
+    if (bounce < STEP_JOLT || this.stepping || now - (this.steps.at(-1) ?? 0) < STEP_GAP_MS) return;
+    this.stepping = true;
+    this.steps = [...this.steps.filter((time) => now - time < WALK_WINDOW_MS), now];
+    // Until the first photo is taken there is no spot to keep to yet.
+    if (this.steps.length < WALK_STEPS || !this.scanning || !this.captured.length) return;
+    this.steps = [];
+    haptic([30, 60, 30]);
+    this.pause({
+      title: 'Stay on your spot',
+      lines: [
+        'It looks like you walked. Every photo has to be taken from the same place, or the 3D build comes out wrong.',
+        'Go back to where you took the first photo, then carry on turning on the spot.',
+      ],
+      primary: ['I\'m on my spot', () => this.resume()],
+    });
+  }
+
+  /** Whether the phone is upright, so the horizon runs straight across the photo. */
+  private get level() {
+    if (!this.pose) return false;
+    // Aimed at the ceiling or the floor there is no horizon in the photo, and no sideways tilt to measure.
+    return Math.abs(pitchOf(this.pose.forward)) > 80 || Math.abs(rollOf(this.pose)) <= LEVEL_DEGREES;
+  }
+
+  /** Whether the phone is still enough for a sharp photo. */
+  private get steady() {
+    if (this.speed >= STEADY_SPEED) return false;
+    return !this.motion || (this.motion.turn < STEADY_TURN && this.motion.shake < STEADY_SHAKE);
+  }
 
   private async firstReading() {
     for (let waited = 0; waited < 1200 && !this.sensorPose; waited += 50) {
@@ -285,14 +368,17 @@ class GuidedScan {
     const frame = document.createElement('canvas');
     frame.width = 720;
     frame.height = 1280;
-    const view = this.simulated = { yaw: 0, pitch: 0, frame };
+    const view = this.simulated = { yaw: 0, pitch: 0, roll: 0, frame };
     this.dialog.dataset.simulated = 'true';
     let from: { x: number; y: number } | undefined;
     this.canvas.addEventListener('pointerdown', (event) => { from = { x: event.clientX, y: event.clientY }; });
     this.canvas.addEventListener('pointermove', (event) => {
       if (!from) return;
-      view.yaw -= (event.clientX - from.x) * 0.25;
-      view.pitch = Math.max(-90, Math.min(90, view.pitch + (event.clientY - from.y) * 0.25));
+      if (event.shiftKey) view.roll = Math.max(-45, Math.min(45, view.roll + (event.clientX - from.x) * 0.25));
+      else {
+        view.yaw -= (event.clientX - from.x) * 0.25;
+        view.pitch = Math.max(-90, Math.min(90, view.pitch + (event.clientY - from.y) * 0.25));
+      }
       from = { x: event.clientX, y: event.clientY };
     });
     for (const type of ['pointerup', 'pointercancel']) this.canvas.addEventListener(type, () => { from = undefined; });
@@ -314,7 +400,7 @@ class GuidedScan {
   }
 
   private readPose() {
-    return this.simulated ? poseFromYawPitch(this.simulated.yaw, this.simulated.pitch) : this.sensorPose;
+    return this.simulated ? poseFromYawPitch(this.simulated.yaw, this.simulated.pitch, this.simulated.roll) : this.sensorPose;
   }
 
   private readonly resize = () => {
@@ -378,9 +464,13 @@ class GuidedScan {
       this.aimed = aimed;
       this.held = 0;
     }
-    if (aimed && this.speed < STEADY_SPEED) {
+    if (aimed && this.steady && this.level) {
       this.held += dt * 1000;
       if (this.held >= HOLD_MS && !this.capturing) void this.capture(aimed);
+    } else if (aimed) {
+      // Any movement or tilt starts the wait again: the photo is only taken after a full, unbroken moment
+      // of holding the phone still and upright.
+      this.held = 0;
     } else this.held = Math.max(0, this.held - dt * 2000);
 
     // Lead the person round one ring at a time: the horizon first, then up, then down.
@@ -400,7 +490,7 @@ class GuidedScan {
 
   private advice() {
     if (!this.guide) return '';
-    if (this.aimed) return this.speed < STEADY_SPEED ? 'Hold still' : 'Hold steady';
+    if (this.aimed) return !this.level ? 'Straighten the phone' : this.steady ? 'Hold still' : 'Steady the phone';
     if (this.speed > FAST_SPEED) return 'Slow down';
     const spot = this.place(this.guide);
     if (spot.visible) return 'Aim at the glowing dot';
@@ -419,7 +509,8 @@ class GuidedScan {
   }
 
   private async capture(target: Target) {
-    if (this.capturePaused(performance.now())) return;
+    // Nothing is captured in a moment the phone is moving or tilted.
+    if (!this.steady || !this.level || this.capturePaused(performance.now())) return;
     const epoch = this.captureEpoch;
     const source = this.simulated ? this.simulatedFrame() : this.video;
     const width = this.simulated ? source.width : this.video.videoWidth;
@@ -486,6 +577,7 @@ class GuidedScan {
 
   private resume() {
     this.show();
+    this.steps = [];
     this.scanning = true;
   }
 
@@ -531,6 +623,7 @@ class GuidedScan {
   private release() {
     cancelAnimationFrame(this.raf);
     window.removeEventListener('deviceorientation', this.onOrientation);
+    window.removeEventListener('devicemotion', this.onMotion);
     window.removeEventListener('resize', this.resize);
     document.removeEventListener('visibilitychange', this.onVisibility);
     this.disconnectCamera();
@@ -594,12 +687,37 @@ class GuidedScan {
       context.stroke();
     }
 
-    // Aiming ring, with an arc that fills while the phone is held still on a dot.
+    // Aiming ring. It turns amber while a dot is in it but the phone is moving or tilted, and its arc
+    // only fills once the phone is still and upright.
+    const blocked = this.scanning && Boolean(this.aimed) && !(this.steady && this.level);
     context.beginPath();
     context.arc(width / 2, height / 2, 30, 0, Math.PI * 2);
-    context.strokeStyle = 'rgb(255 255 255 / 75%)';
-    context.lineWidth = 2;
+    context.strokeStyle = blocked ? `rgb(${AMBER})` : 'rgb(255 255 255 / 75%)';
+    context.lineWidth = blocked ? 3 : 2;
     context.stroke();
+    // The level, like a camera's: two fixed marks either side of the ring, and a line through it that
+    // stays with the horizon. Tilt the phone and the line leans; hold it upright and the three join up.
+    if (this.scanning) {
+      const upright = this.level;
+      context.lineCap = 'round';
+      context.lineWidth = 2.5;
+      context.strokeStyle = upright ? `rgb(${ACCENT})` : 'rgb(255 255 255 / 70%)';
+      context.beginPath();
+      for (const side of [-1, 1]) {
+        context.moveTo(width / 2 + side * 52, height / 2);
+        context.lineTo(width / 2 + side * 78, height / 2);
+      }
+      context.stroke();
+      context.save();
+      context.translate(width / 2, height / 2);
+      context.rotate(upright ? 0 : rollOf(this.pose!) * RAD);
+      context.strokeStyle = upright ? `rgb(${ACCENT})` : '#fff';
+      context.beginPath();
+      context.moveTo(-46, 0);
+      context.lineTo(46, 0);
+      context.stroke();
+      context.restore();
+    }
     if (this.aimed && this.held > 0) {
       context.beginPath();
       context.arc(width / 2, height / 2, 30, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, this.held / HOLD_MS));

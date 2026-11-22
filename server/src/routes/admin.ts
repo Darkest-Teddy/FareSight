@@ -30,7 +30,8 @@ export function registerAdminAndCommunity(app: FastifyInstance, store: Store, gu
         properties: {
           author_label: { type: 'string', minLength: 1, maxLength: 80 },
           text: { type: 'string', minLength: 1, maxLength: 1000 },
-          rating: { type: 'number', minimum: 0, maximum: 5 },
+          // Stars out of five. Optional, so a plain visit note is still accepted.
+          rating: { type: 'integer', minimum: 1, maximum: 5 },
         },
       },
     },

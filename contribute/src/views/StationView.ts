@@ -1,37 +1,48 @@
 import type { Place, Stop } from '@faresight/shared';
 import { catalog } from '../catalog';
-import { categoryLabel, coverage, loadArea, projectToArea, servesDishes, type AreaData, type AreaLayer } from '../data';
+import { categoryLabel, coverage, loadArea, projectToArea, reviewSummary, servesDishes, type AreaData, type AreaLayer } from '../data';
 import { button, el, errorText, haptic, icon, iconButton, svg, type IconName } from '../dom';
 import { MapCanvas, type Box } from '../MapCanvas';
+import { reviewSheet } from '../ui/ReviewSheet';
 
-type SelectSource = 'pin' | 'card' | 'rail' | 'restore';
+type SelectSource = 'pin' | 'restore';
 
-const groundLayers: AreaLayer[] = ['water', 'park', 'pitch', 'foot', 'service', 'minor', 'major'];
 // Metres of street shown across the map when a place is selected.
 const FOCUS_SPAN_M = 210;
+/** Everything the map shows of each place. When any of it changes the pins are drawn again. */
+const drawn = (places: Place[]) => JSON.stringify(places.map((place) => [
+  place.id, place.name, place.lat, place.lon, place.pin_index, place.category, place.cravings,
+]));
+const groundLayers: AreaLayer[] = ['water', 'park', 'pitch', 'foot', 'service', 'minor', 'major'];
 // Screen pixels kept between pin heads, and between a pin head and the station roundel.
 const PIN_GAP = 31;
 const ROUNDEL_GAP = 29;
 // A pin's head sits this far above the point its needle marks.
 const PIN_HEAD_RISE = 25;
+// Half a pin head, and the height of the name tag beside it, in screen pixels.
+const PIN_HEAD = 15;
+const TAG_HEIGHT = 18;
+type Rect = [x: number, y: number, width: number, height: number];
+const overlap = (a: Rect, b: Rect) =>
+  Math.max(0, Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]))
+  * Math.max(0, Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]));
 
 /** One stop's neighborhood: the diorama's footprints seen from above, with a pin for every place. */
 export class StationView {
   readonly root = el('section', 'view station-view');
   private readonly mapHost = el('div', 'station-map');
-  private readonly rail = el('div', 'place-rail');
   private readonly summary = el('p', 'view-sub');
   private readonly pins = new Map<string, HTMLButtonElement>();
-  private readonly cards = new Map<string, { card: HTMLElement; needs: HTMLElement }>();
+  /** The short card about the selected place, over the bottom of the map. */
+  private readonly overview = el('aside', 'place-overview');
+  private readonly tagWidths = new Map<string, number>();
   private readonly points = new Map<string, [number, number]>();
   private readonly unsubscribe: () => void;
   private map?: MapCanvas;
   private area?: AreaData;
   private places: Place[] = [];
   private selected?: string;
-  private railIndex = 0;
-  private railTarget?: number;
-  private railFrame = 0;
+  private built = false;
   private alive = true;
 
   constructor(
@@ -47,17 +58,7 @@ export class StationView {
     title.append(el('h1', '', stop.name), this.summary);
     head.append(iconButton('back', 'Back to the map', actions.back, 'head-back'), badge, title);
 
-    this.rail.setAttribute('role', 'list');
-    this.rail.setAttribute('aria-label', `Places near ${stop.name}`);
-    this.rail.addEventListener('scroll', () => {
-      if (this.railFrame) return;
-      this.railFrame = requestAnimationFrame(() => {
-        this.railFrame = 0;
-        this.syncRail();
-      });
-    }, { passive: true });
-
-    this.root.append(head, this.mapHost, this.rail);
+    this.root.append(head, this.mapHost);
     this.unsubscribe = catalog.subscribe(() => this.onCatalog());
     void this.load();
   }
@@ -65,14 +66,12 @@ export class StationView {
   destroy() {
     this.alive = false;
     this.unsubscribe();
-    cancelAnimationFrame(this.railFrame);
     this.map?.destroy();
   }
 
   private async load() {
     this.summary.textContent = this.stop.lines.map((line) => line.replace('-', ' ')).join(' · ');
     this.mapHost.replaceChildren(el('div', 'board-skeleton'));
-    this.rail.replaceChildren(el('div', 'place-card is-skeleton'), el('div', 'place-card is-skeleton'));
     try {
       const [area] = await Promise.all([loadArea(this.stop.stop_id), catalog.load(60_000)]);
       if (!this.alive) return;
@@ -88,7 +87,6 @@ export class StationView {
     notice.append(icon('alert'), el('h2', '', 'This stop did not load'), el('p', '', text),
       button('Try again', () => void this.load(), 'primary'));
     this.mapHost.replaceChildren(notice);
-    this.rail.replaceChildren();
   }
 
   private onCatalog() {
@@ -99,8 +97,7 @@ export class StationView {
     }
     if (catalog.status !== 'ready') return;
     const places = catalog.at(this.stop.stop_id);
-    const unchanged = this.map && places.length === this.places.length
-      && places.every((place, index) => place.id === this.places[index].id);
+    const unchanged = this.map && drawn(places) === drawn(this.places);
     this.places = places;
     if (unchanged) this.syncNeeds();
     else this.build(this.area);
@@ -109,17 +106,17 @@ export class StationView {
   private build(area: AreaData) {
     this.map?.destroy();
     this.pins.clear();
-    this.cards.clear();
+    this.overview.hidden = true;
+    this.tagWidths.clear();
     this.points.clear();
-    const q = area.unitsPerMeter;
-    const half = area.spanMeters * q / 2;
-    const board: Box = { x: -half, y: -half, w: half * 2, h: half * 2 };
+    const [bx, by, bw, bh] = area.bounds;
+    const board: Box = { x: bx, y: by, w: bw, h: bh };
     const map = new MapCanvas({
-      bounds: board, home: board, padding: 14, maxZoom: area.spanMeters / 70,
+      bounds: board, home: board, padding: 6, fixed: true, maxZoom: area.spanMeters / 70,
       label: `Street map around ${this.stop.name} with ${this.places.length} places marked.`,
     });
     this.map = map;
-    this.draw(map, area, half);
+    this.draw(map, area);
 
     const [sx, sy] = area.station;
     const roundel = el('div');
@@ -129,26 +126,21 @@ export class StationView {
     roundel.append(mark);
     map.addMarker(roundel, sx, sy);
 
-    this.rail.replaceChildren();
-    if (!this.places.length) {
-      const empty = el('div', 'place-card is-empty');
-      empty.append(el('p', '', 'No places are listed at this stop yet.'));
-      this.rail.append(empty);
-    }
     this.places.forEach((place, index) => {
-      const limit = half * 0.95;
       const [px, py] = projectToArea(area, place.lat, place.lon);
-      const point: [number, number] = [Math.max(-limit, Math.min(limit, px)), Math.max(-limit, Math.min(limit, py))];
+      // A place just off the island still gets a pin, at the edge of the map.
+      const point: [number, number] = [Math.max(bx, Math.min(bx + bw, px)), Math.max(by, Math.min(by + bh, py))];
       this.points.set(place.id, point);
 
       const pin = button('', () => this.tapPin(place), 'pin');
       pin.style.setProperty('--i', String(index));
-      pin.append(el('span', 'pin-name', place.name), el('span', 'pin-head', String(place.pin_index + 1)));
+      // Every pin carries its place's name. Tapping one opens the short overview of the place;
+      // tapping it again goes straight to adding photos.
+      pin.append(el('span', 'pin-tag', place.name), el('span', 'pin-head', String(place.pin_index + 1)));
       this.pins.set(place.id, pin);
       const anchor = el('div');
       anchor.append(pin);
       map.addMarker(anchor, point[0], point[1]);
-      this.rail.append(this.card(place, index));
     });
 
     const recenter = iconButton('locate', 'Show the whole neighborhood', () => this.clearSelection(), 'map-control');
@@ -157,26 +149,33 @@ export class StationView {
       recenter.classList.toggle('is-visible', zoom > 1.08);
       this.declutter(map.current.scale, area.station);
     };
-    this.mapHost.replaceChildren(map.root, recenter, el('p', 'map-credit', `© ${area.attribution.replace(' (ODbL)', '')}`));
+    this.mapHost.replaceChildren(map.root, recenter, el('p', 'map-credit', `© ${area.attribution.replace(' (ODbL)', '')}`), this.overview);
     this.syncNeeds();
 
-    const restore = this.places.find((place) => place.id === this.restorePlaceId);
+    // The first time, pick up the place the person came back from. When the list changes under an open
+    // screen, keep whatever they had selected.
+    const keep = this.built ? this.selected : this.restorePlaceId;
+    this.built = true;
+    const restore = this.places.find((place) => place.id === keep);
+    if (!restore) this.selected = undefined;
     if (restore) void map.ready.then(() => { if (this.alive && this.map === map) this.select(restore, 'restore'); });
   }
 
-  private draw(map: MapCanvas, area: AreaData, half: number) {
+  private draw(map: MapCanvas, area: AreaData) {
     const q = area.unitsPerMeter;
     const clipId = `board-clip-${area.stopId}`;
-    const size = half * 2;
-    const corner = 12 * q;
-    const lip = 7 * q;
+    // The city is cropped to the same shoreline as the diorama's island, with a margin of turf around it.
+    const shore = 'M' + area.outline.reduce<string[]>((pairs, value, index) => {
+      if (index % 2 === 0) pairs.push(`${value} ${area.outline[index + 1]}`);
+      return pairs;
+    }, []).join('L') + 'Z';
     const defs = svg('defs');
     const clip = svg('clipPath', { id: clipId });
-    clip.append(svg('rect', { x: -half, y: -half, width: size, height: size, rx: corner }));
+    clip.append(svg('path', { d: shore }));
     defs.append(clip);
 
     const deck = svg('g', { 'clip-path': `url(#${clipId})`, class: 'board' });
-    deck.append(svg('rect', { x: -half, y: -half, width: size, height: size, class: 'board-deck' }));
+    deck.append(svg('path', { d: shore, class: 'board-deck' }));
     for (const name of groundLayers) {
       if (area.layers[name]) deck.append(svg('path', { d: area.layers[name], class: `layer layer-${name}` }));
     }
@@ -193,62 +192,70 @@ export class StationView {
     }
     deck.append(labels);
 
-    map.svg.append(
-      defs,
-      svg('rect', { x: -half - lip, y: -half - lip, width: size + lip * 2, height: size + lip * 2, rx: corner + lip, class: 'board-plinth' }),
-      deck,
-      svg('rect', { x: -half, y: -half, width: size, height: size, rx: corner, class: 'board-trim' }),
-    );
+    map.svg.append(defs, svg('path', { d: shore, class: 'board-turf', 'stroke-width': area.turf * 2 }), deck);
   }
 
-  private card(place: Place, index: number) {
-    const card = el('article', 'place-card');
-    card.setAttribute('role', 'listitem');
-    card.style.setProperty('--i', String(index));
-    const head = el('header', 'place-card-head');
-    const title = el('div', 'place-card-title');
-    title.append(
-      el('h2', '', place.name),
-      el('p', '', `${categoryLabel(place)} · ${place.walk_from_stop_m} m from the stop`),
-    );
-    head.append(el('span', 'card-number', String(place.pin_index + 1)), title);
-    const needs = el('ul', 'needs');
-    const cta = button('Add photos', () => this.actions.openPlace(place), 'primary cta');
-    cta.append(icon('next'));
-    card.append(head, el('p', 'place-vibe', place.vibe), needs, cta);
-    card.addEventListener('click', (event) => {
-      if ((event.target as Element).closest('.cta') || this.selected === place.id) return;
-      this.select(place, 'card');
-    });
-    this.cards.set(place.id, { card, needs });
-    return card;
-  }
-
-  /** Shows what each place still needs, on its card and on its pin. */
+  /** Shows what each place still needs, on its pin. */
   private syncNeeds() {
     let waiting = 0;
     for (const place of this.places) {
-      const status = coverage(place);
-      if (!status.room) waiting++;
-      const rows: [IconName, string, string, boolean][] = [
-        ['room', 'The space', status.room ? 'In 3D' : 'Needs photos', status.room],
-      ];
-      if (servesDishes(place)) {
-        const complete = status.dishes > 0 && status.dishesDone === status.dishes;
-        rows.push(['dish', 'Dishes', status.dishes ? `${status.dishesDone} of ${status.dishes} in 3D` : 'None yet', complete]);
-      }
-      const entry = this.cards.get(place.id);
-      entry?.needs.replaceChildren(...rows.map(([symbol, label, value, done]) => {
-        const row = el('li', done ? 'need is-done' : 'need');
-        row.append(icon(done ? 'check' : symbol), el('span', '', label), el('b', '', value));
-        return row;
-      }));
+      const done = coverage(place).room;
+      if (!done) waiting++;
       const pin = this.pins.get(place.id);
-      pin?.classList.toggle('is-done', status.room);
-      pin?.setAttribute('aria-label', `${place.pin_index + 1}. ${place.name}. ${status.room ? 'The space is in 3D.' : 'The space needs photos.'}`);
+      pin?.classList.toggle('is-done', done);
+      pin?.setAttribute('aria-label', `${place.pin_index + 1}. ${place.name}. ${done ? 'The space is in 3D.' : 'The space needs photos.'}`);
     }
     const lines = this.stop.lines.map((line) => line.replace('-', ' ')).join(' · ');
-    this.summary.textContent = `${lines} · ${this.places.length} places, ${waiting} need photos`;
+    this.summary.textContent = this.places.length
+      ? `${lines} · ${this.places.length} places, ${waiting} need photos`
+      : `${lines} · No places listed yet`;
+    this.renderOverview();
+  }
+
+  /**
+   * The overview of the selected place, kept to what someone needs before deciding to go in:
+   * what it is, whether its space and its menu are in 3D yet, and one line of what people say.
+   */
+  private renderOverview() {
+    const place = this.places.find((entry) => entry.id === this.selected);
+    this.overview.hidden = !place;
+    if (!place) return;
+    const status = coverage(place);
+    const head = el('header', 'overview-head');
+    const title = el('div', 'overview-title');
+    title.append(el('h2', '', place.name), el('p', '', `${categoryLabel(place)} · ${place.walk_from_stop_m} m from the stop`));
+    head.append(el('span', 'card-number', String(place.pin_index + 1)), title,
+      iconButton('close', 'Close the overview', () => this.clearSelection(), 'overview-close'));
+
+    const facts = el('ul', 'facts');
+    facts.append(this.fact('room', '3D space', status.room ? 'In 3D' : 'Needs photos', status.room));
+    if (servesDishes(place)) {
+      facts.append(this.fact('dish', 'Menu', status.dishes ? `${status.dishesDone} of ${status.dishes} dishes in 3D` : 'No dishes yet',
+        status.dishes > 0 && status.dishesDone === status.dishes));
+    }
+    const review = reviewSummary(place);
+    const reviews = button('', () => reviewSheet.open(place), 'fact fact-reviews');
+    const words = el('span', 'fact-text');
+    words.append(
+      el('strong', '', review.rating ? `${review.rating.toFixed(1)} ★ on ${review.source}` : 'Reviews'),
+      el('small', '', review.quote ?? 'No reviews yet. Be the first.'),
+    );
+    reviews.append(icon('star'), words, icon('next'));
+    const row = el('li');
+    row.append(reviews);
+    facts.append(row);
+
+    const cta = button('Add photos', () => this.actions.openPlace(place), 'primary overview-cta');
+    cta.append(icon('next'));
+    this.overview.replaceChildren(head, el('p', 'overview-about', place.vibe), facts, cta);
+  }
+
+  private fact(symbol: IconName, label: string, value: string, done: boolean) {
+    const row = el('li', done ? 'fact is-done' : 'fact');
+    const mark = el('i', 'fact-mark');
+    mark.append(icon(done ? 'check' : 'camera'));
+    row.append(icon(symbol), el('span', 'fact-label', label), el('b', '', value), mark);
+    return row;
   }
 
   /**
@@ -287,6 +294,69 @@ export class StationView {
       pin?.style.setProperty('--dx', `${dx.toFixed(1)}px`);
       pin?.style.setProperty('--dy', `${dy.toFixed(1)}px`);
     }
+    this.placeTags(pins.map(({ id, x, y, dx, dy }) => ({ id, x: x + dx, y: y + dy })), roundel);
+  }
+
+  /**
+   * Puts each pin's name where it gets in the way least: beside, under or over its pin. Covering another
+   * pin or another name counts most, the station a little less. Near the edge of the map a name is
+   * shortened or slid sideways rather than cut off. `heads` are pin head centres in map units times the zoom.
+   */
+  private placeTags(heads: { id: string; x: number; y: number }[], roundel: { x: number; y: number }) {
+    if (!this.map) return;
+    const { cx, cy, scale } = this.map.current;
+    const { width: mapWidth, height: mapHeight } = this.map.size;
+    const EDGE = 4;
+    // From zoomed map units to pixels on the map.
+    const left = mapWidth / 2 - cx * scale;
+    const top = mapHeight / 2 - cy * scale;
+    const station: Rect = [roundel.x + left - 13, roundel.y + top - 13, 26, 26];
+    const pinsAt = heads.map(({ x, y }): Rect => [x + left - PIN_HEAD, y + top - PIN_HEAD, PIN_HEAD * 2, PIN_HEAD + PIN_HEAD_RISE]);
+    const names: (Rect | undefined)[] = heads.map(() => undefined);
+    const place = (head: { id: string; x: number; y: number }, index: number) => {
+      const tag = this.pins.get(head.id)?.querySelector<HTMLElement>('.pin-tag');
+      if (!tag) return;
+      const full = this.tagWidths.get(head.id) || tag.offsetWidth;
+      if (!full) return;
+      this.tagWidths.set(head.id, full);
+      const x = head.x + left, y = head.y + top;
+      // Beside the pin, level with its head or a step above or below it.
+      const beside = (side: -1 | 1, lift: number) => {
+        const room = side > 0 ? mapWidth - EDGE - (x + PIN_HEAD + 4) : x - PIN_HEAD - 4 - EDGE;
+        const width = Math.max(0, Math.min(full, room));
+        return { width, extra: Math.abs(lift) * 2, rect: [side > 0 ? x + PIN_HEAD + 4 : x - PIN_HEAD - 4 - width, y - TAG_HEIGHT / 2 + lift, width, TAG_HEIGHT] as Rect };
+      };
+      // Under or over the pin, slid sideways if that keeps it on the map. `row` 1 is a second row further out.
+      const across = (side: -1 | 1, row: number) => {
+        const width = Math.min(full, mapWidth - EDGE * 2);
+        const start = Math.max(EDGE, Math.min(mapWidth - EDGE - width, x - width / 2));
+        const step = row * (TAG_HEIGHT + 2);
+        return { width, extra: row * 60, rect: [start, side > 0 ? y + PIN_HEAD_RISE + 3 + step : y - PIN_HEAD - 4 - TAG_HEIGHT - step, width, TAG_HEIGHT] as Rect };
+      };
+      const others = names.filter((rect, other): rect is Rect => Boolean(rect) && other !== index);
+      // In order of preference: the plain positions first, then the nudged ones for crowded corners.
+      const options = [
+        beside(1, 0), beside(-1, 0), across(1, 0), across(-1, 0),
+        beside(1, -14), beside(1, 14), beside(-1, -14), beside(-1, 14), across(1, 1), across(-1, 1),
+      ];
+      let best = options[0];
+      let least = Infinity;
+      for (const option of options) {
+        const { rect, width, extra } = option;
+        const covered = (rects: Rect[]) => rects.reduce((sum, other) => sum + overlap(rect, other), 0);
+        const offMap = rect[2] * rect[3] - overlap(rect, [0, 0, mapWidth, mapHeight]);
+        const cost = extra + (full - width) * TAG_HEIGHT + offMap * 6 + covered(pinsAt) * 6 + covered(others) * 6 + overlap(rect, station) * 3;
+        if (cost < least) [best, least] = [option, cost];
+      }
+      tag.style.maxWidth = best.width < full ? `${best.width.toFixed(0)}px` : '';
+      // The tag is positioned from the centre of its own pin head.
+      tag.style.setProperty('--tx', `${(best.rect[0] - x).toFixed(1)}px`);
+      tag.style.setProperty('--ty', `${(best.rect[1] - y).toFixed(1)}px`);
+      names[index] = best.rect;
+    };
+    // The first pass places each name knowing only the ones before it. Two more let every name
+    // reconsider with all the others in place, which untangles tight clusters.
+    for (let pass = 0; pass < 3; pass++) heads.forEach(place);
   }
 
   private tapPin(place: Place) {
@@ -304,68 +374,26 @@ export class StationView {
       pin.classList.toggle('is-selected', id === place.id);
       pin.parentElement?.classList.toggle('is-raised', id === place.id);
     }
-    for (const [id, { card }] of this.cards) card.classList.toggle('is-selected', id === place.id);
+    this.renderOverview();
 
     const { width, height } = map.size;
     const scale = Math.min(width, height) / (FOCUS_SPAN_M * area.unitsPerMeter);
-    // Sit the pin a little below centre so its name label has room above it.
-    const view = { cx: point[0], cy: point[1] - 16 / scale, scale };
+    // The overview covers the bottom of the map, so the pin goes to the middle of what is left above it.
+    const view = { cx: point[0], cy: point[1] + (this.overview.offsetHeight / 2 - 10) / scale, scale };
     if (source === 'restore') map.set(view);
     else void map.fly(view, 520);
 
-    const index = this.places.indexOf(place);
-    if (source !== 'rail') this.centerCard(index, source === 'restore' ? 'instant' : 'smooth');
     if (source !== 'restore') haptic(6);
   }
 
   private clearSelection() {
     this.selected = undefined;
     this.root.classList.remove('has-selection');
+    this.renderOverview();
     for (const pin of this.pins.values()) {
       pin.classList.remove('is-selected');
       pin.parentElement?.classList.remove('is-raised');
     }
-    for (const { card } of this.cards.values()) card.classList.remove('is-selected');
     if (this.map) void this.map.fly(this.map.homeView(), 480);
-  }
-
-  private centerCard(index: number, behavior: ScrollBehavior) {
-    const card = this.cards.get(this.places[index]?.id)?.card;
-    if (!card) return;
-    const left = card.offsetLeft - (this.rail.clientWidth - card.offsetWidth) / 2;
-    if (Math.abs(left - this.rail.scrollLeft) < 2) {
-      this.railIndex = index;
-      return;
-    }
-    // Ignore the cards that pass through the middle while the rail scrolls to its target.
-    this.railTarget = index;
-    this.rail.scrollTo({ left, behavior });
-    window.setTimeout(() => { if (this.railTarget === index) this.railTarget = undefined; }, 900);
-  }
-
-  /** Swiping the cards selects the place in the middle and moves the map to its pin. */
-  private syncRail() {
-    const middle = this.rail.scrollLeft + this.rail.clientWidth / 2;
-    let nearest = 0;
-    let distance = Infinity;
-    this.places.forEach((place, index) => {
-      const card = this.cards.get(place.id)?.card;
-      if (!card) return;
-      const offset = Math.abs(card.offsetLeft + card.offsetWidth / 2 - middle);
-      if (offset < distance) {
-        distance = offset;
-        nearest = index;
-      }
-    });
-    if (this.railTarget !== undefined) {
-      if (nearest !== this.railTarget) return;
-      this.railTarget = undefined;
-      this.railIndex = nearest;
-      return;
-    }
-    if (nearest === this.railIndex) return;
-    this.railIndex = nearest;
-    const place = this.places[nearest];
-    if (place && place.id !== this.selected) this.select(place, 'rail');
   }
 }

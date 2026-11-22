@@ -158,7 +158,7 @@ async function verifyPairing(request, origin, trip) {
 async function verifyPipeline(request, origin) {
   const photos = demoPhotos();
   const { jobs, uploads } = await runMilestone({
-    origin, passcode, place, dishName: 'E2E Dessert', plateDiameter: 0.18, demo: true, ...photos,
+    origin, passcode, place, dishName: 'E2E Dessert', dishPrice: 11.5, plateDiameter: 0.18, demo: true, ...photos,
   });
   for (const upload of uploads) {
     const saved = await fetch(origin + upload.url, { signal: AbortSignal.timeout(5000) });

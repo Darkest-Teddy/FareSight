@@ -1,6 +1,7 @@
 import { MAX_ROOM_PHOTOS, type Place, type RoomModelTier, type Stop } from '@faresight/shared';
 import { api, ApiError, type ContributorJob, type JobRequest } from '../api';
 import { sendCapture, type CaptureUpload } from '../captureUpload';
+import { catalog } from '../catalog';
 import { categoryLabel, coverage, servesDishes } from '../data';
 import { button, el, errorText, haptic, icon, iconButton, motion, replay, svg, wait, type IconName } from '../dom';
 import { prepareImage } from '../photos';
@@ -18,17 +19,11 @@ interface Shot {
 
 const MIN_ROOM_PHOTOS = 2;
 const NEW_DISH = '';
-const tips: Record<Kind, string[]> = {
-  room: [
-    'Tap 360° scan and turn on the spot. The app takes each photo for you.',
-    'Adding your own instead? Let each photo overlap the one before it by about half.',
-    'Keep the light steady and wait for people to move out of frame.',
-  ],
-  dish: [
-    'Use one dish on a clear table, with the whole plate in frame.',
-    'Shoot from a low angle, about 45 degrees, not straight down.',
-    'Avoid hard shadows and hands or cutlery crossing the plate.',
-  ],
+// One line of advice, shown only once the person reaches for the camera or the library.
+// The 360° scan explains itself on its own first screen.
+const hints: Record<Kind, string> = {
+  room: 'Let each photo overlap the last by about half.',
+  dish: 'Whole plate in frame, from about 45°.',
 };
 const tiers: [RoomModelTier, string, string][] = [
   ['atlas-draft', 'Draft', 'Ready in about a minute'],
@@ -53,15 +48,21 @@ export class VenueView {
   private readonly draftIds: Partial<Record<Kind, string>> = {};
   private readonly stored = new Set<Kind>();
   private readonly pending: Partial<Record<Kind, PendingSubmission>> = {};
-  private readonly guide = el('ol', 'tips');
   private readonly grid = el('div', 'photo-grid');
+  private readonly hint = el('p', 'field-hint photo-hint');
+  private readonly hinted = new Set<Kind>();
   private readonly count = el('span', 'photo-count');
   private readonly options = el('section', 'options');
   private readonly photoFeedback = el('ul', 'form-error photo-feedback');
   private readonly feedback = el('p', 'form-error');
   private readonly send: HTMLButtonElement;
   private readonly sendLabel = el('span');
+  private readonly heading = el('h1');
+  private readonly sub = el('p', 'view-sub');
+  private readonly status = el('div', 'venue-status');
+  private readonly unsubscribe: () => void;
   private readonly dishName = el('input', 'text-input');
+  private readonly dishPrice = el('input', 'text-input');
   private readonly diameter = el('input', 'text-input');
   private kind: Kind;
   private tier: RoomModelTier = 'atlas-draft';
@@ -73,7 +74,7 @@ export class VenueView {
   private capture?: CaptureUpload;
 
   constructor(
-    private readonly place: Place,
+    private place: Place,
     private readonly stop: Stop,
     private readonly actions: { back(): void; done(jobId: string): void },
   ) {
@@ -85,19 +86,20 @@ export class VenueView {
 
     const head = el('header', 'view-head');
     const title = el('div', 'head-title');
-    title.append(el('h1', '', place.name), el('p', 'view-sub', `${categoryLabel(place)} · ${stop.name} · ${place.walk_from_stop_m} m from the stop`));
+    title.append(this.heading, this.sub);
     head.append(iconButton('back', `Back to ${stop.name}`, actions.back, 'head-back'), title);
 
     const body = el('div', 'venue-body');
-    if (this.kinds.length > 1) body.append(this.kindPicker(status));
-    else body.append(this.statusNote(status.room));
+    body.append(this.status);
+    this.renderPlace();
+    this.unsubscribe = catalog.subscribe(() => this.onCatalog());
 
     const photos = el('section', 'photo-section');
     const photoHead = el('div', 'section-head');
     photoHead.append(el('h2', '', 'Photos'), this.count);
     this.photoFeedback.setAttribute('aria-live', 'polite');
     this.photoFeedback.setAttribute('role', 'list');
-    photos.append(photoHead, this.grid, this.photoFeedback);
+    photos.append(photoHead, this.grid, this.hint, this.photoFeedback);
 
     this.dishName.type = 'text';
     this.dishName.maxLength = 120;
@@ -106,6 +108,15 @@ export class VenueView {
     this.dishName.enterKeyHint = 'done';
     this.dishName.setAttribute('aria-label', 'Name of the new dish');
     this.dishName.addEventListener('input', () => this.optionsChanged());
+    this.dishPrice.type = 'number';
+    this.dishPrice.inputMode = 'decimal';
+    this.dishPrice.min = '0.25';
+    this.dishPrice.max = '500';
+    this.dishPrice.step = '0.01';
+    this.dishPrice.placeholder = 'For example 12.95';
+    this.dishPrice.autocomplete = 'off';
+    this.dishPrice.setAttribute('aria-label', 'Menu price of the dish in dollars');
+    this.dishPrice.addEventListener('input', () => this.optionsChanged());
     this.diameter.type = 'number';
     this.diameter.inputMode = 'decimal';
     this.diameter.min = '5';
@@ -114,7 +125,7 @@ export class VenueView {
     this.diameter.placeholder = 'Optional, for example 24';
     this.diameter.addEventListener('input', () => this.optionsChanged());
 
-    body.append(this.guide, photos, this.options);
+    body.append(photos, this.options);
 
     this.feedback.setAttribute('role', 'alert');
     this.send = button('', () => void this.submit(), 'primary send');
@@ -128,10 +139,32 @@ export class VenueView {
 
   destroy() {
     this.alive = false;
+    this.unsubscribe();
     for (const shot of [...this.shots.room, ...this.shots.dish]) URL.revokeObjectURL(shot.url);
   }
 
   private get current() { return this.shots[this.kind]; }
+
+  /** Shows what comes from the place itself: its name, where it is and what it still needs. */
+  private renderPlace() {
+    const place = this.place;
+    const status = coverage(place);
+    this.heading.textContent = place.name;
+    this.sub.textContent = `${categoryLabel(place)} · ${this.stop.name} · ${place.walk_from_stop_m} m from the stop`;
+    this.status.replaceChildren(this.kinds.length > 1 ? this.kindPicker(status) : this.statusNote(status.room));
+  }
+
+  /** Follows the place when it changes on the server, without touching the photos already added. */
+  private onCatalog() {
+    const next = catalog.find(this.place.id);
+    // A scan that is being sent keeps the place it started with.
+    if (!next || !this.alive || this.busy || this.finished || JSON.stringify(next) === JSON.stringify(this.place)) return;
+    this.place = next;
+    if (this.dishId !== NEW_DISH && !next.dishes.some((dish) => dish.id === this.dishId)) this.dishId = next.dishes[0]?.id ?? NEW_DISH;
+    this.renderPlace();
+    this.renderOptions();
+    this.renderFooter();
+  }
 
   private get locked() { return this.loading || this.busy || this.finished || Boolean(this.pending[this.kind] || (this.kind === 'room' && this.capture?.completed)); }
 
@@ -159,6 +192,7 @@ export class VenueView {
         } else {
           this.dishId = draft.dishId ?? this.dishId;
           this.dishName.value = draft.dishName ?? '';
+          this.dishPrice.value = draft.dishPrice ?? '';
           this.diameter.value = draft.diameter ?? '';
         }
       }
@@ -179,7 +213,8 @@ export class VenueView {
         file, name: file.name, lastModified: file.lastModified, uploadId,
       })),
       ...(kind === 'room' ? { tier: this.tier, capture: this.capture } : {
-        dishId: this.dishId, dishName: this.dishName.value, diameter: this.diameter.value,
+        dishId: this.dishId, dishName: this.dishName.value, dishPrice: this.dishPrice.value,
+        diameter: this.diameter.value,
       }),
       pending,
     };
@@ -232,8 +267,6 @@ export class VenueView {
 
   private render() {
     this.renderControls();
-    this.guide.replaceChildren(...tips[this.kind].map((tip) => el('li', '', tip)));
-    replay(this.guide, 'is-swapping');
     this.renderGrid();
     this.renderOptions();
     this.renderFooter();
@@ -256,6 +289,10 @@ export class VenueView {
     if (capture) input.setAttribute('capture', 'environment');
     else input.multiple = this.kind === 'room';
     input.disabled = this.locked;
+    input.addEventListener('click', () => {
+      this.hinted.add(this.kind);
+      this.hint.textContent = hints[this.kind];
+    });
     input.addEventListener('change', () => {
       const files = Array.from(input.files ?? []);
       input.value = '';
@@ -287,6 +324,7 @@ export class VenueView {
     if (!full) tiles.push(this.picker('camera', shots.length && this.kind === 'dish' ? 'Retake' : 'Camera', true),
       this.picker('image', 'Library', false));
     this.grid.replaceChildren(...tiles);
+    this.hint.textContent = this.hinted.has(this.kind) ? hints[this.kind] : '';
     this.renderControls();
 
     const needed = this.kind === 'room' ? MIN_ROOM_PHOTOS : 1;
@@ -336,16 +374,22 @@ export class VenueView {
       chip.append(radio('dish-choice', id, id === this.dishId, () => {
         this.dishId = id;
         nameField.hidden = id !== NEW_DISH;
+        // Start from the price the catalog already holds; the contributor still confirms or corrects it.
+        const known = this.place.dishes.find((dish) => dish.id === id)?.price;
+        if (known != null) this.dishPrice.value = known.toFixed(2);
         if (id === NEW_DISH) this.dishName.focus();
         haptic(6);
         this.optionsChanged();
       }), el('span', '', name));
       chips.append(chip);
     }
+    const price = el('label', 'field');
+    price.append(el('span', 'field-label', 'Menu price in dollars'), this.dishPrice,
+      el('span', 'field-hint', 'Required. Copy the price from the menu for this dish.'));
     const size = el('label', 'field');
     size.append(el('span', 'field-label', 'Plate width in cm'), this.diameter,
       el('span', 'field-hint', 'Optional. It lets riders see the dish at its true size.'));
-    this.options.append(head, chips, nameField, size);
+    this.options.append(head, chips, nameField, price, size);
   }
 
   /** What still stops this scan from being sent, in the words shown on the button. */
@@ -358,6 +402,8 @@ export class VenueView {
     }
     if (!count) return 'Add a photo of the dish';
     if (this.dishId === NEW_DISH && !this.dishName.value.trim()) return 'Name the dish';
+    if (!this.dishPrice.value.trim()) return 'Enter the menu price';
+    if (!this.dishPrice.checkValidity()) return 'Menu price must be $0.25 to $500';
     if (this.diameter.value && !this.diameter.checkValidity()) return 'Plate width must be 5 to 100 cm';
     return '';
   }
@@ -472,6 +518,7 @@ export class VenueView {
         kind, place_id: this.place.id, upload_ids: uploadIds.slice(0, 1),
         dish_id: this.dishId || undefined,
         dish_name: this.dishId ? undefined : this.dishName.value.trim(),
+        dish_price: Math.round(this.dishPrice.valueAsNumber * 100) / 100,
         plate_diameter_m: Number.isFinite(width) ? width / 100 : undefined,
       };
     const pending = { job, idempotencyKey: crypto.randomUUID() };

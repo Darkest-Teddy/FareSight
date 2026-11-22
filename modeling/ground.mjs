@@ -199,3 +199,76 @@ export function groundBlob(surface, sites, y) {
 
   return quads;
 }
+
+// ---------------------------------------------------------------------------------------------
+// The flat maps' ground.
+//
+// The Contribute app draws the network on one rounded island. That outline is still measured the
+// polar way the 3D ground used to be: a reach per compass direction out of one centre, smoothed.
+// It is deliberately simpler than the 3D ground above, which is cut to the buildings.
+
+/** The point the outline is measured out from. */
+const CENTRE = [0.02, 0];
+/** Directions sampled around the centre. */
+const SPOKES = 128;
+/** How far past the outermost track the solid ground reaches, and how far its rim then fades. */
+const OUTLINE_SKIRT = 0.3;
+const OUTLINE_FADE = 0.1;
+
+/**
+ * Reach per direction, from the track geometry.
+ *
+ * Bins every centreline sample by bearing and keeps the furthest in each bin. Empty bins are
+ * filled by walking out to the nearest neighbour that has a value, then the whole ring is
+ * smoothed circularly so the outline curves instead of stepping.
+ */
+function reaches(lines, centre) {
+  const raw = new Array(SPOKES).fill(0);
+  for (const line of lines)
+    for (const p of line.points) {
+      const dx = p[0] - centre[0];
+      const dz = p[2] - centre[1];
+      const bin =
+        (Math.round((Math.atan2(dz, dx) / (Math.PI * 2)) * SPOKES) + SPOKES) % SPOKES;
+      raw[bin] = Math.max(raw[bin], Math.hypot(dx, dz));
+    }
+
+  // Fill gaps: a direction with no track still needs ground if its neighbours have some.
+  for (let i = 0; i < SPOKES; i++) {
+    if (raw[i] > 0) continue;
+    let back = 0;
+    let forward = 0;
+    while (raw[(i - back + SPOKES) % SPOKES] === 0 && back < SPOKES) back++;
+    while (raw[(i + forward) % SPOKES] === 0 && forward < SPOKES) forward++;
+    const a = raw[(i - back + SPOKES) % SPOKES];
+    const b = raw[(i + forward) % SPOKES];
+    raw[i] = (a * forward + b * back) / Math.max(1, back + forward);
+  }
+
+  // Circular smoothing, twice, so the outline reads as a coastline and not as a polygon.
+  let smooth = raw;
+  for (let pass = 0; pass < 2; pass++) {
+    const next = new Array(SPOKES);
+    for (let i = 0; i < SPOKES; i++) {
+      let sum = 0;
+      for (let k = -6; k <= 6; k++) sum += smooth[(i + k + SPOKES) % SPOKES];
+      next[i] = sum / 13;
+    }
+    smooth = next;
+  }
+  return smooth;
+}
+
+/**
+ * The ground seen from above, for the flat maps: `solid` is the edge of the lit ground and
+ * `rim` is where it has faded into the backdrop. Both are rings of [x, z].
+ */
+export function groundOutline(lines) {
+  const reach = reaches(lines, CENTRE);
+  const ring = (pad) =>
+    reach.map((r, i) => {
+      const angle = (i / SPOKES) * Math.PI * 2;
+      return [CENTRE[0] + Math.cos(angle) * (r + pad), CENTRE[1] + Math.sin(angle) * (r + pad)];
+    });
+  return { solid: ring(OUTLINE_SKIRT), rim: ring(OUTLINE_SKIRT + OUTLINE_FADE) };
+}

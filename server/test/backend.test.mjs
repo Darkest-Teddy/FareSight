@@ -8,7 +8,7 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { crc32, gunzipSync, gzipSync } from 'node:zlib';
 import { WebSocket } from 'ws';
-import { computeTotalCost, computeTripEstimate, demoAssets, demoPlaces, formatDishPrice, latLonToSculpture, STOPS } from '@faresight/shared';
+import { computeTotalCost, computeTripEstimate, demoAssets, demoDishPriceSources, demoPlaces, formatDishPrice, latLonToSculpture, STOPS } from '@faresight/shared';
 import { createApp } from '../dist/app.js';
 import { getConfig } from '../dist/config.js';
 import { Store, WorkerLeaseLost } from '../dist/db/database.js';
@@ -286,7 +286,11 @@ test('catalog startup refreshes bundled SOG previews and preserves uploaded asse
   assert.ok(bundled.every(({ dish_asset }) =>
     dish_asset.format === 'sog' && dish_asset.scale_status === 'approximate' &&
     dish_asset.gaussian_count >= 59_000 && dish_asset.gaussian_count <= 60_000));
-  assert.ok([...jefes.menu_items, ...starbucks.menu_items].every(({ dish }) => dish.price === null));
+  // These two publish no price of their own; the price agent filled what it could cite and left the rest null.
+  assert.deepEqual([jefes, starbucks].map(({ menu_items }) => menu_items.filter(({ dish }) => dish.price === null).length), [1, 22]);
+  assert.ok(demoDishPriceSources.length > 0);
+  assert.ok(demoDishPriceSources.every(({ items }) => items.length > 0
+    && items.every(({ price, source, url }) => price > 0 && source && url.startsWith('https://'))));
   assert.deepEqual(shu.menu_items.map(({ dish }) => dish.price), [
     15, 12.5, 15, 18, 13, 16, 17, 13, 24, 21, 12, 9, 15, 13, 10, 14, 9.5, 8, 7, 5, 14.5, 4.5, 15.5, 4, 6.5, 12, 7, 6, 6.5,
   ]);
@@ -294,8 +298,8 @@ test('catalog startup refreshes bundled SOG previews and preserves uploaded asse
     const { dish, dish_asset } = bundled.find(({ dish }) => dish.id === id);
     return [dish.name, dish.price, dish_asset.gaussian_count, dish_asset.plate_diameter_m];
   };
-  assert.deepEqual(preview('kenmore-jefes-tacos'), ['Tacos (Three)', null, 60_000, 0.22]);
-  assert.deepEqual(preview('kenmore-jefes-burrito'), ['Carnitas Burrito', null, 60_000, 0.22]);
+  assert.deepEqual(preview('kenmore-jefes-tacos'), ['Tacos (Three)', 12.45, 60_000, 0.22]);
+  assert.deepEqual(preview('kenmore-jefes-burrito'), ['Carnitas Burrito', 12.45, 60_000, 0.22]);
   assert.deepEqual(preview('kenmore-shudaxia-hotpot'), ['Taiji Shrimp Paste 2.0', 15, 59_998, 0.32]);
   assert.deepEqual(preview('kenmore-shudaxia-beef'), ['Premium Fatty Beef Slice', 12.5, 59_938, 0.26]);
   assert.deepEqual(preview('bu-starbucks-macchiato'), ['Iced Caramel Macchiato', null, 60_000, 0.095]);
@@ -380,7 +384,7 @@ test('upload, intake, failed download with restart and retry, room and dish publ
   await server.stage(queued.id, 'ready');
 
   const dishJob = await server.request('/api/jobs', { body: {
-    kind: 'dish', place_id: placeId, upload_ids: [dishUpload.id], dish_id: 'harvard-matcha-tiramisu',
+    kind: 'dish', place_id: placeId, upload_ids: [dishUpload.id], dish_id: 'harvard-matcha-tiramisu', dish_price: 9.25,
   }, status: 202 });
   const dishReview = await server.stage(dishJob.id, 'needs_review');
   const dishAsset = await server.request(`/api/assets/${dishReview.asset_id}/publish`, { body: { plate_diameter_m: 0.25 } });
@@ -461,7 +465,7 @@ test('provider request contracts and TRELLIS retry preserve the paid prediction'
   const intake = await server.request('/api/intake', { body: { place_id: placeId, upload_ids: [imageId] } });
   assert.equal(intake.used_model, 'gemini-4-hydrogen');
   const dishJob = await server.request('/api/jobs', { body: {
-    kind: 'dish', place_id: placeId, upload_ids: [imageId], dish_name: 'Other dish',
+    kind: 'dish', place_id: placeId, upload_ids: [imageId], dish_name: 'Other dish', dish_price: 11,
   }, status: 202 });
   const dishFailed = await server.stage(dishJob.id, 'failed');
   assert.equal(dishFailed.provider_task_id, 'prediction-01');
@@ -871,7 +875,7 @@ test('pipeline credentials cannot administer jobs and idempotent job requests su
   const contributor = { passcode: false, headers: { 'X-Upload-Passcode': 'test-contributor', 'Idempotency-Key': 'capture-01' } };
   const body = { filename: 'test.png', mimeType: 'image/png', dataBase64: image.toString('base64'), place_id: placeId };
   const upload = await server.request('/api/uploads', { ...contributor, body, status: 201 });
-  const jobBody = { kind: 'dish', place_id: placeId, upload_ids: [upload.id], dish_name: 'Noodles' };
+  const jobBody = { kind: 'dish', place_id: placeId, upload_ids: [upload.id], dish_name: 'Noodles', dish_price: 14.5 };
   const [job, duplicate] = await Promise.all([1, 2].map(() => server.request('/api/jobs', { ...contributor, body: jobBody, status: 202 })));
   assert.equal(job.id, duplicate.id);
   assert.equal(job.idempotency_key, undefined);
@@ -890,6 +894,30 @@ test('pipeline credentials cannot administer jobs and idempotent job requests su
   await server.start({ worker: false });
   assert.equal((await server.request('/api/jobs', { ...contributor, body: jobBody, status: 202 })).id, job.id);
   await server.request('/api/jobs', { ...contributor, body: { ...jobBody, dish_name: 'Dessert' }, status: 409 });
+});
+
+test('an uploaded food photo must carry the dish name and its menu price', async (t) => {
+  const server = await setup(t);
+  await server.start({ worker: false });
+  const upload = await server.request('/api/uploads', {
+    body: { filename: 'plate.png', mimeType: 'image/png', dataBase64: image.toString('base64'), place_id: placeId },
+    status: 201,
+  });
+  const base = { kind: 'dish', place_id: placeId, upload_ids: [upload.id] };
+  const noPrice = await server.request('/api/jobs', { body: { ...base, dish_name: 'Street corn' }, status: 400 });
+  assert.match(noPrice.error, /menu price/);
+  const noName = await server.request('/api/jobs', { body: { ...base, dish_price: 8.5 }, status: 400 });
+  assert.match(noName.error, /name of the dish/);
+  await server.request('/api/jobs', { body: { ...base, dish_name: 'Street corn', dish_price: 0 }, status: 400 });
+  await server.request('/api/jobs', { body: { ...base, dish_name: 'Street corn', dish_price: 900 }, status: 400 });
+  const job = await server.request('/api/jobs', {
+    body: { ...base, dish_name: 'Street corn', dish_price: 8.5 }, status: 202,
+  });
+  assert.equal(job.dish_price, 8.5);
+  assert.equal(job.dish_name, 'Street corn');
+  // A room job carries no dish fields at all.
+  const room = await server.request('/api/jobs', { body: { kind: 'room', place_id: placeId, upload_ids: [upload.id] }, status: 202 });
+  assert.equal(room.dish_price, null);
 });
 
 test('non-loopback binds fail closed and admin auth throttles before parsing JSON', async (t) => {

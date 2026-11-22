@@ -21,6 +21,7 @@ interface JobBody extends IntakeBody {
   kind: 'room' | 'dish';
   dish_id?: string;
   dish_name?: string;
+  dish_price?: number;
   plate_diameter_m?: number;
   model_tier?: RoomModelTier;
 }
@@ -29,6 +30,8 @@ interface PublishBody extends PublishOptions { approve?: boolean }
 const idSchema = { type: 'string', minLength: 1, maxLength: 96 };
 const idList = (maxItems: number) => ({ type: 'array', minItems: 1, maxItems, uniqueItems: true, items: idSchema });
 const plateSize = { type: 'number', exclusiveMinimum: 0, maximum: 2 };
+/** Contributors state the menu price with the photo, so an uploaded dish is never priceless. */
+const dishPrice = { type: 'number', exclusiveMinimum: 0, maximum: 500 };
 
 const multipartLimit = MAX_IMAGE_BYTES + 64 * 1024;
 
@@ -128,7 +131,8 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
       type: 'object', required: ['kind', 'place_id', 'upload_ids'],
       properties: {
         kind: { enum: ['room', 'dish'] }, place_id: idSchema, dish_id: idSchema,
-        dish_name: { type: 'string', minLength: 1, maxLength: 120 }, upload_ids: idList(MAX_ROOM_PHOTOS),
+        dish_name: { type: 'string', minLength: 1, maxLength: 120 }, dish_price: dishPrice,
+        upload_ids: idList(MAX_ROOM_PHOTOS),
         plate_diameter_m: plateSize, model_tier: { enum: ROOM_MODEL_TIERS },
       },
     } },
@@ -138,7 +142,8 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
       return reply.code(400).send({ error: 'Invalid Idempotency-Key' });
     }
     const fingerprint = keyHeader && createHash('sha256').update(JSON.stringify([
-      body.kind, body.place_id, body.upload_ids, body.dish_id, body.dish_name, body.plate_diameter_m, body.model_tier,
+      body.kind, body.place_id, body.upload_ids, body.dish_id, body.dish_name, body.dish_price,
+      body.plate_diameter_m, body.model_tier,
     ])).digest('hex');
     return store.transaction(() => {
       if (keyHeader) {
@@ -159,6 +164,13 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
       if (body.kind === 'dish' && (uploads.length !== 1 || (body.dish_id && !dish))) {
         return reply.code(400).send({ error: 'Dish generation requires one image and any supplied dish_id must belong to the place' });
       }
+      // A food photo carries its own menu price, so nothing reaches the catalog unpriced.
+      if (body.kind === 'dish' && body.dish_price === undefined) {
+        return reply.code(400).send({ error: 'Dish generation requires the menu price of the dish' });
+      }
+      if (body.kind === 'dish' && !dish && !dishName) {
+        return reply.code(400).send({ error: 'Dish generation requires the name of the dish' });
+      }
       const { provider, missingKey } = pipelineProvider(config, body.kind);
       if (provider === 'atlas-v2' && uploads.length < 2) return reply.code(400).send({ error: ROOM_PHOTO_REQUIREMENT });
       if (missingKey) return reply.code(503).send({ error: `Missing API credentials for ${provider}` });
@@ -167,6 +179,7 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
         id: randomUUID(), kind: body.kind, place_id: place.id,
         dish_id: body.kind === 'dish' ? dish?.id ?? null : null,
         dish_name: body.kind === 'dish' ? dish?.name ?? (dishName || 'Untitled dish') : null,
+        dish_price: body.kind === 'dish' ? body.dish_price ?? null : null,
         input_upload_ids: body.upload_ids, status: 'queued', progress: 0, provider, provider_task_id: null,
         plate_diameter_m: body.kind === 'dish' ? body.plate_diameter_m ?? dish?.plate_diameter_m ?? null : null,
         model_tier: body.kind === 'room' ? body.model_tier ?? 'atlas-draft' : undefined,

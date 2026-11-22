@@ -1,6 +1,6 @@
 import {
   STOPS, type Asset, type GenerationJob, type IntakeSelectionResult,
-  type LiveReviewsResponse, type LiveSessionRequest, type LiveSessionResponse, type LiveStatusResponse,
+  type LiveMenuPricesResponse, type LiveReviewsResponse, type LiveSessionRequest, type LiveSessionResponse, type LiveStatusResponse,
   type MarbleTier, type MbtaAlert, type MbtaPrediction, type MbtaSource, type MbtaVehicle,
   type PairingMessage, type Place, type RestaurantManifest, type Stop, type TripEstimate, type Vector3,
 } from '@faresight/shared';
@@ -83,6 +83,7 @@ export const api = {
   manifest: (id: string) => request<RestaurantManifest>(`/restaurants/${pathId(id)}/manifest`),
   place: (id: string) => request<Place>(`/restaurants/${pathId(id)}`),
   liveReviews: (id: string) => request<LiveReviewsResponse>(`/restaurants/${pathId(id)}/live-reviews`, undefined, undefined, undefined, 25_000),
+  liveMenuPrices: (id: string) => request<LiveMenuPricesResponse>(`/restaurants/${pathId(id)}/live-prices`, undefined, undefined, undefined, 25_000),
   review: (id: string, data: { author_label: string; text: string }) =>
     request<unknown>(`/restaurants/${pathId(id)}/reviews`, data),
   vehicles: () => request<{ vehicles: MbtaVehicle[]; source: MbtaSource; updated_at: string }>('/mbta/vehicles'),
@@ -132,7 +133,7 @@ export const api = {
   },
   intake: (place_id: string, upload_ids: string[], passcode: string) =>
     request<IntakeSelectionResult>('/intake', { place_id, upload_ids }, passcode),
-  async generate(data: { kind: 'room' | 'dish'; place_id: string; dish_id?: string; dish_name?: string; upload_ids: string[]; plate_diameter_m?: number; model_tier?: MarbleTier }, passcode: string) {
+  async generate(data: { kind: 'room' | 'dish'; place_id: string; dish_id?: string; dish_name?: string; dish_price?: number; upload_ids: string[]; plate_diameter_m?: number; model_tier?: MarbleTier }, passcode: string) {
     return jobResult(await request<GenerationJob | { job: GenerationJob }>('/jobs', data, passcode));
   },
   async jobs() {

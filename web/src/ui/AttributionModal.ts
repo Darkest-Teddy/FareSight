@@ -1,4 +1,4 @@
-import { demoDishPhotoSources } from '@faresight/shared';
+import { demoDishPhotoSources, demoDishPriceSources } from '@faresight/shared';
 import { button, element, link, modal, section } from './dom';
 
 export function attribution(openModeration: () => void) {
@@ -42,6 +42,22 @@ export function attribution(openModeration: () => void) {
     group.append(sourcePhotos);
     dishCredits.append(group);
   }
+  const priceCredits = section('Menu price sources');
+  if (demoDishPriceSources.length) {
+    priceCredits.append(element('p', '', 'Where a venue publishes no price of its own, a web-search agent looked the price up and recorded the page it read. Prices drift, and a third-party listing can be stale or carry a delivery markup, so treat these as a guide rather than a quote.'));
+    for (const { venue, items } of demoDishPriceSources) {
+      const group = element('details', 'dish-source-group');
+      group.append(element('summary', '', `${venue} · ${items.length} prices`));
+      const list = element('ul', 'credit-list');
+      for (const { name, price, source, url } of items) {
+        const item = element('li');
+        item.append(`${name} — $${price.toFixed(2)} from `, link(source, url));
+        list.append(item);
+      }
+      group.append(list);
+      priceCredits.append(group);
+    }
+  }
   const privacy = section('Photos and privacy');
   privacy.append(
     element('p', '', 'Upload photos you own or have permission to use. Avoid faces, addresses, and other private details. In live mode, the generation services may receive your photos to select references or produce a 3D preview.'),
@@ -49,6 +65,7 @@ export function attribution(openModeration: () => void) {
     element('p', '', 'GPS is optional. FareSight uses your position to find a nearby stop and estimate the walk there. Pairing shares the venue or trip you choose with the device using your code.'),
     element('p', '', 'Live AI voice streams your microphone audio directly to OpenAI over WebRTC only while a live session is active. End the session at any time to disconnect the microphone.'),
   );
-  surface.body.append(credits, roomCredits, dishCredits, privacy, button('Open moderation', () => { surface.dialog.close(); openModeration(); }, 'quiet'));
+  surface.body.append(credits, roomCredits, dishCredits,
+    ...(demoDishPriceSources.length ? [priceCredits] : []), privacy, button('Open moderation', () => { surface.dialog.close(); openModeration(); }, 'quiet'));
   return surface;
 }

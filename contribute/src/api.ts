@@ -63,6 +63,7 @@ export interface JobRequest {
   upload_ids: string[];
   dish_id?: string;
   dish_name?: string;
+  dish_price?: number;
   plate_diameter_m?: number;
   model_tier?: RoomModelTier;
 }
@@ -150,4 +151,8 @@ export const api = {
   },
 
   vehicles: () => request<{ vehicles: MbtaVehicle[] }>('/mbta/vehicles'),
+
+  /** Sends a review of a place. The server publishes it once a FareSight admin approves it. */
+  review: (placeId: string, review: { author_label: string; text: string; rating: number }) =>
+    request<{ id: string; created_at: string }>(`/restaurants/${pathId(placeId)}/reviews`, review),
 };

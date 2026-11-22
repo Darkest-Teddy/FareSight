@@ -21,7 +21,7 @@ test('the catalog seeds labeled reviews once and preserves moderated diner submi
   assert.ok(catalog.every(({ reviews }) => reviews.length === 2 && reviews.every(({ sample }) => sample === true)));
   const seeded = (await app.inject(placeUrl)).json().reviews;
   const submit = await app.inject({ method: 'POST', url: `${placeUrl}/reviews`,
-    payload: { author_label: 'Taylor B.', text: 'The counter was practical for a quick lunch between lectures.' } });
+    payload: { author_label: 'Taylor B.', text: 'The counter was practical for a quick lunch between lectures.', rating: 4 } });
   assert.equal(submit.statusCode, 201);
   const { id } = submit.json();
   assert.deepEqual((await app.inject(placeUrl)).json().reviews, seeded);
@@ -35,7 +35,9 @@ test('the catalog seeds labeled reviews once and preserves moderated diner submi
   assert.deepEqual(reviews.filter(({ sample }) => sample), seeded);
   const submitted = reviews.find((review) => review.id === id);
   assert.equal(submitted?.author, 'Taylor B.');
-  assert.equal(submitted.rating, 0);
+  assert.equal(submitted.rating, 4);
   assert.equal((await moderation('reject')).statusCode, 200);
   assert.deepEqual((await app.inject(placeUrl)).json().reviews, seeded);
+  const outOfRange = await app.inject({ method: 'POST', url: `${placeUrl}/reviews`, payload: { author_label: 'Taylor B.', text: 'Six stars.', rating: 6 } });
+  assert.equal(outOfRange.statusCode, 400);
 });

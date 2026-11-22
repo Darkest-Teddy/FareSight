@@ -12,6 +12,8 @@ interface MapOptions {
   padding?: number;
   /** How far past the home view a pinch can zoom in. */
   maxZoom?: number;
+  /** A fixed map cannot be moved by hand: it ignores drags, pinches and the wheel. `fly` and `set` still move it. */
+  fixed?: boolean;
   label: string;
 }
 
@@ -64,7 +66,8 @@ export class MapCanvas {
       if (first) markReady();
     });
     this.observer.observe(this.root);
-    this.listen();
+    if (options.fixed) this.root.classList.add('is-fixed');
+    else this.listen();
   }
 
   get size() { return { width: this.width, height: this.height }; }
