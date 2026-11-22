@@ -42,6 +42,11 @@ export const focal = [
   ['place-kencl', 'Kenmore', 'Kenmore', '003', 'Green-B', '#00843D', 0.208],
   ['place-harsq', 'Harvard', 'Harvard', '004', 'Red', '#DA291C', 0.167],
   ['place-chncl', 'Chinatown', 'Chinatown', '005', 'Orange', '#ED8B00', 0.137],
+  ['place-haecl', 'Haymarket', 'Haymarket', '006', 'Orange', '#ED8B00', 0.144],
+  ['place-coecl', 'Copley', 'Copley', '007', 'Green-B', '#00843D', 0.189],
+  ['place-aqucl', 'Aquarium', 'Aquarium', '008', 'Blue', '#003DA5', 0.121],
+  ['place-cntsq', 'Central', 'Central', '009', 'Red', '#DA291C', 0.151],
+  ['place-cool', 'Coolidge Corner', 'Coolidge Corner', '010', 'Green-C', '#00843D', 0.26],
 ];
 export const project = (lat, lon, y) => [
   ((lon + 71.095) * 111320 * Math.cos((42.354 * Math.PI) / 180)) / 6500,

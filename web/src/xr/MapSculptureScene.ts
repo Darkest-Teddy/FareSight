@@ -613,7 +613,7 @@ export class MapSculptureScene {
       const isHighlighted = this.highlighted.has(id);
       const goal = id === this.hovered || isHighlighted ? 1 : id === this.selected ? 0.75 : 0;
       beacon.glow = pc.math.lerp(beacon.glow, goal, blend);
-      // Idle rings breathe gently so the five explorable stops read as clickable.
+      // Idle rings breathe gently so the explorable stops read as clickable.
       const breath = 0.5 + 0.5 * Math.sin(this.clock * (isHighlighted ? 4.2 : 2.1) + beacon.root.getLocalPosition().x * 9);
       const size = isHighlighted
         ? 0.064 + 0.016 * breath

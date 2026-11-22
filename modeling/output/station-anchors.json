@@ -56,6 +56,44 @@
     ],
     "segmentFile": "segment-place-kencl.glb"
   },
+  "place-coecl": {
+    "name": "Copley",
+    "areaCode": "AREA - 007",
+    "line": "Green-B",
+    "color": "#00843D",
+    "lat": 42.349974,
+    "lon": -71.077447,
+    "tubePos": [
+      0.2221537083387375,
+      0.04500000178813934,
+      0.06846677511930466
+    ],
+    "topPos": [
+      0.2221537083387375,
+      0.05250000178813934,
+      0.06846677511930466
+    ],
+    "segmentFile": "segment-place-coecl.glb"
+  },
+  "place-cool": {
+    "name": "Coolidge Corner",
+    "areaCode": "AREA - 010",
+    "line": "Green-C",
+    "color": "#00843D",
+    "lat": 42.342116,
+    "lon": -71.121263,
+    "tubePos": [
+      -0.33238890767097473,
+      0.04500000178813934,
+      0.20210112631320953
+    ],
+    "topPos": [
+      -0.33238890767097473,
+      0.05250000178813934,
+      0.20210112631320953
+    ],
+    "segmentFile": "segment-place-cool.glb"
+  },
   "place-harsq": {
     "name": "Harvard",
     "areaCode": "AREA - 004",
@@ -75,6 +113,44 @@
     ],
     "segmentFile": "segment-place-harsq.glb"
   },
+  "place-cntsq": {
+    "name": "Central",
+    "areaCode": "AREA - 009",
+    "line": "Red",
+    "color": "#DA291C",
+    "lat": 42.365486,
+    "lon": -71.103802,
+    "tubePos": [
+      -0.1113995835185051,
+      0.048500001430511475,
+      -0.19533267617225647
+    ],
+    "topPos": [
+      -0.1113995835185051,
+      0.056000001430511474,
+      -0.19533267617225647
+    ],
+    "segmentFile": "segment-place-cntsq.glb"
+  },
+  "place-haecl": {
+    "name": "Haymarket",
+    "areaCode": "AREA - 006",
+    "line": "Orange",
+    "color": "#ED8B00",
+    "lat": 42.363021,
+    "lon": -71.05829,
+    "tubePos": [
+      0.4646078944206238,
+      0.04149999842047691,
+      -0.15341252088546753
+    ],
+    "topPos": [
+      0.4646078944206238,
+      0.04899999842047691,
+      -0.15341252088546753
+    ],
+    "segmentFile": "segment-place-haecl.glb"
+  },
   "place-chncl": {
     "name": "Chinatown",
     "areaCode": "AREA - 005",
@@ -93,5 +169,24 @@
       0.02470994181931019
     ],
     "segmentFile": "segment-place-chncl.glb"
+  },
+  "place-aqucl": {
+    "name": "Aquarium",
+    "areaCode": "AREA - 008",
+    "line": "Blue",
+    "color": "#003DA5",
+    "lat": 42.359784,
+    "lon": -71.051652,
+    "tubePos": [
+      0.5486195087432861,
+      0.048500001430511475,
+      -0.09836359322071075
+    ],
+    "topPos": [
+      0.5486195087432861,
+      0.056000001430511474,
+      -0.09836359322071075
+    ],
+    "segmentFile": "segment-place-aqucl.glb"
   }
 }

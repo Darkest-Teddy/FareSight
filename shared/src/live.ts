@@ -132,11 +132,11 @@ export const FARESIGHT_LIVE_TOOLS: LiveFunctionTool[] = [
     type: 'function',
     name: 'open_station',
     description:
-      'Dive smoothly from the Boston map into a specific MBTA station neighborhood diorama (BU Central, Packards Corner, Kenmore, Harvard Square, or Chinatown). Optionally highlight specific venue pins in that station.',
+      'Dive smoothly from the Boston map into a specific MBTA station neighborhood diorama. Optionally highlight specific venue pins in that station.',
     parameters: {
       type: 'object',
       properties: {
-        stop: { type: 'string', description: 'Stop ID (e.g. place-bucen, place-brico, place-kencl, place-harsq, place-chncl) or stop name.' },
+        stop: { type: 'string', description: 'Focal stop ID (e.g. place-bucen or place-haecl) or stop name. The map state includes the full list.' },
         highlight_place_ids: {
           type: 'array',
           items: { type: 'string' },

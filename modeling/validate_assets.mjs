@@ -13,6 +13,11 @@ const stationRef = {
   'place-kencl': [42.348949, -71.095169, 'Green-B', '003'],
   'place-harsq': [42.373362, -71.118956, 'Red', '004'],
   'place-chncl': [42.352547, -71.062752, 'Orange', '005'],
+  'place-haecl': [42.363021, -71.05829, 'Orange', '006'],
+  'place-coecl': [42.349974, -71.077447, 'Green-B', '007'],
+  'place-aqucl': [42.359784, -71.051652, 'Blue', '008'],
+  'place-cntsq': [42.365486, -71.103802, 'Red', '009'],
+  'place-cool': [42.342116, -71.121263, 'Green-C', '010'],
 };
 const gaussians = {
   'room-study-cafe': [20000, 5.5, 4.5, 3],

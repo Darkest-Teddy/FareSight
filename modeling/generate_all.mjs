@@ -17,6 +17,6 @@ physicalUi(output);
 vrControllers(output);
 splats(output);
 console.log(
-  'Generated 20 glTF models, 2 Gaussian scenes and 3 metadata files in ' +
+  'Generated 25 glTF models, 2 Gaussian scenes and 3 metadata files in ' +
     output,
 );

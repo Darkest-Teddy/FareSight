@@ -254,9 +254,9 @@ export function registerMbta(app: FastifyInstance, config: Config, store: Store)
       const walked = computeTripEstimate(input).walk_to_station_min;
       const reachStation = now + walked * 60_000;
       const boardTimes: number[] = [];
-      const routeChoices = from === 'place-kencl' && ride.direction_id === 1
+      const routeChoices = from === 'place-kencl' && ride.direction_id === 1 && ride.route_id === 'Green-B'
         ? STOPS.find((stop) => stop.stop_id === from)!.lines.join(',') : ride.route_id;
-      const reverseRoutes = to === 'place-kencl' && reverse.direction_id === 1
+      const reverseRoutes = to === 'place-kencl' && reverse.direction_id === 1 && reverse.route_id === 'Green-B'
         ? STOPS.find((stop) => stop.stop_id === to)!.lines.join(',') : reverse.route_id;
       const [result, returnSchedule] = await Promise.all([
         predictions({ stop: from, route: routeChoices, direction: ride.direction_id }),

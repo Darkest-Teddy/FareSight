@@ -14,12 +14,13 @@ const TRAIN_POLL_MS = 10_000;
 // Map units kept clear on each side of the outermost stops for their name labels.
 const LABEL_ROOM = 185;
 const NEEDS_SHOWN = 3;
-// Hand-placed so the five labels never sit on a line or on each other.
+// Hand-placed so the station labels never sit on a line or on each other.
 const labelSide: Record<string, 'top' | 'bottom' | 'left' | 'right'> = {
   'place-brico': 'top', 'place-bucen': 'bottom', 'place-kencl': 'top', 'place-harsq': 'right', 'place-chncl': 'bottom',
+  'place-haecl': 'top', 'place-coecl': 'bottom', 'place-aqucl': 'right', 'place-cntsq': 'top', 'place-cool': 'bottom',
 };
 // A few well-known stations label the rest of the network for orientation.
-const landmarks: Record<string, 'above' | 'below'> = { 'Park Street': 'above', 'North Station': 'above', Central: 'above' };
+const landmarks: Record<string, 'above' | 'below'> = { 'Park Street': 'above', 'North Station': 'above' };
 let introPlayed = false;
 
 function nearestOnLine(points: number[], x: number, y: number) {
@@ -65,11 +66,11 @@ export class NetworkView {
 
     const [x, y, w, h] = networkData.bounds;
     const xs = this.focal.map((station) => station.x);
-    // Full height of the sculpture, and wide enough for the five stops and their labels.
+    // Full height of the sculpture, and wide enough for the focal stops and their labels.
     const home: Box = { x: Math.min(...xs) - LABEL_ROOM, y, w: Math.max(...xs) - Math.min(...xs) + LABEL_ROOM * 2, h };
     this.map = new MapCanvas({
       bounds: { x, y, w, h }, home, maxZoom: 4.5,
-      label: 'Map of the MBTA subway lines through Boston. Five stops are open for contributions.',
+      label: `Map of the MBTA subway lines through Boston. ${this.focal.length} stops are open for contributions.`,
     });
     this.draw();
     this.focal.forEach((station, index) => this.addNode(station, index));

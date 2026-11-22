@@ -87,7 +87,7 @@ async function setup(t, overrides = {}) {
   return { config, dir, start, stop, request, stage, origin: () => origin };
 }
 
-test('shared projection, all 25 rides, and fares', () => {
+test('shared projection, all 100 ordered stop combinations, and fares', () => {
   assert.deepEqual(latLonToSculpture(42.354, -71.095), [0, 0]);
   const [east, north] = latLonToSculpture(42.364, -71.085);
   assert(east > 0 && north < 0);
@@ -123,8 +123,8 @@ test('HTTP catalog and live MBTA proxy plus two-way WebSocket pairing', { timeou
   const [places, stops, manifest] = await Promise.all([
     server.request('/api/restaurants'), server.request('/api/stops'), server.request(`/api/restaurants/${placeId}/manifest`),
   ]);
-  assert.equal(places.length, 28);
-  assert.equal(stops.length, 5);
+  assert.equal(places.length, 58);
+  assert.equal(stops.length, 10);
   for (const stop of stops) {
     const pins = places.filter((place) => place.stop_id === stop.stop_id).map((place) => place.pin_index);
     assert([5, 6, 7].includes(pins.length));

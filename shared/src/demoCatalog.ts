@@ -55,6 +55,46 @@ const listings: Listing[][] = [
     ['chinatown-q-01', 'The Q', 'restaurant', 42.35171, -71.06261, 95, 38, '12:00', '00:00', ['hot pot', 'late night', 'groups'], 'Tabletop hot pot near the theater district.', true, true],
     ['chinatown-taiwan-01', 'Taiwan Café', 'restaurant', 42.35147, -71.06026, 270, 19, '11:30', '22:00', ['taiwanese', 'soup dumplings', 'rice'], 'Taiwanese comfort food and shareable plates on Oxford Street.', true, true],
   ],
+  [
+    ["haymarket-neptune-01", "Neptune Oyster", "restaurant", 42.3632431, -71.0560033, 270, 45, "11:00", "23:00", ["oysters", "lobster roll", "raw bar"], "Oysters on ice and hot buttered lobster rolls at a narrow Salem Street counter.", true, true],
+    ["haymarket-union-oyster-01", "Union Oyster House", "restaurant", 42.3612749, -71.0569532, 320, 35, "11:00", "22:00", ["clam chowder", "oysters", "seafood"], "A curved oyster bar and wooden booths on Union Street.", true, true],
+    ["haymarket-public-market-01", "Boston Public Market", "market", 42.3621228, -71.0575399, 235, 15, "08:00", "20:00", ["food stalls", "local produce", "lunch"], "Indoor stalls sell New England produce and prepared food beside Haymarket station.", true, false],
+    ["haymarket-regina-01", "Pizzeria Regina", "restaurant", 42.3654041, -71.0568572, 415, 18, "11:00", "00:30", ["pizza", "brick oven", "family meal"], "Brick-oven pies and booth seating at the Thacher Street pizzeria.", true, true],
+    ["haymarket-mikes-pastry-01", "Mike's Pastry", "shop", 42.3641884, -71.0542414, 490, 7, "08:00", "22:00", ["cannoli", "ricotta", "pastry"], "A Hanover Street pastry counter with trays of cannoli and boxes to take home.", true, true],
+    ["haymarket-city-winery-01", "City Winery", "music", 42.3640637, -71.0586667, 150, 30, "10:00", "23:00", ["wine", "live music", "small plates"], "Wine and dinner on Beverly Street, with concerts in the adjoining venue.", false, true],
+  ],
+  [
+    ["copley-levain-01", "Levain Bakery", "shop", 42.3502953, -71.0791906, 225, 6, "08:00", "22:00", ["cookies", "bakery", "chocolate"], "A Newbury Street bakery selling thick chocolate chip walnut cookies by the piece.", true, true],
+    ["copley-thai-basil-01", "Thai Basil Restaurant", "restaurant", 42.3509847, -71.076712, 210, 19, "11:00", "21:00", ["thai", "noodles", "curry"], "Noodles and curry at a downstairs storefront on Newbury Street.", true, true],
+    ["copley-lolita-01", "Lolita Back Bay", "restaurant", 42.3506853, -71.0774037, 95, 34, "11:30", "01:00", ["tacos", "mexican", "tequila"], "A Dartmouth Street dining room for shared tacos and late-night drinks.", false, true],
+    ["copley-newsfeed-01", "Newsfeed Café", "study", 42.34924, -71.0790061, 205, 10, "09:00", "17:00", ["coffee", "chowder", "library"], "Coffee and chowder beside the GBH broadcast studio in the public library.", true, false],
+    ["copley-oak-01", "OAK Long Bar + Kitchen", "restaurant", 42.3491772, -71.0766081, 135, 44, "07:00", "00:00", ["american", "cocktails", "chowder"], "An 83-foot copper bar stretches across the Fairmont Copley Plaza dining room.", true, true],
+    ["copley-thinking-cup-01", "Thinking Cup", "study", 42.3518284, -71.0749192, 375, 9, "07:00", "19:00", ["coffee", "espresso", "sandwiches"], "A Newbury Street coffeehouse serving espresso and pressed sandwiches.", true, false],
+  ],
+  [
+    ["aquarium-legal-01", "Legal Sea Foods – Long Wharf", "restaurant", 42.3593913, -71.0510643, 115, 35, "11:00", "22:00", ["clam chowder", "seafood", "lobster"], "Seafood dining room at the foot of Long Wharf, across from the aquarium.", true, true],
+    ["aquarium-charthouse-01", "Chart House", "restaurant", 42.3601392, -71.0493925, 235, 44, "11:00", "22:00", ["seafood", "steak", "harbor views"], "Seafood and steaks in an eighteenth-century warehouse on Long Wharf.", true, true],
+    ["aquarium-blackrose-01", "The Black Rose", "restaurant", 42.3594126, -71.0536973, 185, 26, "11:00", "00:00", ["irish", "beef stew", "live music"], "Irish pub on State Street with Guinness beef stew and evening music.", true, true],
+    ["aquarium-saltydog-01", "Salty Dog Seafood Grille & Bar", "restaurant", 42.3602616, -71.0554773, 410, 30, "11:30", "20:00", ["oysters", "raw bar", "seafood"], "A downstairs raw bar and seasonal outdoor tables on the Quincy Market bricks.", true, true],
+    ["aquarium-granary-01", "Granary Tavern", "restaurant", 42.3587066, -71.0524027, 195, 25, "11:00", "22:00", ["pub food", "burgers", "patio"], "Tavern on Milk Street with a patio facing the Greenway.", true, true],
+    ["aquarium-sailloft-01", "Boston Sail Loft", "restaurant", 42.3624578, -71.0504909, 380, 32, "11:30", "22:00", ["clam chowder", "seafood", "harbor views"], "Waterfront seafood restaurant on Atlantic Avenue known for its clam chowder.", true, true],
+  ],
+  [
+    ["central-asmara-01", "Asmara Restaurant", "restaurant", 42.3664123, -71.1050773, 105, 29, "17:00", "21:00", ["eritrean", "injera", "stews"], "An Eritrean dinner of stews scooped up with injera.", true, true],
+    ["central-cicada-01", "Cicada Coffee Bar", "study", 42.3676769, -71.1019944, 300, 9, "09:00", "15:00", ["vietnamese coffee", "coffee", "brunch"], "A Prospect Street café for Vietnamese coffee and brunch.", true, false],
+    ["central-andala-01", "Andala Coffee House", "study", 42.364771, -71.1057705, 205, 13, "08:00", "23:00", ["palestinian", "coffee", "hummus"], "Palestinian coffee and café plates on Franklin Street.", true, true],
+    ["central-paikinkao-01", "Pai Kin Kao", "restaurant", 42.3642092, -71.1074792, 355, 20, "11:30", "21:00", ["thai", "noodles", "curry"], "Thai curry and noodle dishes on River Street.", true, true],
+    ["central-lanner-01", "Lanner Noodles & Bar", "restaurant", 42.3641739, -71.1030009, 110, 23, "11:30", "22:00", ["chinese", "hand-pulled noodles", "beef noodle soup"], "Hand-pulled noodles and beef broth on Pearl Street.", true, true],
+    ["central-veggiegalaxy-01", "Veggie Galaxy", "restaurant", 42.3636635, -71.1011293, 205, 18, "09:00", "22:00", ["vegetarian", "diner", "vegan bakery"], "Vegetarian diner fare and a vegan bakery near Lafayette Square.", true, true],
+  ],
+  [
+    ["coolidge-zaftigs-01", "Zaftigs Delicatessen", "restaurant", 42.3438261, -71.1237819, 315, 22, "08:00", "21:00", ["deli", "latkes", "breakfast"], "Harvard Street deli with griddled potato pancakes and breakfast served all day.", true, true],
+    ["coolidge-theatre-01", "Coolidge Corner Theatre", "activity", 42.3424412, -71.1227002, 185, 17, "12:00", "22:00", ["cinema", "independent film", "matinee"], "Independent cinema with an Art Deco moviehouse. The box office opens 30 minutes before the first show, so check the day’s listings.", true, true],
+    ["coolidge-maruichi-01", "Maruichi Select", "study", 42.3430554, -71.1224304, 175, 13, "09:00", "21:00", ["japanese", "matcha", "cafe"], "Japanese café and specialty food shop on the odd-numbered side of Harvard Street.", true, false],
+    ["coolidge-prairie-fire-01", "Prairie Fire", "restaurant", 42.3412838, -71.1212104, 120, 25, "12:00", "22:00", ["wood-fired pizza", "dinner", "pizza"], "A wood-fired pizza stop south of the Beacon Street intersection.", true, true],
+    ["coolidge-los-amigos-01", "Los Amigos Taqueria", "restaurant", 42.3426942, -71.1203333, 135, 14, "11:00", "21:30", ["burritos", "fish tacos", "takeout"], "Build-your-own burritos and Baja-style fish tacos on the east side of the junction.", true, true],
+    ["coolidge-bab-01", "Bab Korean Bistro", "restaurant", 42.34177, -71.1236026, 225, 20, "11:30", "21:00", ["korean", "bibimbap", "bulgogi"], "Korean bistro on Beacon Street west of the theatre.", true, true],
+  ],
 ];
 
 export const demoPlaces: Place[] = listings.flatMap((entries, stopIndex) => entries.map((listing, pin_index) => {

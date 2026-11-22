@@ -53,10 +53,10 @@ for (const [, routeId, , color, , knots] of routes) {
     stations.set(key, station);
   }
 }
-for (const [stopId, fullName, label, code] of focal) {
+for (const [stopId, fullName, label, code, , primaryColor] of focal) {
   const station = stations.get(fullName);
   if (!station) throw new Error('Focal station is missing from the route tables: ' + fullName);
-  Object.assign(station, { name: label, stopId, code });
+  Object.assign(station, { name: label, stopId, code, colors: [primaryColor, ...station.colors.filter((color) => color !== primaryColor)] });
   // Use the collar position from the sculpture so the 2D node sits exactly on the drawn tube.
   const [x, , z] = anchors[stopId].tubePos;
   Object.assign(station, { x: fixed(x), y: fixed(z) });
