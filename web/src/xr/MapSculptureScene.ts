@@ -55,6 +55,14 @@ interface Train {
   root: pc.Entity;
   family: string;
   track?: Track;
+  /**
+   * Which way along the track the train faces: +1 with increasing distance, -1 against.
+   *
+   * Kept on the train because a stopped vehicle gives nothing to infer it from -- its reported
+   * position has not changed -- and without it a halted train keeps whatever rotation it last had,
+   * or none at all if it arrived stopped, and sits skewed across the line.
+   */
+  heading: number;
   from: number;
   to: number;
   elapsed: number;
@@ -68,8 +76,37 @@ interface LineSurface {
 }
 
 const pollInterval = 18; // AppShell polls live vehicles every 18 seconds.
-// Trains ride on top of the tube rather than inside it.
-const trainLift = 0.0102;
+// Trains ride on top of the plate rather than inside it. Half the plate thickness clears it; the
+// old 0.0102 was sized for the swept tube the lines used to be and now floats them well above it.
+const trainLift = 0.0014;
+
+/**
+ * Flowcast's train is 45 m long and 2.7 m wide: a 17:1 sliver, correct for the real-scale map it
+ * was built for. This map is a diagram, and everything on it is already exaggerated -- the line
+ * plates stand for roughly 55 m of ground, about twenty times a real track.
+ *
+ * Length is the binding constraint. At this scale a consist already covers nine tenths of the
+ * average Green Line B stop gap (0.072 units), so it cannot grow without spanning whole stations.
+ * The cross-section is therefore lifted instead, by a little under 1.8x.
+ *
+ * That ratio is a deliberate middle ground. Uniform scaling is faithful but leaves the body so
+ * slim that its livery is invisible from the map's usual angle, where mostly roof is in view. An
+ * earlier attempt at 3x went too far the other way and the cars came out visibly stubby. At 1.8x
+ * the consist still reads as a tram -- about 9:1 overall -- while the green band along its lower
+ * body is actually legible.
+ */
+const trainScaleLength = 0.0014;
+const trainScaleCross = 0.0024;
+
+/**
+ * No floor offset: the model's own geometry already starts at y=0, so its origin is its railhead.
+ *
+ * This previously dropped the train by 1.12 m of model space, taken from the first POSITION
+ * accessor's minimum. That accessor is the bodyshell, which does start at 1.12; the wheels and
+ * underframe reach all the way down to 0. Trusting it sank every train through the plate it was
+ * meant to be riding on.
+ */
+const trainFloorOffset = 0;
 const maxSnapError = 0.03 ** 2;
 const burstTime = 0.7;
 const mapRevealTime = 1.45;
@@ -100,6 +137,29 @@ function snapToTrack(track: Track, x: number, z: number): { distance: number; er
     distance = pc.math.lerp(track.distances[i - 1], track.distances[i], t);
   }
   return { distance, error };
+}
+
+/**
+ * Which way along a track a vehicle is pointing, from the compass bearing MBTA reports.
+ *
+ * The sculpture projects +x east and +z south, so a direction (dx, dz) is at compass
+ * atan2(dx, -dz). Comparing that with the reported bearing says whether the train runs with the
+ * track's distance axis or against it. Without this a train that arrives already stopped has no
+ * travel to infer from and would face an arbitrary way down the line.
+ */
+function headingFromBearing(track: Track, distance: number, bearing: number): number {
+  const length = track.distances[track.distances.length - 1];
+  const a = new pc.Vec3();
+  const b = new pc.Vec3();
+  sampleTrack(track, clamp(distance - 0.002, 0, length), a);
+  sampleTrack(track, clamp(distance + 0.002, 0, length), b);
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  if (Math.abs(dx) < 1e-9 && Math.abs(dz) < 1e-9) return 1;
+  const forward = (Math.atan2(dx, -dz) * 180) / Math.PI;
+  // Shortest signed angle between the track's forward direction and the reported bearing.
+  const delta = Math.abs(((forward - bearing + 540) % 360) - 180);
+  return delta > 90 ? -1 : 1;
 }
 
 function sampleTrack(track: Track, distance: number, position: pc.Vec3): void {
@@ -208,6 +268,12 @@ export class MapSculptureScene {
         for (const mesh of render.meshInstances) {
           const surface = mesh.material;
           if (!(surface instanceof pc.StandardMaterial)) continue;
+          // The ground renders unlit so its rim reaches the backdrop colour exactly. Lit, the
+          // faded edge never quite matched and the last row of quads read as a hard border.
+          if (mesh.node.name === 'Ground plane') {
+            surface.useLighting = false;
+            surface.update();
+          }
           const line = /^Lacquer (#[0-9a-f]{6})$/i.exec(mesh.node.name);
           if (line) {
             this.lineSurfaces.set(line[1].toLowerCase(),
@@ -423,7 +489,7 @@ export class MapSculptureScene {
       const isNew = !train;
       if (!train) {
         const root = child(this.trainRoot, vehicle.label || vehicle.id);
-        train = { root, family, elapsed: pollInterval, from: 0, to: 0 };
+        train = { root, family, elapsed: pollInterval, from: 0, to: 0, heading: 1 };
         this.trains.set(vehicle.id, train);
         this.attachTrainModel(train);
       } else if (train.family !== family) {
@@ -435,6 +501,10 @@ export class MapSculptureScene {
       if (train.track === track) {
         train.from = pc.math.lerp(train.from, train.to, clamp(train.elapsed / pollInterval, 0, 1));
       } else train.from = snap.distance;
+      const stationary = Math.abs(snap.distance - train.from) < 1e-5;
+      if (Number.isFinite(vehicle.bearing) && (isNew || stationary)) {
+        train.heading = headingFromBearing(track, snap.distance, vehicle.bearing as number);
+      }
       train.to = snap.distance;
       train.track = track;
       train.elapsed = 0;
@@ -455,9 +525,15 @@ export class MapSculptureScene {
     const source = this.trainModels.get(train.family);
     if (!source || train.root.children.length) return;
     const model = source.instantiateRenderEntity();
-    // The GLB's nose is +Z. The train root points -Z along its track.
+    // Materials are left alone on purpose: each model already carries its own livery, window band
+    // and roof trim. Overriding them would flatten all of that back to one colour.
+    //
+    // The nose is +Z -- measured on the vendored model, whose headlight sits at z=+22.5 and
+    // taillight at z=-22.5 -- while lookAt points the root's -Z along the track. Without the flip
+    // every train runs backwards.
     model.setLocalEulerAngles(0, 180, 0);
-    model.setLocalScale(1.25, 1.25, 1.25);
+    model.setLocalScale(trainScaleCross, trainScaleCross, trainScaleLength);
+    model.setLocalPosition(0, trainFloorOffset, 0);
     train.root.addChild(model);
     if (this.detailsVisible) this.reveal.show(train.root, 0.38, jarvisPoints.detail);
     else this.reveal.finish(train.root, false);
@@ -471,15 +547,35 @@ export class MapSculptureScene {
     sampleTrack(train.track, distance, this.trainPosition);
     this.trainPosition.y += trainLift;
     train.root.setLocalPosition(this.trainPosition);
-    if (Math.abs(train.to - train.from) > 0.00001) {
-      const step = Math.sign(train.to - train.from) * 0.002;
-      const length = train.track.distances[train.track.distances.length - 1];
-      sampleTrack(train.track, clamp(distance + step, 0, length), this.trainLookAt);
-      this.trainLookAt.y += trainLift;
-      if (this.trainLookAt.distanceSq(this.trainPosition) > 1e-12) {
-        this.root.getWorldTransform().transformPoint(this.trainLookAt, this.trainLookAt);
-        train.root.lookAt(this.trainLookAt);
-      }
+
+    // Orient every frame, whether or not the train is moving. This used to be skipped when
+    // `to === from`, which is exactly the case for anything STOPPED_AT a platform -- and most
+    // trains are stopped most of the time -- so those kept their default rotation and lay across
+    // the line at an angle instead of along it.
+    if (Math.abs(train.to - train.from) > 1e-5) train.heading = Math.sign(train.to - train.from);
+    const length = train.track.distances[train.track.distances.length - 1];
+    // Sample a little along the track and face that way. Near an end the step would fall off the
+    // track and collapse to zero, so it flips to look back from the other side instead.
+    const step = train.heading * 0.002;
+    let ahead = clamp(distance + step, 0, length);
+    let flip = 1;
+    if (Math.abs(ahead - distance) < 1e-9) {
+      ahead = clamp(distance - step, 0, length);
+      flip = -1;
+    }
+    sampleTrack(train.track, ahead, this.trainLookAt);
+    this.trainLookAt.y += trainLift;
+    if (flip < 0) {
+      // Mirror the sample through the train so it still faces along its heading.
+      this.trainLookAt.set(
+        2 * this.trainPosition.x - this.trainLookAt.x,
+        this.trainPosition.y,
+        2 * this.trainPosition.z - this.trainLookAt.z,
+      );
+    }
+    if (this.trainLookAt.distanceSq(this.trainPosition) > 1e-12) {
+      this.root.getWorldTransform().transformPoint(this.trainLookAt, this.trainLookAt);
+      train.root.lookAt(this.trainLookAt);
     }
   }
 

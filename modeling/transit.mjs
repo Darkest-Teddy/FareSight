@@ -321,34 +321,41 @@ function landmarks(surface, accent) {
 }
 
 /**
- * A station bead: a white disc with the line's colour inset on top.
+ * A station marker: a disc set into the line, wider than it, so it reads as the line swelling at
+ * a stop rather than as something stacked on top.
  *
- * Both discs are raised clear of the plate so neither z-fights with it, and the white ring is
- * wider than the plate itself, which is what makes a stop legible at map scale.
+ * It occupies exactly the plate's own thickness -- same top face, same underside -- so nothing
+ * stands proud for a train to clip through. Because it is wider than the plate, its rim is what
+ * shows, and that rim is a real wall with a lit top edge and a shaded side, which is what gives
+ * every stop a visible 3D edge from an angled or side-on camera.
+ *
+ * Earlier takes got one half of this or the other: a raised puck that trains drove through, then a
+ * flat decal with no edge at all.
  */
-const dotOuter = 0.0068;
-const dotInner = 0.0042;
+const dotOuter = 0.0062;
+const dotInner = 0.0036;
 
 function stationDot(white, colour, [x, , z], deck, tint) {
-  const base = deck + 0.0004;
-  const lip = base + 0.0014;
-  // White body.
-  loft(white, [circle(x, base, z, dotOuter, 20), circle(x, lip, z, dotOuter, 20)], '#f4f6fa', {
-    bottom: false,
-    top: false,
-  });
-  // The white rim left showing around the coloured centre.
-  const outer = circle(x, lip, z, dotOuter, 20);
-  const inner = circle(x, lip, z, dotInner, 20);
-  for (let j = 0; j < 20; j++) {
-    const k = (j + 1) % 20;
+  // A hair above the plate's own top face. Drawn exactly level with it the two surfaces are
+  // coplanar and z-fight, which speckles the ring; this is far too small to read as a step.
+  const top = deck + 0.00006;
+  const bottom = deck - trackThickness;
+  // The rim. Capped underneath so the disc is solid when the camera drops below the line.
+  loft(
+    white,
+    [circle(x, bottom, z, dotOuter, 24), circle(x, top, z, dotOuter, 24)],
+    '#e8edf3',
+    { top: false },
+  );
+  // White ring on the top face, left showing around the coloured centre.
+  const outer = circle(x, top, z, dotOuter, 24);
+  const inner = circle(x, top, z, dotInner, 24);
+  for (let j = 0; j < 24; j++) {
+    const k = (j + 1) % 24;
     face(white, [outer[j], inner[j], inner[k], outer[k]], '#f4f6fa');
   }
-  // Coloured cap, a hair proud of the white so it never z-fights.
-  const cap = lip + 0.0003;
-  loft(colour, [circle(x, lip, z, dotInner, 20), circle(x, cap, z, dotInner, 20)], tint, {
-    bottom: false,
-  });
+  // Route colour filling the middle, a hair proud so it never z-fights the ring.
+  face(colour, circle(x, top + 0.00006, z, dotInner, 24), tint);
 }
 
 // Center and half-width of the Charles, from the Allston bend to the harbor mouth.
@@ -493,13 +500,21 @@ export function mapSculpture(dir) {
       };
     }
   }
-  // Ground first, so it sits behind everything. It shares the city's surface, so the whole
-  // base and all 300 buildings remain a single draw call.
-  groundBlob(city, lines, slabTop - 0.0006);
-
-  // The city goes in last: it needs every centreline so it can avoid building on the tracks.
+  // The city is placed first now, because the ground is cut to fit it rather than to the rails.
+  // Both share one surface, so the ground and all 200-odd buildings stay a single draw call and
+  // the order between them does not matter to the renderer.
   const blocks = cityBlocks(city, lines, slabTop);
-  if (process.env.FARESIGHT_VERBOSE) console.log('city blocks placed:', blocks);
+  // Buildings set how far out the ground reaches; the spine keeps it continuous between them.
+  //
+  // Its own surface, not the city's. The ground's rim fades to the renderer's backdrop colour and
+  // has to land on it exactly, or the last row of quads shows up as a hard edge where the
+  // geometry stops. Sharing a lit material made that impossible: lighting and the city's emission
+  // shift the rendered colour away from the vertex colour, so the fade could never quite arrive.
+  // The runtime turns lighting off for this one material, which is also free -- the ground is a
+  // flat plane and lighting only ever tinted it uniformly.
+  const ground = batch('Ground plane', { rough: 1, metal: 0 });
+  groundBlob(ground, [...blocks.sites, ...blocks.spine], slabTop - 0.0006);
+  if (process.env.FARESIGHT_VERBOSE) console.log('city blocks placed:', blocks.count);
 
   // Transfer posts tie stacked platforms of different lines together.
   for (const platforms of levels.values()) {

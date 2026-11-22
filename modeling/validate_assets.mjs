@@ -29,19 +29,31 @@ const uiModels = [
   'menu-book',
   'review-clipboard',
 ];
+/**
+ * Models this repo exports itself. parseModel checks them against our exporter's conventions --
+ * one node per surface, one primitive per mesh, exact accessor bounds -- which only hold for files
+ * we wrote.
+ */
 const genModels = [
   'boston-map-sculpture',
-  'mbta-train-green',
-  'mbta-train-red',
-  'mbta-train-orange',
-  'mbta-train-blue',
   'table-pedestal',
   ...uiModels,
   ...Object.keys(stationRef).map((k) => 'segment-' + k),
 ];
+/**
+ * Vendored from Flowcast and recoloured per line. These follow a different exporter's conventions
+ * -- notably one mesh carrying all sixteen primitives -- so they get their own, lighter checks
+ * below rather than going through parseModel.
+ */
+const vendorModels = [
+  'mbta-train-green',
+  'mbta-train-red',
+  'mbta-train-orange',
+  'mbta-train-blue',
+];
 const jsonNames = ['station-anchors', 'segment-anchors', 'mbta-3d-paths'];
 const expected = [
-  ...genModels.map((n) => n + '.glb'),
+  ...[...genModels, ...vendorModels].map((n) => n + '.glb'),
   ...Object.keys(gaussians).map((n) => n + '.ply'),
   ...jsonNames.map((n) => n + '.json'),
 ].sort();
@@ -210,7 +222,9 @@ function parseModel(name) {
       // Floor lowered from 15000: the sculpture now uses flat track plates instead of swept
       // tubes and has no deck, street grid or river, so the honest triangle count is far lower.
       // The ceiling is the one that matters for performance and is unchanged.
-      ? [4000, 55000, 12]
+      // 13 draws: the ground needs a material of its own so it can render unlit and its rim can
+      // reach the backdrop exactly. Everything else still shares.
+      ? [4000, 55000, 13]
       : uiModels.includes(name)
         ? [1, 5000, 20]
         : [1, 5000, 8];
@@ -225,7 +239,7 @@ function parseModel(name) {
     draws + ' primitives',
     reportBounds(bounds),
   );
-  return { bounds, meshes };
+  return { bounds, meshes, materials: j.materials ?? [] };
 }
 for (const name of genModels) models[name] = parseModel(name);
 function exactBounds(b, lo, hi) {
@@ -239,11 +253,16 @@ const map = models['boston-map-sculpture'];
 // the backdrop. Checked as a range: wide enough to prove the ground and its skirt are present,
 // tight enough to catch runaway geometry. The track geometry itself is bounded separately by
 // the per-line checks further down.
+// Extent is now set by the track and the buildings, not the ground: the blob is cut to the city
+// and the lines run out past its edge, so the model reaches roughly as far as clipToFootprint
+// allows the rails to go.
+// Extent is set by the track, the buildings, and the ground's faded rim, which reaches a little
+// past the outermost block. The rails themselves are clipped to +/-0.738 x +/-0.513.
 assert.ok(
-  map.bounds.min[0] >= -1.12 && map.bounds.min[0] <= -0.88 &&
-    map.bounds.max[0] <= 1.12 && map.bounds.max[0] >= 0.88 &&
-    map.bounds.min[2] >= -0.92 && map.bounds.min[2] <= -0.62 &&
-    map.bounds.max[2] <= 0.92 && map.bounds.max[2] >= 0.62,
+  map.bounds.min[0] >= -0.90 && map.bounds.min[0] <= -0.70 &&
+    map.bounds.max[0] <= 0.90 && map.bounds.max[0] >= 0.70 &&
+    map.bounds.min[2] >= -0.68 && map.bounds.min[2] <= -0.48 &&
+    map.bounds.max[2] <= 0.68 && map.bounds.max[2] >= 0.48,
   'sculpture footprint ' + reportBounds(map.bounds),
 );
 // Floats above zero now: the lowest geometry is the station skirts, not a deck resting on y=0.
@@ -267,25 +286,56 @@ for (const r of [0.1, 0.15]) {
     }
   assert.ok(hits >= 120);
 }
-for (const line of ['green', 'red', 'orange', 'blue']) {
-  const train = models['mbta-train-' + line];
-  // Centred on its own origin, so the scene can place it straight onto a track sample.
-  approx(train.bounds.min[2], -train.bounds.max[2], 1e-6, line + ' train centring');
-  // Sits above the rail, never through it.
-  assert.ok(train.bounds.min[1] > 0, line + ' train floor ' + train.bounds.min[1]);
-  // Plausible size: longer than it is wide, and small enough to read as a train on the line.
-  const length = train.bounds.max[2] - train.bounds.min[2];
-  const width = train.bounds.max[0] - train.bounds.min[0];
-  assert.ok(length > width * 2 && length < 0.05, line + ' train proportions');
-  assert.ok(train.meshes.get('Head lamps'), line + ' train has no head lamps');
-}
-// Green and Blue are the two lines that collect from overhead wire, so only they carry a
-// pantograph, which makes them taller than the third-rail stock.
-for (const line of ['green', 'blue'])
-  assert.ok(
-    models['mbta-train-' + line].bounds.max[1] > 0.0077,
-    line + ' train is missing its pantograph',
+// The trains are Flowcast's mbta-green-line-train.glb recoloured per line, so every variant must
+// stay geometrically identical to its source and differ only in the accent material. Read here
+// directly rather than through parseModel, which encodes our own exporter's conventions.
+const lineAccents = {
+  green: '#00843D',
+  red: '#DA291C',
+  orange: '#ED8B00',
+  blue: '#003DA5',
+};
+const linear2srgb = (v) =>
+  Math.round(255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055));
+let trainTriangles = null;
+let trainBin = null;
+for (const [line, accent] of Object.entries(lineAccents)) {
+  const bytes = readFileSync(dir + 'mbta-train-' + line + '.glb');
+  const jsonLength = bytes.readUInt32LE(12);
+  const doc = JSON.parse(bytes.subarray(20, 20 + jsonLength).toString('utf8'));
+  const binStart = 20 + jsonLength;
+  const bin = bytes.subarray(binStart + 8, binStart + 8 + bytes.readUInt32LE(binStart));
+
+  // Byte-identical geometry across every line: only a material factor may differ.
+  if (trainBin === null) trainBin = bin;
+  else assert.ok(bin.equals(trainBin), line + ' train geometry differs from the other lines');
+
+  const count = doc.meshes.reduce(
+    (n, m) => n + m.primitives.reduce((k, p) => k + doc.accessors[p.indices].count / 3, 0),
+    0,
   );
+  if (trainTriangles === null) trainTriangles = count;
+  assert.equal(count, trainTriangles, line + ' train triangle count');
+  assert.ok(count > 3000, line + ' train looks too simple: ' + count + ' triangles');
+
+  // Real-scale metres straight from Flowcast; the runtime scales it down to sculpture units.
+  const z = doc.accessors.filter((a) => a.min && a.min.length === 3);
+  const length = Math.max(...z.map((a) => a.max[2])) - Math.min(...z.map((a) => a.min[2]));
+  assert.ok(length > 40 && length < 50, line + ' train length ' + length);
+
+  // The accent material carries this line's official colour.
+  const material = doc.materials.find((m) => m.name === 'mbta_' + line);
+  assert.ok(material, line + ' train has no mbta_' + line + ' material');
+  const hex =
+    '#' +
+    material.pbrMetallicRoughness.baseColorFactor
+      .slice(0, 3)
+      .map((v) => linear2srgb(v).toString(16).padStart(2, '0'))
+      .join('')
+      .toUpperCase();
+  assert.equal(hex, accent, line + ' train accent is ' + hex);
+}
+
 const offsets = new Map();
 assert.deepEqual(
   paths.map((l) => l.routeId).sort(),

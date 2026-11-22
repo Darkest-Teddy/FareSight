@@ -19,3 +19,6 @@ experiments/**/vendor/
 experiments/**/venv/
 experiments/**/hf-cache/
 experiments/**/atlas/*-*/
+
+# git-lfs on Windows can write its hooks to a literal "dev/null" path.
+dev/null/
