@@ -3,6 +3,7 @@ import { catalog } from './catalog';
 import { button, el, icon, iconButton, motion } from './dom';
 import { inviteCode, scans } from './store';
 import { codeSheet } from './ui/CodeSheet';
+import { session } from './session';
 import { NetworkView } from './views/NetworkView';
 import { ScansView } from './views/ScansView';
 import { StationView } from './views/StationView';
@@ -90,7 +91,9 @@ export class App {
     this.renderBadge();
     void catalog.load();
     catalog.watch();
-    void inviteCode.refresh();
+    // Resolves the account first, redeeming a handoff token injected by the Expo app. The invite
+    // code is still refreshed behind it, so a server with no accounts configured is unaffected.
+    void session.restore().finally(() => void inviteCode.refresh());
     scans.start();
     window.addEventListener('online', () => {
       void catalog.load();

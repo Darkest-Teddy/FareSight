@@ -1,4 +1,5 @@
 import type { GenerationJob, MbtaVehicle, Place, RoomModelTier } from '@faresight/shared';
+import { session } from './session';
 
 export interface Upload {
   id: string;
@@ -33,6 +34,9 @@ async function request<T>(path: string, body?: object | FormData, code?: string,
   const headers = new Headers({ accept: 'application/json' });
   if (body && !multipart) headers.set('content-type', 'application/json');
   if (code) headers.set('X-Upload-Passcode', code);
+  // A signed-in contributor identifies themselves by bearer token. The passcode header is still
+  // sent alongside it so a server configured the old way keeps working unchanged.
+  if (session.bearer) headers.set('authorization', `Bearer ${session.bearer}`);
   if (idempotencyKey) headers.set('Idempotency-Key', idempotencyKey);
   let response: Response;
   try {

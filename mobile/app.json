@@ -19,7 +19,9 @@
       "infoPlist": {
         "NSCameraUsageDescription": "FareSight Contribute uses the camera so you can photograph the places you scan.",
         "NSPhotoLibraryUsageDescription": "FareSight Contribute reads your photo library so you can submit existing photos.",
-        "NSAppTransportSecurity": { "NSAllowsLocalNetworking": true }
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
       }
     },
     "android": {
@@ -29,12 +31,22 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#111112"
       },
-      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE"],
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ],
       "usesCleartextTraffic": true
     },
-    "web": { "favicon": "./assets/favicon.png" },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
     "extra": {
-      "contributeUrl": null
-    }
+      "contributeUrl": null,
+      "apiUrl": null,
+      "googleIosClientId": null,
+      "googleAndroidClientId": null
+    },
+    "scheme": "faresight"
   }
 }
