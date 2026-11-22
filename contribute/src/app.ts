@@ -1,6 +1,6 @@
 import { STOPS } from '@faresight/shared';
 import { catalog } from './catalog';
-import { button, el, icon, iconButton, motion } from './dom';
+import { button, el, icon, iconButton, motion, svg } from './dom';
 import { inviteCode, scans } from './store';
 import { codeSheet } from './ui/CodeSheet';
 import { NetworkView } from './views/NetworkView';
@@ -55,10 +55,13 @@ export class App {
     root.classList.add('shell');
     const bar = el('header', 'topbar');
     const brand = button('', () => this.go('#/'), 'wordmark');
-    const mark = el('span', 'brand-mark');
-    mark.setAttribute('aria-hidden', 'true');
-    brand.append(mark);
-    brand.setAttribute('aria-label', 'FareSight Contribute, back to the map');
+    const mark = svg('svg', { class: 'brand-mark', viewBox: '0 0 96 96', 'aria-hidden': 'true', fill: 'currentColor' });
+    mark.append(
+      svg('path', { d: 'M9 78V50C9 32 18 23 35 16L56 8 82 18 61 27C46 33 38 42 38 57V67Z' }),
+      svg('path', { d: 'M48 55C48 45 53 39 63 35L85 26V65L48 87Z' }),
+    );
+    brand.append(mark, 'Vantage Contribute');
+    brand.setAttribute('aria-label', 'Vantage Contribute, back to the map');
     this.codeButton = iconButton('key', codeLabels.unknown, () => void codeSheet.ask(), 'code-button');
     bar.append(brand, this.codeButton);
 
@@ -141,7 +144,7 @@ export class App {
       if ((route.name === 'scans') === (id === 'scans')) tab.setAttribute('aria-current', 'page');
       else tab.removeAttribute('aria-current');
     }
-    document.title = route.name === 'scans' ? 'My scans · FareSight Contribute' : 'FareSight Contribute';
+    document.title = route.name === 'scans' ? 'My scans · Vantage Contribute' : 'Vantage Contribute';
   }
 
   private build(route: Route, previous: Route | undefined): Screen | undefined {

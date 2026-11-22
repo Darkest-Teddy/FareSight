@@ -21,7 +21,7 @@ export class PairingModal {
     const { body } = this.surface;
     this.status.setAttribute('role', 'status');
     this.feedback.setAttribute('role', 'status');
-    const intro = element('p', '', 'Open FareSight on both devices. Create a code on one and enter it on the other.');
+    const intro = element('p', '', 'Open Vantage on both devices. Create a code on one and enter it on the other.');
     this.create = button('Create pairing code', () => void this.createCode(), 'accent');
     this.disconnect = button('Disconnect', () => this.closeConnection(), 'quiet');
     const codeForm = element('form', 'form-stack');

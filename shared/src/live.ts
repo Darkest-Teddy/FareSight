@@ -55,7 +55,7 @@ export const FARESIGHT_LIVE_TOOLS: LiveFunctionTool[] = [
     type: 'function',
     name: 'get_app_state',
     description:
-      'Read the full current UI and 3D scene state of FareSight: active scene (map, station, venue, dish), current stop, place, dish, comparison dish, filters, highlights, audio state, XR mode, and loaded menu/trip details.',
+      'Read the full current UI and 3D scene state of Vantage: active scene (map, station, venue, dish), current stop, place, dish, comparison dish, filters, highlights, audio state, XR mode, and loaded menu/trip details.',
     parameters: {
       type: 'object',
       properties: {},
@@ -66,7 +66,7 @@ export const FARESIGHT_LIVE_TOOLS: LiveFunctionTool[] = [
     type: 'function',
     name: 'search_catalog',
     description:
-      'Search FareSight stops, venues, dishes, and rooms by keyword, stop, craving, category, max budget, group size, 3D preview availability, family-friendly, or evening availability. Use this to answer discovery questions and find exact IDs.',
+      'Search Vantage stops, venues, dishes, and rooms by keyword, stop, craving, category, max budget, group size, 3D preview availability, family-friendly, or evening availability. Use this to answer discovery questions and find exact IDs.',
     parameters: {
       type: 'object',
       properties: {
@@ -170,7 +170,7 @@ export const FARESIGHT_LIVE_TOOLS: LiveFunctionTool[] = [
     type: 'function',
     name: 'open_place',
     description:
-      'Open a venue or restaurant in FareSight: loads its 3D Gaussian splat room (if published), photo gallery, 3D physical menu book, live MBTA trip estimate, and cost breakdown.',
+      'Open a venue or restaurant in Vantage: loads its 3D Gaussian splat room (if published), photo gallery, 3D physical menu book, live MBTA trip estimate, and cost breakdown.',
     parameters: {
       type: 'object',
       properties: {
@@ -249,7 +249,7 @@ export const FARESIGHT_LIVE_TOOLS: LiveFunctionTool[] = [
     type: 'function',
     name: 'set_filters',
     description:
-      'Update FareSight explore filters: craving chip, total per-person budget (8 to 50, includes $2.40 T fare), starting MBTA stop, group size (1 to 20), family visit toggle, or reset all filters.',
+      'Update Vantage explore filters: craving chip, total per-person budget (8 to 50, includes $2.40 T fare), starting MBTA stop, group size (1 to 20), family visit toggle, or reset all filters.',
     parameters: {
       type: 'object',
       properties: {
@@ -329,7 +329,7 @@ export const FARESIGHT_LIVE_TOOLS: LiveFunctionTool[] = [
       type: 'object',
       properties: {
         filter_panel: { type: 'string', enum: ['open', 'close'] },
-        audio_sfx: { type: 'string', enum: ['on', 'off'], description: 'Toggle FareSight Web Audio UI sound effects.' },
+        audio_sfx: { type: 'string', enum: ['on', 'off'], description: 'Toggle Vantage Web Audio UI sound effects.' },
         modal: { type: 'string', enum: ['none', 'upload', 'pair', 'credits', 'debug'], description: 'Open a specific modal or close open modals (none).' },
         send_to_paired_device: { type: 'string', enum: ['current', 'trip'], description: 'Send current venue/dish or trip estimate to a paired Quest headset.' },
         table_mode: { type: 'string', enum: ['virtual', 'passthrough'], description: 'Switch dish tabletop between virtual table and AR passthrough.' },
@@ -351,7 +351,7 @@ const stop = { type: 'string', enum: STOPS.map(({ stop_id }) => stop_id) };
 const craving = { type: 'string', enum: CRAVING_FILTERS.map(([id]) => id) };
 const budget = { type: 'number', minimum: 0, description: 'Maximum one-way total per person in USD, including fare' };
 const groupSize = { type: 'integer', minimum: 1, maximum: 20 };
-const id = { type: 'string', description: 'Exact ID from the FareSight catalog' };
+const id = { type: 'string', description: 'Exact ID from the Vantage catalog' };
 const text = { type: 'string' };
 const bool = { type: 'boolean' };
 const oneOf = (...values: string[]) => ({ type: 'string', enum: values });
@@ -373,7 +373,7 @@ function tool<Name extends string>(name: Name, description: string, properties: 
 }
 
 export const LIVE_APP_TOOLS = [
-  tool('list_places', 'Find places and dish IDs in the FareSight catalog.', {
+  tool('list_places', 'Find places and dish IDs in the Vantage catalog.', {
     stopId: stop, craving, maxBudget: budget, only3D: bool, query: text, openNow: bool,
     familyFriendly: bool, eveningOnly: bool, groupSize, has3DRoom: bool, has3DDish: bool,
   }),
@@ -480,14 +480,14 @@ export const LIVE_APP_TOOLS = [
 export type LiveAppToolName = typeof LIVE_APP_TOOLS[number]['name'];
 
 export const LIVE_VOICE_PERSONA = [
-  'You are FareSight GPT Live, an unflappable British AI concierge for Boston transit and dining. Speak in crisp British English with a Received Pronunciation cadence, smooth low-key delivery, and poised diction.',
+  'You are Vantage GPT Live, an unflappable British AI concierge for Boston transit and dining. Speak in crisp British English with a Received Pronunciation cadence, smooth low-key delivery, and poised diction.',
   'Sound assured and understated, with an occasional dry aside when it fits. Avoid effusive greetings, exclamation-heavy hype, theatrical delivery, and sci-fi roleplay.',
   'Keep spoken replies to one or two sentences. Lead with what changed on screen or the most useful fact, such as the MBTA stop, walk time, cost including fare, available 3D preview, or next arrival.',
 ].join('\n');
 
 export const LIVE_APP_INSTRUCTIONS = [
-  `FareSight covers ${STOPS.map(({ name, stop_id }) => `${name} (${stop_id})`).join(', ')}. The one-way subway fare is $${MBTA_SUBWAY_FARE.toFixed(2)} when riding to another stop.`,
-  'When the user asks to open, show, compare, filter, or navigate, call the appropriate tool to change FareSight before you confirm the action. Use list_places for exact venue and dish IDs. Speak names, never IDs.',
+  `Vantage covers ${STOPS.map(({ name, stop_id }) => `${name} (${stop_id})`).join(', ')}. The one-way subway fare is $${MBTA_SUBWAY_FARE.toFixed(2)} when riding to another stop.`,
+  'When the user asks to open, show, compare, filter, or navigate, call the appropriate tool to change Vantage before you confirm the action. Use list_places for exact venue and dish IDs. Speak names, never IDs.',
   'Each tool result includes currentView. If a request depends on what the user is looking at or has selected, call get_current_view first to check for manual changes since the previous result. The initial app state is a snapshot from when voice connected.',
   'For 3D dish comparisons, including in VR and across different restaurants, call open_dish with placeId, dishId, and compareDishId. Include comparePlaceId when known. This places both foods side by side on the bistro table.',
   'Use recommend_places, search_dishes and get_station_overview to narrow choices by Boston opening hours, fare-inclusive budget, travel time, transfers, walking distance, group fit, ratings, awards, 3D previews and MBTA alerts. Use openAt for a planned day and time. Verify finalists with get_place_details, get_live_reviews and get_transit_info, especially the last train back for evening plans. When a dish price is null, check get_live_menu_prices before quoting a price.',

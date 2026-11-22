@@ -149,7 +149,7 @@ class ReviewSheet {
       this.text.value = '';
       this.renderPicker();
       this.render();
-      this.thanks.textContent = 'Thanks. Everyone sees your review once a FareSight admin approves it.';
+      this.thanks.textContent = 'Thanks. Everyone sees your review once a Vantage admin approves it.';
     } catch (error) {
       this.fail(errorText(error));
     } finally {

@@ -62,8 +62,8 @@ export function attribution(openModeration: () => void) {
   const privacy = section('Photos and privacy');
   privacy.append(
     element('p', '', 'Upload photos you own or have permission to use. Avoid faces, addresses, and other private details. In live mode, the generation services may receive your photos to select references or produce a 3D preview.'),
-    element('p', '', 'The team reviews previews before they appear in the restaurant catalog. To request removal of a photo, preview, or visit note, contact the FareSight team at the demo with the venue and item name.'),
-    element('p', '', 'GPS is optional. FareSight uses your position to find a nearby stop and estimate the walk there. Pairing shares the venue or trip you choose with the device using your code.'),
+    element('p', '', 'The team reviews previews before they appear in the restaurant catalog. To request removal of a photo, preview, or visit note, contact the Vantage team at the demo with the venue and item name.'),
+    element('p', '', 'GPS is optional. Vantage uses your position to find a nearby stop and estimate the walk there. Pairing shares the venue or trip you choose with the device using your code.'),
     element('p', '', 'Live AI voice streams your microphone audio directly to OpenAI over WebRTC only while a live session is active. End the session at any time to disconnect the microphone.'),
   );
   surface.body.append(credits, roomCredits, dishCredits,

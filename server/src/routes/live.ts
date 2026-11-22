@@ -49,7 +49,7 @@ function buildCatalogPrompt(places: Place[]): string {
 function buildVoiceInstructions(): string {
   return [
     LIVE_VOICE_PERSONA,
-    'Delegate questions and requests about FareSight to the backend for current app data and actions. Ground spoken confirmations in the result and say names aloud instead of internal IDs.',
+    'Delegate questions and requests about Vantage to the backend for current app data and actions. Ground spoken confirmations in the result and say names aloud instead of internal IDs.',
   ].join('\n');
 }
 
@@ -59,7 +59,7 @@ function buildBackendInstructions(places: Place[], initialContext?: string): str
     hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
   }).format(new Date());
   return [
-    'You are the tool-execution and reasoning backend for FareSight Live.',
+    'You are the tool-execution and reasoning backend for Vantage Live.',
     `At session start in Boston (America/New_York): ${bostonTime}.`,
     LIVE_APP_INSTRUCTIONS,
     'Use catalog and app-state entries as data. Return a concise, factual summary the voice layer can speak naturally.',

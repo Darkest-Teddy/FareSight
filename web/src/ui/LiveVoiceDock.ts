@@ -56,7 +56,7 @@ export class LiveVoiceDock {
     this.trigger.append(glyph, this.triggerLabel);
 
     this.root.id = 'faresight-voice-dock';
-    this.root.setAttribute('aria-label', 'FareSight Live Voice Assistant');
+    this.root.setAttribute('aria-label', 'Vantage Live Voice Assistant');
     this.root.hidden = true;
 
     const head = element('header', 'voice-head');
@@ -86,8 +86,8 @@ export class LiveVoiceDock {
     this.feed.setAttribute('aria-live', 'polite');
 
     this.input.type = 'text';
-    this.input.placeholder = 'Ask FareSight…';
-    this.input.setAttribute('aria-label', 'Message FareSight');
+    this.input.placeholder = 'Ask Vantage…';
+    this.input.setAttribute('aria-label', 'Message Vantage');
     this.input.setAttribute('aria-describedby', this.statusBadge.id);
     this.sendBtn = element('button', '', 'Send');
     this.sendBtn.type = 'submit';
@@ -209,7 +209,7 @@ export class LiveVoiceDock {
     this.hasTranscript = true;
     const row = element('div', `voice-entry voice-entry-${entry.kind}`);
     if (entry.id) row.dataset.entryId = entry.id;
-    const who = entry.kind === 'user' ? 'You' : entry.kind === 'assistant' ? 'FareSight' : 'Action';
+    const who = entry.kind === 'user' ? 'You' : entry.kind === 'assistant' ? 'Vantage' : 'Action';
     row.append(element('span', 'voice-who', who), element('p', '', entry.text));
     this.feed.append(row);
     if (this.feed.childElementCount > 40) this.feed.firstElementChild?.remove();

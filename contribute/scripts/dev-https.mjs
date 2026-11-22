@@ -20,7 +20,7 @@ if (!reusable) {
   mkdirSync(dir, { recursive: true });
   execFileSync('openssl', [
     'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '30',
-    '-subj', '/CN=FareSight Contribute (development)',
+    '-subj', '/CN=Vantage Contribute (development)',
     '-addext', 'subjectAltName=' + hosts, '-addext', 'extendedKeyUsage=serverAuth',
     '-keyout', dir + 'key.pem', '-out', dir + 'cert.pem',
   ], { stdio: 'ignore' });
