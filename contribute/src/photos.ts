@@ -4,8 +4,9 @@ const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp'];
 const LIMIT = 7.5 * 1024 * 1024;
 const attempts: [longEdge: number, quality: number][] = [[3072, 0.88], [2048, 0.82], [1440, 0.76]];
 
-export async function prepareImage(file: File): Promise<File> {
-  if (ACCEPTED.includes(file.type) && file.size <= LIMIT) return file;
+/** `jpegOnly` is for captures sent to object storage, which keeps every frame as a JPEG. */
+export async function prepareImage(file: File, jpegOnly = false): Promise<File> {
+  if ((jpegOnly ? file.type === 'image/jpeg' : ACCEPTED.includes(file.type)) && file.size <= LIMIT) return file;
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });

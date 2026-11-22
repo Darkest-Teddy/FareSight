@@ -1,14 +1,16 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { MAX_ROOM_PHOTOS, ROOM_MODEL_TIERS, ROOM_PHOTO_REQUIREMENT } from '@faresight/shared';
-import type { Dish, GenerationJob, RoomModelTier, Vector3 } from '@faresight/shared';
+import type { RoomModelTier } from '@faresight/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { pipelineProvider } from '../config.ts';
 import type { Config } from '../config.ts';
 import { publicJob } from '../db/database.ts';
 import type { JobRecord, Store } from '../db/database.ts';
 import { selectReferencePhotos } from '../services/geminiSelector.ts';
 import { decodeImageBase64, MAX_IMAGE_BYTES, prepareImage } from '../services/imagePrep.ts';
-import { measureScale } from '../services/splatProcessor.ts';
+import { publishAsset } from '../services/publish.ts';
+import type { PublishOptions } from '../services/publish.ts';
 
 interface ImageFields { filename: string; mimeType: string; place_id: string; dish_id?: string; source_url?: string }
 interface UploadBody extends ImageFields { dataBase64: string }
@@ -20,15 +22,15 @@ interface JobBody extends IntakeBody {
   plate_diameter_m?: number;
   model_tier?: RoomModelTier;
 }
-interface PublishBody { spawn_point?: Vector3; plate_diameter_m?: number; rotation_y?: number; approve?: boolean }
+interface PublishBody extends PublishOptions { approve?: boolean }
 
 const idSchema = { type: 'string', minLength: 1, maxLength: 96 };
 const idList = (maxItems: number) => ({ type: 'array', minItems: 1, maxItems, uniqueItems: true, items: idSchema });
 const plateSize = { type: 'number', exclusiveMinimum: 0, maximum: 2 };
-const defaultVector: Vector3 = [0, 0, 0];
 
-export function registerPipeline(app: FastifyInstance, store: Store, config: Config) {
-  async function admin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+/** Pre-handler that requires the admin passcode on writes. Open when no passcode is configured. */
+export function adminGuard(config: Config) {
+  return async function admin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     if (!config.adminPasscode) return;
     const provided = request.headers['x-admin-passcode'] ?? request.headers.authorization?.replace(/^Bearer /i, '');
     const expected = Buffer.from(config.adminPasscode);
@@ -36,7 +38,11 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
       || !timingSafeEqual(Buffer.from(provided), expected)) {
       reply.code(401).send({ error: 'Admin passcode is required' });
     }
-  }
+  };
+}
+
+export function registerPipeline(app: FastifyInstance, store: Store, config: Config) {
+  const admin = adminGuard(config);
 
   app.post<{ Body: UploadBody }>('/api/uploads', { preHandler: admin }, async (request, reply) => {
     let input: ImageFields & { bytes: Buffer };
@@ -117,11 +123,9 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
     if (body.kind === 'dish' && (uploads.length !== 1 || (body.dish_id && !dish))) {
       return reply.code(400).send({ error: 'Dish generation requires one image and any supplied dish_id must belong to the place' });
     }
-    const key = body.kind === 'room' ? config.atlasKey : config.replicateKey;
-    let provider: GenerationJob['provider'] = body.kind === 'room' ? 'atlas-v2' : 'trellis-replicate';
-    if (config.mode === 'demo' || (config.mode === 'auto' && !key)) provider = 'demo-sim';
+    const { provider, missingKey } = pipelineProvider(config, body.kind);
     if (provider === 'atlas-v2' && uploads.length < 2) return reply.code(400).send({ error: ROOM_PHOTO_REQUIREMENT });
-    if (config.mode === 'live' && !key) return reply.code(503).send({ error: `Missing API credentials for ${provider}` });
+    if (missingKey) return reply.code(503).send({ error: `Missing API credentials for ${provider}` });
     const now = new Date().toISOString();
     const job: JobRecord = {
       id: randomUUID(), kind: body.kind, place_id: place.id,
@@ -197,36 +201,7 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
     const place = store.get('places', job.place_id);
     if (!place) return reply.code(404).send({ error: 'Place not found' });
     if (job.status === 'ready') return asset;
-    if (job.kind === 'dish' && body.plate_diameter_m !== undefined) {
-      Object.assign(asset, measureScale(body.plate_diameter_m, asset.metadata?.measured_width));
-    }
-    asset.spawn_point = body.spawn_point ?? asset.spawn_point;
-    const rotation = asset.transform?.rotation ?? defaultVector;
-    asset.transform = {
-      position: asset.transform?.position ?? defaultVector,
-      rotation: [rotation[0], body.rotation_y ?? rotation[1], rotation[2]], scale: asset.scale_factor,
-    };
-    asset.status = 'ready';
-    if (job.kind === 'room') {
-      for (const room of place.rooms) {
-        if (room.asset_id === place.room_asset_id) room.asset_id = asset.id;
-      }
-      place.room_asset_id = asset.id;
-    } else {
-      const name = job.dish_name!;
-      let dish = place.dishes.find((entry) => entry.id === job.dish_id || entry.name.toLowerCase() === name.toLowerCase());
-      if (!dish) {
-        dish = { id: `${place.id}-dish-${job.id}`, place_id: place.id, name, price: null, portion_note: '' } satisfies Dish;
-        place.dishes.push(dish);
-      }
-      dish.asset_id = asset.id;
-      dish.plate_diameter_m = asset.plate_diameter_m ?? dish.plate_diameter_m;
-      job.dish_id = dish.id;
-      job.plate_diameter_m = asset.plate_diameter_m;
-    }
-    store.put('assets', asset);
-    store.put('places', place);
-    store.updateJob(job, { status: 'ready', status_message: 'Published', progress: 100 });
+    publishAsset(store, job, asset, place, body);
     return asset;
   }));
 }
