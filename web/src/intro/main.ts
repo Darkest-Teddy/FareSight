@@ -1,4 +1,4 @@
-import { IntroScene } from './IntroScene';
+import { IntroScene, ROOM_START } from './IntroScene';
 
 /**
  * Scroll is the only input. The page is a tall, empty track; the canvas and the copy are fixed
@@ -13,6 +13,7 @@ const canvas = document.querySelector<HTMLCanvasElement>('#stage')!;
 const veil = document.querySelector<HTMLElement>('.veil')!;
 const meter = document.querySelector<HTMLElement>('.meter')!;
 const status = document.querySelector<HTMLElement>('.status')!;
+const roomTag = document.querySelector<HTMLElement>('.room-tag')!;
 const chapterLinks = [...document.querySelectorAll<HTMLAnchorElement>('.chapters a')];
 
 interface Beat {
@@ -37,6 +38,7 @@ const beats: Beat[] = [...document.querySelectorAll<HTMLElement>('.beat')].map((
 
 const ramp = (value: number, from: number, to: number): number => {
   if (to <= from) return value >= to ? 1 : 0;
+  if (reducedMotion.matches) return Number(value >= (from + to) / 2);
   const t = Math.max(0, Math.min((value - from) / (to - from), 1));
   return t * t * (3 - 2 * t);
 };
@@ -55,7 +57,7 @@ function frame(dt: number): number {
   const goal = scrolled();
   eased += (goal - eased) * (reducedMotion.matches ? 1 : 1 - Math.exp(-dt * 5.2));
   if (Math.abs(goal - eased) < 0.00005) eased = goal;
-  if (body.dataset.state === 'ready') opening = Math.min(1, opening + dt / 1.1);
+  if (body.dataset.state === 'ready') opening = reducedMotion.matches ? 1 : Math.min(1, opening + dt / 1.1);
 
   for (const beat of beats) {
     const arrive = ramp(eased, ...beat.enter);
@@ -69,7 +71,9 @@ function frame(dt: number): number {
     beat.copy.style.transform = `translate3d(0, ${drift.toFixed(2)}px, 0)`;
   }
 
-  veil.style.opacity = (ramp(eased, 0.945, 1) * 0.9).toFixed(3);
+  const interior = body.dataset.room === 'ready' ? ramp(eased, ROOM_START, 0.98) : 0;
+  veil.style.opacity = (interior * 0.38).toFixed(3);
+  root.style.setProperty('--interior', interior.toFixed(3));
   meter.style.transform = `scaleX(${eased.toFixed(4)})`;
   const current = eased < 0.36 ? 'map' : eased < 0.82 ? 'station' : eased < 0.955 ? 'place' : 'inside';
   if (current !== chapter) {
@@ -101,14 +105,19 @@ function playWithoutStage(): void {
 }
 
 const scene = new IntroScene(canvas, frame);
-scene.init().then(() => {
+scene.init().then((roomReady) => {
+  body.dataset.room = roomReady ? 'ready' : 'missing';
+  if (!roomReady) roomTag.textContent = '3D interior unavailable';
   body.dataset.state = 'ready';
   status.hidden = true;
+  scene.start();
 }).catch((error: unknown) => {
   console.error(error);
   scene.destroy();
   body.dataset.state = 'ready';
   body.dataset.stage = 'missing';
+  roomTag.textContent = '3D interior unavailable';
   status.textContent = 'The 3D model could not load on this device. The app still works.';
   playWithoutStage();
 });
+window.addEventListener('pagehide', (event) => { if (!event.persisted) scene.destroy(); });

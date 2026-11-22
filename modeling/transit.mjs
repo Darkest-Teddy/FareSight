@@ -53,7 +53,7 @@ const join = (text) =>
     const [name, y] = s.split('@');
     return [name, Number(y)];
   });
-const routes = [
+export const routes = [
   [
     'green-b',
     'Green-B',
@@ -351,6 +351,34 @@ function stationDot(white, colour, [x, , z], deck, tint) {
   });
 }
 
+// Center and half-width of the Charles, from the Allston bend to the harbor mouth.
+export const riverBanks = [
+  [-0.739, -0.058, 0.028],
+  [-0.63, -0.083, 0.036],
+  [-0.537, -0.166, 0.032],
+  [-0.535, -0.268, 0.033],
+  [-0.459, -0.334, 0.028],
+  [-0.355, -0.309, 0.029],
+  [-0.298, -0.253, 0.027],
+  [-0.266, -0.191, 0.029],
+  [-0.276, -0.12, 0.03],
+  [-0.234, -0.064, 0.03],
+  [-0.165, -0.032, 0.026],
+  [-0.066, -0.014, 0.036],
+  [0.055, -0.033, 0.047],
+  [0.188, -0.084, 0.052],
+  [0.246, -0.145, 0.048],
+  [0.274, -0.196, 0.042],
+  [0.309, -0.235, 0.03],
+  [0.368, -0.258, 0.031],
+  [0.428, -0.29, 0.035],
+  [0.506, -0.302, 0.057],
+  [0.578, -0.27, 0.092],
+  [0.625, -0.179, 0.105],
+  [0.65, -0.065, 0.088],
+  [0.678, 0.038, 0.065],
+  [0.726, 0.112, 0.037],
+];
 export function mapSculpture(dir) {
   const m = new Model();
   const batch = (name, options) => m.surface(m.material(name, options));
@@ -553,51 +581,154 @@ export function accessories(dir) {
       '#fff4bb',
     );
   // The shared capsule is retired: every line now has its own model in trains.mjs.
-  const m = new Model(),
-    slate = m.surface(m.material('Honed graphite', { rough: 0.75 })),
-    steel = m.surface(
-      m.material('Spun aluminium', { metal: 0.82, rough: 0.31 }),
-    ),
-    glow = m.surface(
-      m.material('Cyan photoluminescent inlay', { emission: '#378f96' }),
-    );
-  loft(
-    steel,
-    [
-      circle(0, -0.042, 0, 0.435, 96),
-      circle(0, -0.034, 0, 0.45, 96),
-      circle(0, -0.007, 0, 0.45, 96),
-      circle(0, -0.004, 0, 0.447, 96),
-    ],
-    '#667787',
-  );
-  loft(
-    slate,
-    [circle(0, -0.004, 0, 0.447, 96), circle(0, 0, 0, 0.445, 96)],
-    '#303e48',
-    { top: false },
-  );
-  // Cut the scale rings into the coplanar top to avoid z-fighting or raised plates.
-  const radii = [0, 0.0994, 0.1006, 0.1494, 0.1506, 0.445];
-  for (let k = 1; k < radii.length; k++) {
-    const inner = circle(0, 0, 0, radii[k - 1], 120),
-      outer = circle(0, 0, 0, radii[k], 120);
-    const surf = k === 2 || k === 4 ? glow : slate;
-    for (let j = 0; j < 120; j++) {
-      const l = (j + 1) % 120,
-        clr = surf === glow ? '#83d4d5' : '#303e48';
-      if (k === 1) face(surf, [[0, 0, 0], outer[l], outer[j]], clr);
-      else if ((k === 3 || k === 5) && j % 5 === 0) {
-        const tickR = radii[k - 1] + (j % 15 === 0 ? 0.008 : 0.004),
-          a = circle(0, 0, 0, tickR, 120);
-        const f = k === 3 ? 0.12 : 0.09;
-        const edgeI = mix(inner[j], inner[l], f),
-          edgeA = mix(a[j], a[l], f);
-        face(glow, [inner[j], edgeI, edgeA, a[j]], '#80bbbb');
-        face(slate, [edgeI, inner[l], a[l], edgeA], clr);
-        face(slate, [a[j], a[l], outer[l], outer[j]], clr);
-      } else face(surf, [inner[j], inner[l], outer[l], outer[j]], clr);
+  const m = new Model();
+  const walnut = m.surface(m.material('Satin quarter-sawn walnut', { rough: 0.36, metal: 0.04 }));
+  const brass = m.surface(m.material('Brushed brass', { rough: 0.28, metal: 0.78 }));
+  const inlay = m.surface(brass.material, 'Scale inlay');
+  const iron = m.surface(m.material('Graphite cast iron', { rough: 0.46, metal: 0.45 }));
+  const gold = '#c9a462', patina = '#b48d4c', casting = '#26282e';
+  const tau = 2 * Math.PI;
+
+  // Each glued stave samples a different stretch of the same straight-grained stock.
+  // Long pores follow the growth rings, with finer, broken fibres between them.
+  const { crc32, deflateSync } = process.getBuiltinModule('node:zlib');
+  const size = 512, pixels = Buffer.alloc((size * 3 + 1) * size);
+  function hash(x, y) {
+    let n = Math.imul(x, 374761393) + Math.imul(y, 668265263);
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+  }
+  function noise(x, y) {
+    const i = Math.floor(x), j = Math.floor(y);
+    let u = x - i, v = y - j;
+    u *= u * (3 - 2 * u);
+    v *= v * (3 - 2 * v);
+    const a = hash(i, j), b = hash(i, j + 1);
+    return (a + u * (hash(i + 1, j) - a)) * (1 - v) +
+      (b + u * (hash(i + 1, j + 1) - b)) * v;
+  }
+  for (let y = 0; y < size; y++) {
+    const board = Math.floor(y / 91), v = 1.5 * y + 557 * board;
+    for (let x = 0; x < size; x++) {
+      const u = 1.5 * x;
+      const wave = v + 19 * noise(u / 245, v / 82) + 4 * noise(u / 100, v / 36);
+      const rings = wave / 12 + 2 * noise(u / 400, v / 51);
+      const pore = (0.5 + 0.5 * Math.cos(tau * rings)) ** 7;
+      const tone = 16 * (noise(u / 180, wave / 15) - 0.5) +
+        11 * (noise(u / 22, wave / 1.9) - 0.5) - 11 * pore +
+        9 * (hash(board, 101) - 0.5) + 3 * (hash(x, y) - 0.5);
+      const i = y * (size * 3 + 1) + 1 + 3 * x;
+      pixels[i] = Math.round(88 + tone);
+      pixels[i + 1] = Math.round(60 + tone * 0.78);
+      pixels[i + 2] = Math.round(43 + tone * 0.61);
     }
   }
+  function pngChunk(tag, data) {
+    const chunk = Buffer.alloc(12 + data.length);
+    chunk.writeUInt32BE(data.length);
+    chunk.write(tag, 4);
+    data.copy(chunk, 8);
+    chunk.writeUInt32BE(crc32(chunk.subarray(4, -4)), chunk.length - 4);
+    return chunk;
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(size);
+  header.writeUInt32BE(size, 4);
+  header[8] = 8;
+  header[9] = 2;
+  m.textures.push({ name: 'Walnut staves', material: walnut.material,
+    bytes: Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'),
+      pngChunk('IHDR', header), pngChunk('IDAT', deflateSync(pixels)),
+      pngChunk('IEND', Buffer.alloc(0))]) });
+
+  // The two guides and their ticks replace pieces of the walnut surface at y = 0.
+  const sides = 60;
+  const radii = [0, 0.09955, 0.10045, 0.14955, 0.15045, 0.444];
+  const rings = radii.map((r) => circle(0, 0, 0, r, sides));
+  function topFace(surface, points) {
+    face(surface, points, surface === inlay ? '#d8b878' : '#ffffff',
+      surface === walnut ? points.map(([x, , z]) => [0.5 + x / 0.90, 0.5 + z / 0.90]) : undefined);
+  }
+  for (let k = 1; k < rings.length; k++) {
+    const inner = rings[k - 1], outer = rings[k];
+    for (let j = 0; j < sides; j++) {
+      const l = (j + 1) % sides;
+      if (k === 1) topFace(walnut, [[0, 0, 0], outer[l], outer[j]]);
+      else if (k === 2 || k === 4) topFace(inlay, [inner[j], inner[l], outer[l], outer[j]]);
+      else if (j % (sides / 12) === 0) {
+        const depth = (j % (sides / 4) === 0 ? 0.0055 : 0.0033) / (radii[k] - radii[k - 1]);
+        const tip = mix(inner[j], outer[j], depth), next = mix(inner[l], outer[l], depth);
+        const width = 0.0009 / (radii[k - 1] * tau / sides);
+        const start = mix(inner[j], inner[l], width), end = mix(tip, next, width);
+        topFace(inlay, [inner[j], start, end, tip]);
+        topFace(walnut, [start, inner[l], next, end]);
+        topFace(walnut, [tip, next, outer[l], outer[j]]);
+      } else topFace(walnut, [inner[j], inner[l], outer[l], outer[j]]);
+    }
+  }
+
+  // Revolve a joiner's or foundry profile from the bottom up. The optional third
+  // ordinate gives the depth of the eight flutes at that height, fading into collars.
+  function turn(surface, color, profile, count = 40) {
+    const rows = profile.map(([y, r, relief = 0, rise = 0]) => Array.from({ length: count }, (_, i) => {
+      const a = tau * i / count;
+      const flute = (0.5 + 0.5 * Math.cos(8 * a)) ** 2;
+      const radius = r + relief * flute;
+      return [radius * Math.cos(a), y + rise * flute, radius * Math.sin(a)];
+    }));
+    for (let j = 1; j < rows.length; j++) {
+      const lower = rows[j - 1], upper = rows[j];
+      const strip = lower.map((p, i) => {
+        const prev = (i + count - 1) % count, next = (i + 1) % count;
+        const [dx, dy, dz] = sub(upper[i], p);
+        const tx = (lower[next][0] - lower[prev][0]) + (upper[next][0] - upper[prev][0]);
+        const ty = (lower[next][1] - lower[prev][1]) + (upper[next][1] - upper[prev][1]);
+        const tz = (lower[next][2] - lower[prev][2]) + (upper[next][2] - upper[prev][2]);
+        const normal = norm([dy * tz - dz * ty, dz * tx - dx * tz, dx * ty - dy * tx]);
+        return [p, upper[i]].map((pos) => surface.vertex(pos, normal, color,
+          surface === walnut ? [0.5 + pos[0] / 0.90, 0.5 + (pos[2] + pos[1]) / 0.90] : undefined));
+      });
+      for (let i = 0; i < count; i++) {
+        const [a, b] = strip[i], [c, d] = strip[(i + 1) % count];
+        surface.indices.push(a, b, d, a, d, c);
+      }
+    }
+  }
+  turn(walnut, '#ffffff', [
+    [-0.062, 0.105], [-0.062, 0.332], [-0.058, 0.34], [-0.036, 0.34], [-0.036, 0.44],
+  ], sides);
+  turn(brass, gold, [
+    [-0.036, 0.44], [-0.033, 0.447], [-0.029, 0.45], [-0.025, 0.448],
+    [-0.007, 0.448], [-0.004, 0.45], [-0.0015, 0.449], [0, 0.444],
+  ], sides);
+
+  // Low domed rivets sit on the recessed fascia, inside the rolled edge's envelope.
+  for (let i = 0; i < 24; i++) {
+    const a = (i + 0.5) * tau / 24, ca = Math.cos(a), sa = Math.sin(a);
+    const head = Array.from({ length: 8 }, (_, j) => {
+      const angle = tau * j / 8, t = 0.0021 * Math.cos(angle);
+      return [0.4475 * ca - t * sa, -0.016 + 0.0021 * Math.sin(angle), 0.4475 * sa + t * ca];
+    });
+    const crown = [0.4497 * ca, -0.016, 0.4497 * sa];
+    for (let j = 0; j < head.length; j++) face(brass, [head[(j + 1) % 8], head[j], crown], '#ddbd7d');
+  }
+
+  face(iron, circle(0, -0.740, 0, 0.249, 40), casting);
+  turn(iron, casting, [[-0.740, 0.249], [-0.729, 0.260], [-0.724, 0.260]]);
+  turn(brass, patina, [[-0.724, 0.260], [-0.720, 0.260], [-0.717, 0.256]]);
+  turn(iron, casting, [
+    [-0.717, 0.256], [-0.711, 0.249], [-0.708, 0.225], [-0.699, 0.214, 0.002, 0.0015],
+    [-0.690, 0.157, 0.007, 0.010], [-0.666, 0.096, 0.009, 0.013], [-0.641, 0.074, 0.004, 0.008], [-0.626, 0.071],
+  ]);
+  turn(brass, gold, [[-0.626, 0.071], [-0.623, 0.075], [-0.616, 0.075], [-0.611, 0.063]]);
+  turn(iron, casting, [
+    [-0.611, 0.063], [-0.601, 0.060], [-0.584, 0.048, 0.004], [-0.55, 0.042, 0.005],
+    [-0.218, 0.036, 0.004], [-0.197, 0.040], [-0.188, 0.051],
+  ]);
+  turn(brass, gold, [[-0.188, 0.051], [-0.184, 0.054], [-0.178, 0.054], [-0.175, 0.050]]);
+  turn(iron, casting, [
+    [-0.175, 0.050], [-0.160, 0.048], [-0.13, 0.054, 0.004],
+    [-0.099, 0.085, 0.005], [-0.082, 0.108], [-0.061, 0.108],
+  ]);
   m.save(dir + 'table-pedestal.glb');
 }

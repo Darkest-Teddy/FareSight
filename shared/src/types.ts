@@ -40,6 +40,37 @@ export interface Place {
   seat_views: SeatView[];
   reviews: Review[];
   seed_status?: 'demo_venue' | 'planning_estimate';
+  details?: PlaceDetails;
+}
+
+/** Researched public facts about a real venue, with sources. */
+export interface PlaceDetails {
+  checked_on: string;
+  address: string | null;
+  website: string | null;
+  phone: string | null;
+  /** False when no reliable published schedule was found and `hours` are planning estimates. */
+  hours_verified: boolean;
+  hours_note: string | null;
+  hours_source: string | null;
+  awards: PlaceAward[];
+  ratings: PlaceRating[];
+  review_highlights: string[];
+  review_sources: string[];
+}
+
+export interface PlaceAward {
+  title: string;
+  org: string;
+  year: number | null;
+  url: string | null;
+}
+
+export interface PlaceRating {
+  source: string;
+  rating: number;
+  count: number | null;
+  url: string | null;
 }
 
 export interface Dish {
@@ -83,6 +114,7 @@ export interface Review {
   rating: number;
   text: string;
   author: string;
+  sample?: boolean;
   created_at: string;
 }
 

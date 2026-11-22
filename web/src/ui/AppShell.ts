@@ -6,12 +6,18 @@ import { createFareSightEngine, type FareSightSceneEngine, type SceneMode } from
 import { SoundEngine } from '../audio/SoundEngine';
 import { api, type PairMessage, type Trip } from '../api/client';
 import { offlineCatalog, offlineManifest } from '../data/fallbackData';
+import { countPreviewsByStop, describe3DCount, isSplat } from '../data/preview3D';
+import { buildComparisonBriefingCard, buildPlaceBriefingCard, loadPlaceDecision, maxBriefingCards, placeDecision, type BriefingCard, type BriefingMode } from '../data/reviewBriefing';
+import { LiveController, type AppControlSurface } from '../live/LiveController';
+import { RealtimeVoice } from '../voice/RealtimeVoice';
 import { AdminModal } from './AdminModal';
 import { attribution } from './AttributionModal';
-import { button, element, errorText, link, message, modal } from './dom';
+import { button, element, errorText, link, message, modal, previewBadge } from './dom';
 import { FilterBar } from './FilterBar';
+import { LiveVoiceDock } from './LiveVoiceDock';
+import { ReviewBriefingModal } from './ReviewBriefingModal';
 import { PairingModal } from './PairingModal';
-import { lineDots, PlaceDrawer, type Seating, type StationData, type ViewData } from './PlaceDrawer';
+import { lineDots, PlaceDrawer, type DishComparison, type Seating, type StationData, type ViewData } from './PlaceDrawer';
 import { initialFilters, matchingPlaces, placesAt, type Filters } from './state';
 import { UploadPipelineModal } from './UploadPipelineModal';
 
@@ -32,6 +38,15 @@ export class AppShell {
   private readonly drawer: PlaceDrawer;
   private readonly pairing: PairingModal;
   private readonly uploader: UploadPipelineModal;
+  private readonly credits: ReturnType<typeof attribution>;
+  private readonly liveController: LiveController;
+  private readonly liveClient: RealtimeVoice;
+  private readonly liveDock: LiveVoiceDock;
+  private readonly reviewModal: ReviewBriefingModal;
+  private readonly briefings = new Map<string, BriefingCard>();
+  private comparedPlaces: Place[] = [];
+  private comparisonRun = 0;
+  private comparisonLoading = false;
   private readonly debug = modal('Debug');
   private readonly renderStats = element('p', 'readout');
   private readonly debugLogs = element('pre', 'log-view');
@@ -59,7 +74,8 @@ export class AppShell {
   private stop?: Stop;
   private place?: Place;
   private dish?: Dish;
-  private compareId = '';
+  private comparison?: DishComparison;
+  private dishRequest = 0;
   private inside = false;
   private fit = false;
   private seating: Seating = 'seated';
@@ -81,6 +97,9 @@ export class AppShell {
   private noticeTimer?: number;
   private syncingTransit = false;
   private xrMode: 'none' | 'vr' | 'ar' = 'none';
+  private highlightedStops: string[] = [];
+  private highlightedPlaces: string[] = [];
+  private highlightedDishId?: string;
 
   constructor(private readonly root: HTMLElement) {
     root.classList.add('app-shell');
@@ -99,14 +118,45 @@ export class AppShell {
     this.audioButton = button('Audio off', () => this.toggleAudio(), 'quiet');
     this.audioButton.setAttribute('aria-pressed', 'false');
     const admin = new AdminModal(() => void this.loadCatalog());
-    const credits = attribution(() => admin.open());
+    this.credits = attribution(() => admin.open());
+    this.reviewModal = new ReviewBriefingModal({
+      dismiss: (cardId) => this.dismissReviewCard(cardId),
+      openVenue: (id) => { void this.openBriefingVenue(id); },
+      openDish: (id, dishId) => { void this.openBriefingVenue(id, dishId); },
+      compareDishes: (id, dishId, comparePlaceId, compareDishId) => { void this.openBriefingVenue(id, dishId, compareDishId, comparePlaceId); },
+      viewOnMap: (stopId) => {
+        this.dismissReviewCard();
+        this.showMap();
+        void this.sceneQueue.then(() => { if (this.mode === 'map') this.engine?.focusMapStopCamera(stopId); });
+      },
+    });
+    this.liveController = new LiveController(this.createControlSurface());
+    this.liveClient = new RealtimeVoice({
+      onState: (state, detail) => {
+        this.liveDock.setState(state, detail);
+        this.engine?.setVoiceState(state);
+      },
+      onTranscript: (entry) => this.liveDock.appendTranscript(entry),
+      onTool: (name, args) => this.liveController.executeRealtime(name, args),
+      getContext: () => this.liveController.describeContext(),
+    });
+    this.liveDock = new LiveVoiceDock({
+      toggle: () => this.liveClient.toggle(),
+      stop: () => this.liveClient.stop(),
+      toggleMute: () => {
+        const next = !this.liveClient.isMuted;
+        this.liveClient.setMuted(next);
+        this.liveDock.setMuted(next);
+      },
+      sendText: (text) => this.liveClient.sendText(text),
+    });
     // Secondary tools live in one menu so the bar keeps a single clear call to action.
     this.moreMenu.id = 'command-menu';
     this.moreMenu.hidden = true;
     this.moreMenu.append(
       button('Upload 3D', () => this.uploader.open(this.place?.id), 'quiet desktop-action'),
       this.pairButton, this.audioButton, button('Debug', () => this.openDebug(), 'quiet desktop-debug'),
-      button('Credits', credits.open, 'quiet'),
+      button('Credits', this.credits.open, 'quiet'),
     );
     this.moreButton = button('More', () => this.setMenuOpen(this.moreMenu.hidden), 'quiet menu-toggle');
     this.moreButton.setAttribute('aria-haspopup', 'true');
@@ -125,7 +175,7 @@ export class AppShell {
       this.setMenuOpen(false);
       this.moreButton.focus();
     });
-    operations.append(this.vrButton, this.arButton, this.xrExit, more);
+    operations.append(this.liveDock.trigger, this.vrButton, this.arButton, this.xrExit, more);
     head.append(brand, this.breadcrumbs, operations);
 
     this.status.setAttribute('role', 'status');
@@ -145,11 +195,19 @@ export class AppShell {
 
     this.filterBar = new FilterBar(this.filters, (patch) => this.updateFilters(patch), () => this.locate(), () => this.setFilterOpen(false));
     this.drawer = new PlaceDrawer({
+      showBriefing: (place) => this.showPlaceBriefing(place),
+      toggleComparison: (place) => {
+        if (this.comparedPlaces.some(({ id }) => id === place.id)) this.setComparedPlaces(this.comparedPlaces.filter(({ id }) => id !== place.id));
+        else if (this.comparedPlaces.length < 3) this.setComparedPlaces([...this.comparedPlaces, place]);
+        else this.notify('Compare up to three restaurants. Remove one to add another.');
+      },
+      clearComparison: () => this.setComparedPlaces([]),
+      openComparison: () => void this.openRestaurantComparison(),
       close: () => { this.drawerOpen = false; this.renderPanels(); this.mobileButtons.get('Venue')?.focus(); },
       toggleSheet: () => { this.sheetExpanded = !this.sheetExpanded; this.renderPanels(); },
       showPlace: (place) => { void this.showVenue(place); },
       enterRoom: () => void this.enterRoom(),
-      openDish: (dish, compareId) => void this.showDish(dish, compareId),
+      openDish: (dish, compareId, comparePlaceId) => void this.showDish(dish, compareId, comparePlaceId),
       changeFit: (enabled, seating) => void this.setFit(enabled, seating),
       rotate: (degrees) => { this.rotation = degrees; this.engine?.setDishRotation(degrees * Math.PI / 180); },
       table: (useVirtual) => this.setTable(useVirtual),
@@ -182,7 +240,7 @@ export class AppShell {
       this.mobileButtons.set(label, tab);
     }
 
-    root.replaceChildren(this.canvas, this.canvasNotice, head, indicators, this.stationBoard, this.filterBar.root, this.drawer.root, tabs, this.notice);
+    root.replaceChildren(this.canvas, this.canvasNotice, head, indicators, this.stationBoard, this.filterBar.root, this.drawer.root, this.liveDock.root, tabs, this.notice);
     this.debug.body.append(this.renderStats, this.debugLogs,
       button('Reset camera', () => this.engine?.resetCamera()),
       button('Send debug logs', () => void this.sendDebugLogs(), 'quiet'));
@@ -206,7 +264,10 @@ export class AppShell {
     }, pollInterval);
     window.addEventListener('online', () => { void this.loadCatalog(); void this.refreshTransit(); });
     window.addEventListener('resize', () => this.engine?.resize());
-    window.addEventListener('pagehide', (event) => { if (!event.persisted) this.engine?.destroy(); });
+    window.addEventListener('pagehide', (event) => {
+      this.liveClient.destroy();
+      if (!event.persisted) this.engine?.destroy();
+    });
     try {
       this.engine = createFareSightEngine(this.canvas, {
         onSelectStop: (id) => { const stop = this.findStop(id); if (stop) this.showStation(stop); },
@@ -217,8 +278,14 @@ export class AppShell {
         },
         onSelectPlace: (id) => { const place = this.places.find((entry) => entry.id === id); if (place) void this.showVenue(place); },
         onSelectDish: (id) => { const dish = this.manifest.data?.menu_items.find((entry) => entry.dish.id === id)?.dish; if (dish) void this.showDish(dish); },
+        onCompareDish: (id, placeId) => {
+          if (this.mode === 'dish' && this.dish) void this.showDish(this.dish, this.comparison?.dish.id === id ? '' : id, placeId);
+        },
         onNavigateScene: (mode) => { if (!this.busyScene && mode !== this.mode) this.navigate(mode); },
+        onToggleVoice: () => this.liveClient.toggle(),
+        onDismissReviewCard: (cardId) => this.dismissReviewCard(cardId),
         onXrStateChange: (state) => {
+          const changed = this.xrMode !== state.activeMode;
           this.xrMode = state.activeMode;
           this.root.dataset.xr = this.xrMode;
           this.vrButton.hidden = this.xrMode !== 'none';
@@ -233,6 +300,7 @@ export class AppShell {
             : state.activeMode === 'vr' ? 'VR active'
               : /Quest|OculusBrowser/i.test(navigator.userAgent) ? 'Quest browser'
                 : state.vrSupported || state.arSupported ? 'WebXR available' : 'Desktop 3D';
+          if (changed) this.renderReviewCards();
         },
         onStatsUpdate: (stats) => {
           this.renderStats.textContent = `${Math.round(stats.fps)} FPS · ${stats.loadedSplats} splats loaded · ${stats.activeAssetLabel}`;
@@ -241,8 +309,12 @@ export class AppShell {
       });
       await this.engine.init();
       this.engineReady = true;
+      this.engine.setVoiceState(this.liveClient.state);
       this.canvasNotice.hidden = true;
       this.engine.setStops(this.stops);
+      if (this.highlightedStops.length) this.engine.setHighlightedStops(this.highlightedStops, false);
+      if (this.highlightedPlaces.length) this.engine.setHighlightedPlaces(this.highlightedPlaces);
+      if (this.highlightedDishId) this.engine.setHighlightedDish(this.highlightedDishId);
       this.applyFilters();
       this.renderScene();
       void this.refreshTransit();
@@ -325,20 +397,24 @@ export class AppShell {
     this.breadcrumbs.replaceChildren(...nodes);
   }
 
-  private renderStationBoard() {
-    const key = JSON.stringify([this.filters.familyVisit, ...this.stops.map((stop) => [
-      stop.stop_id, this.filtered.filter((place) => place.stop_id === stop.stop_id).length,
-    ])]);
+  private renderStationBoard(matched: ReadonlySet<string>) {
+    const counts = countPreviewsByStop(this.places, matched);
+    const key = JSON.stringify([this.filters.familyVisit, this.highlightedStops, ...this.stops.map((stop) => [stop.stop_id, counts.get(stop.stop_id)])]);
     if (this.stationList.dataset.summary === key) return;
     this.stationList.dataset.summary = key;
     this.stationList.replaceChildren();
+    const highlighted = new Set(this.highlightedStops);
     for (const stop of this.stops) {
-      const count = this.filtered.filter((place) => place.stop_id === stop.stop_id).length;
+      const previews = counts.get(stop.stop_id);
+      const count = previews?.matching ?? 0;
       if (this.filters.familyVisit && count === 0) continue;
       const row = button('', () => this.showStation(stop), 'station-row');
-      row.append(lineDots(stop), element('strong', '', stop.name), element('span', 'station-count', String(count)));
-      row.setAttribute('aria-label', `${stop.name}, ${count} matching ${count === 1 ? 'place' : 'places'}`);
+      const name = element('strong', '', stop.name);
+      if (previews?.published3D) name.append(previewBadge());
+      row.append(lineDots(stop), name, element('span', 'station-count', String(count)));
+      row.setAttribute('aria-label', `${stop.name}, ${count} matching ${count === 1 ? 'place' : 'places'}${describe3DCount(previews)}`);
       row.dataset.stop = stop.stop_id;
+      row.dataset.highlighted = String(highlighted.has(stop.stop_id));
       // Mirror list focus on the 3D map so the two read as one control.
       for (const type of ['pointerenter', 'focus']) row.addEventListener(type, () => this.engine?.setHoveredStop(stop.stop_id));
       for (const type of ['pointerleave', 'blur']) row.addEventListener(type, () => this.engine?.setHoveredStop(undefined));
@@ -364,16 +440,18 @@ export class AppShell {
   }
 
   private renderDrawer(focus = false) {
+    this.drawer.setComparison(this.comparedPlaces, this.comparisonLoading);
     if (!this.drawerOpen || (this.mobile.matches && this.filterOpen)) return;
     if (this.mode === 'station' && this.stop) {
-      this.drawer.station(this.stop, placesAt(this.filtered, this.stop, this.filters), this.filters, focus);
+      this.drawer.station(this.stop, placesAt(this.filtered, this.stop, this.filters), this.filters, focus, new Set(this.highlightedPlaces));
       this.updateStationDrawer();
     }
     if ((this.mode === 'venue' || this.mode === 'dish') && this.place) {
       this.drawer.venue({
         place: this.place, stop: this.stop, filters: this.filters, manifest: this.manifest, trip: this.trip, dish: this.dish,
-        compareId: this.compareId, fit: this.fit, seating: this.seating, rotation: this.rotation, inside: this.inside,
+        places: this.places, comparison: this.comparison, fit: this.fit, seating: this.seating, rotation: this.rotation, inside: this.inside,
         table: this.virtualTable ? 'virtual' : 'passthrough', originName: this.findStop(this.filters.startStopId)?.name,
+        highlightedDishId: this.highlightedDishId,
       }, focus);
     }
   }
@@ -390,16 +468,18 @@ export class AppShell {
     this.filters = { ...this.filters, ...patch };
     this.applyFilters();
     if (originChanged) void this.refreshTrip();
+    this.syncLiveContext();
   }
 
   private applyFilters() {
     this.filtered = matchingPlaces(this.places, this.filters);
+    const matched = new Set(this.filtered.map((place) => place.id));
     this.filterBar.render(this.filters, this.filtered.length);
-    this.renderStationBoard();
+    this.renderStationBoard(matched);
     this.renderDrawer();
     if (!this.engineReady) return;
     this.engine?.setFilters(this.filters);
-    this.engine?.setPlaces(this.places, new Set(this.filtered.map((place) => place.id)));
+    this.engine?.setPlaces(this.places, matched);
     if (this.fit && this.inside) this.engine?.setWillWeFit(true, this.filters.groupSize, this.seating);
   }
 
@@ -422,7 +502,7 @@ export class AppShell {
     if (mode === 'map') this.showMap();
     if (mode === 'station' && this.stop) this.showStation(this.stop);
     if (mode === 'venue' && this.place) void this.showVenue(this.place);
-    if (mode === 'dish' && this.dish) void this.showDish(this.dish, this.compareId);
+    if (mode === 'dish' && this.dish) void this.showDish(this.dish, this.comparison?.dish.id, this.comparison?.place.id);
   }
 
   private showMap() {
@@ -433,6 +513,7 @@ export class AppShell {
     this.renderBreadcrumbs();
     this.renderPanels();
     this.renderScene();
+    this.syncLiveContext();
   }
 
   private showStation(stop: Stop) {
@@ -444,6 +525,8 @@ export class AppShell {
     this.stop = stop;
     this.place = undefined;
     this.dish = undefined;
+    this.comparison = undefined;
+    this.highlightedDishId = undefined;
     this.inside = this.fit = false;
     this.mode = 'station';
     this.filterOpen = false;
@@ -460,6 +543,7 @@ export class AppShell {
       void this.refreshStation();
       this.renderScene();
     }
+    this.syncLiveContext();
   }
 
   private updateStationDrawer() {
@@ -499,20 +583,24 @@ export class AppShell {
     }
   }
 
-  private async showVenue(place: Place) {
+  private async showVenue(place: Place, options?: { inside?: boolean }) {
     const changed = this.place?.id !== place.id;
     const cameFromDish = this.mode === 'dish';
     if (changed) {
       this.manifest = {};
       this.trip = {};
-      this.inside = true;
+      this.inside = options?.inside ?? true;
       this.fit = false;
       this.seating = 'seated';
+      this.highlightedDishId = undefined;
+    } else if (options?.inside !== undefined) {
+      this.inside = options.inside;
     }
     this.place = place;
     this.stop = this.findStop(place.stop_id);
     this.dish = undefined;
-    this.compareId = '';
+    this.comparison = undefined;
+    this.dishRequest++;
     this.mode = 'venue';
     this.filterOpen = false;
     this.drawerOpen = true;
@@ -524,22 +612,26 @@ export class AppShell {
     this.renderScene();
     void this.refreshTrip();
     if (changed || !this.manifest.data) await this.refreshManifest();
+    this.syncLiveContext();
   }
 
   private async refreshManifest() {
     if (!this.place) return;
     const place = this.place;
     const request = ++this.manifestRequest;
-    let manifest: ViewData['manifest'];
-    try { manifest = { data: await api.manifest(place.id) }; }
-    catch (error) {
-      const offline = offlineManifest(place);
-      manifest = offline ? { data: offline, offline: true, error: 'Live previews are unavailable.' } : { error: errorText(error) };
-    }
+    const manifest = await this.loadManifest(place);
     if (request !== this.manifestRequest || this.place?.id !== place.id) return;
     this.manifest = manifest;
     this.renderDrawer();
     if (this.mode === 'venue' || this.mode === 'dish') this.renderScene();
+  }
+
+  private async loadManifest(place: Place): Promise<ViewData['manifest']> {
+    try { return { data: await api.manifest(place.id) }; }
+    catch (error) {
+      const offline = offlineManifest(place);
+      return offline ? { data: offline, offline: true, error: 'Live previews are unavailable.' } : { error: errorText(error) };
+    }
   }
 
   private async refreshTrip(reset = true) {
@@ -577,23 +669,45 @@ export class AppShell {
     this.renderScene();
   }
 
-  private async showDish(dish: Dish, compareId = '') {
-    if (!this.place || !this.manifest.data?.menu_items.find((entry) => entry.dish.id === dish.id)?.dish_asset) {
+  private async showDish(dish: Dish, compareId = '', comparePlaceId?: string): Promise<boolean> {
+    const request = ++this.dishRequest;
+    const place = this.place;
+    const mode = this.mode;
+    if (!place || !isSplat(this.manifest.data?.menu_items.find((entry) => entry.dish.id === dish.id)?.dish_asset)) {
       this.notify('This dish does not have a published 3D preview.');
-      return;
+      return false;
+    }
+    let comparison: DishComparison | undefined;
+    if (compareId && compareId !== dish.id) {
+      const inCurrentMenu = this.manifest.data?.menu_items.some((entry) => entry.dish.id === compareId);
+      const venue = comparePlaceId
+        ? this.places.find((entry) => entry.id === comparePlaceId)
+        : inCurrentMenu ? place : this.places.find((entry) => entry.dishes.some((item) => item.id === compareId));
+      const manifest = !venue ? undefined : venue.id === place.id ? this.manifest : await this.loadManifest(venue);
+      if (request !== this.dishRequest || this.place?.id !== place.id || this.mode !== mode) return false;
+      const item = manifest?.data?.menu_items.find((entry) => entry.dish.id === compareId);
+      if (!venue || !item || !isSplat(item.dish_asset)) {
+        this.notify('The comparison dish does not have a published 3D preview.');
+        const select = this.drawer.root.querySelector<HTMLSelectElement>('select[data-control="compare"]');
+        if (select) select.value = this.comparison?.dish.id ?? '';
+        return false;
+      }
+      comparison = { place: venue, dish: item.dish, asset: item.dish_asset, offline: manifest?.offline };
     }
     const previous = this.dish?.id;
     this.mode = 'dish';
     this.dish = dish;
-    this.compareId = compareId;
+    this.comparison = comparison;
     if (previous !== dish.id) this.rotation = 0;
     this.drawerOpen = true;
     this.filterOpen = false;
     this.sound.playSelect();
     this.renderBreadcrumbs();
     this.renderPanels();
-    if (previous !== dish.id) this.renderDrawer(true);
+    this.renderDrawer(previous !== dish.id);
     this.renderScene();
+    this.syncLiveContext();
+    return true;
   }
 
   private async setFit(enabled: boolean, seating: Seating) {
@@ -602,6 +716,90 @@ export class AppShell {
     this.renderDrawer();
     if (enabled && !this.inside) await this.enterRoom();
     else this.engine?.setWillWeFit(enabled, this.filters.groupSize, seating);
+  }
+
+  private setComparedPlaces(places: Place[]): void {
+    this.comparisonRun++;
+    this.comparisonLoading = false;
+    this.comparedPlaces = places;
+    this.renderDrawer();
+  }
+
+  private async openRestaurantComparison(): Promise<void> {
+    if (this.comparedPlaces.length < 2 || this.comparisonLoading) return;
+    const pairs = this.comparedPlaces.flatMap((place) => {
+      const stop = this.findStop(place.stop_id);
+      return stop ? [{ place, stop }] : [];
+    });
+    if (pairs.length !== this.comparedPlaces.length) return;
+    const filters = this.filters;
+    const request = ++this.comparisonRun;
+    this.comparisonLoading = true;
+    this.drawer.setComparison(this.comparedPlaces, true);
+    try {
+      const decisions = await Promise.all(pairs.map(({ place, stop }) => loadPlaceDecision(place, stop, filters)));
+      if (request !== this.comparisonRun) return;
+      const controls = this.createControlSurface();
+      controls.setHighlightedStops([...new Set(pairs.map(({ stop }) => stop.stop_id))]);
+      controls.setHighlightedPlaces(pairs.map(({ place }) => place.id));
+      this.showReviewCard(buildComparisonBriefingCard(decisions, this.findStop(filters.startStopId)?.name ?? 'your start stop'));
+    } catch (error) {
+      if (request === this.comparisonRun) this.notify(errorText(error));
+    } finally {
+      if (request === this.comparisonRun) {
+        this.comparisonLoading = false;
+        this.drawer.setComparison(this.comparedPlaces, false);
+      }
+    }
+  }
+
+  private showPlaceBriefing(place: Place): void {
+    const stop = this.findStop(place.stop_id);
+    if (!stop) return;
+    const filters = this.filters;
+    const initial = buildPlaceBriefingCard(placeDecision(place, stop, filters));
+    this.showReviewCard(initial);
+    void loadPlaceDecision(place, stop, filters).then((details) => {
+      if (this.briefings.get(initial.id) !== initial) return;
+      this.briefings.set(initial.id, buildPlaceBriefingCard(details));
+      this.renderReviewCards();
+    }).catch(() => { /* The bundled briefing stays open when supplemental data is unavailable. */ });
+  }
+
+  private showReviewCard(card: BriefingCard, mode: BriefingMode = 'add'): void {
+    if (mode === 'replace') this.briefings.clear();
+    if (!this.briefings.has(card.id) && this.briefings.size === maxBriefingCards) {
+      const oldest = this.briefings.keys().next();
+      if (!oldest.done) this.briefings.delete(oldest.value);
+    }
+    this.briefings.set(card.id, card);
+    this.renderReviewCards(card.id);
+    this.syncLiveContext();
+  }
+
+  private renderReviewCards(activeId?: string): void {
+    const cards = [...this.briefings.values()];
+    if (this.xrMode === 'none') this.reviewModal.show(cards, activeId);
+    else this.reviewModal.hide();
+    this.engine?.setReviewCards(cards);
+  }
+
+  private dismissReviewCard(cardId?: string): void {
+    if (cardId === undefined) this.briefings.clear();
+    else this.briefings.delete(cardId);
+    this.renderReviewCards();
+    this.syncLiveContext();
+  }
+
+  private async openBriefingVenue(placeId: string, dishId?: string, compareDishId?: string, comparePlaceId?: string): Promise<void> {
+    const place = this.places.find(({ id }) => id === placeId);
+    if (!place) return;
+    this.dismissReviewCard();
+    await this.showVenue(place, { inside: true });
+    if (!dishId || this.place?.id !== placeId) return;
+    const dish = this.manifest.data?.menu_items.find((item) => item.dish.id === dishId && item.dish_asset)?.dish;
+    if (dish) await this.showDish(dish, compareDishId, comparePlaceId);
+    else this.notify('This dish does not have a published 3D preview.');
   }
 
   private setTable(useVirtual: boolean, announce = true) {
@@ -614,7 +812,7 @@ export class AppShell {
   private renderScene() {
     if (!this.engineReady) return;
     const version = ++this.sceneVersion;
-    const { mode, stop, place, dish, compareId, inside } = this;
+    const { mode, stop, place, dish, comparison, inside } = this;
     const manifest = this.manifest.data;
     this.sceneQueue = this.sceneQueue.then(async () => {
       const engine = this.engine;
@@ -628,8 +826,8 @@ export class AppShell {
           await engine.openVenue(previewPlace, preview ?? null);
           engine.setWillWeFit(this.fit && inside, this.filters.groupSize, this.seating);
         } else if (mode === 'dish' && place && dish && manifest) {
-          const comparison = manifest.menu_items.find(({ dish }) => dish.id === compareId)?.dish;
-          await engine.openDish(place, dish, comparison, manifest);
+          const otherDish = comparison ? { ...comparison.dish, asset: comparison.asset } : null;
+          await engine.openDish(place, dish, otherDish, manifest, comparison?.place.name);
           engine.setDishRotation(this.rotation * Math.PI / 180);
           engine.setPassthroughFallback(this.virtualTable);
         } else await engine.setScene(mode);
@@ -755,6 +953,142 @@ export class AppShell {
   private async sendDebugLogs() {
     try { await api.logs(this.logs); this.log('Debug logs sent.'); }
     catch (error) { this.log('Could not send debug logs. ' + errorText(error)); }
+  }
+
+  private createControlSurface(): AppControlSurface {
+    return {
+      getState: () => ({
+        mode: this.mode,
+        stops: this.stops,
+        places: this.places,
+        filtered: this.filtered,
+        filters: this.filters,
+        stop: this.stop,
+        place: this.place,
+        dish: this.dish,
+        compareId: this.comparison?.dish.id ?? '',
+        comparePlaceId: this.comparison?.place.id,
+        inside: this.inside,
+        fit: this.fit,
+        seating: this.seating,
+        rotation: this.rotation,
+        virtualTable: this.virtualTable,
+        muted: this.muted,
+        drawerOpen: this.drawerOpen,
+        sheetExpanded: this.sheetExpanded,
+        filterOpen: this.filterOpen,
+        xrMode: this.xrMode,
+        manifest: this.manifest.data,
+        trip: this.trip.data,
+        highlightedStops: [...this.highlightedStops],
+        highlightedPlaces: [...this.highlightedPlaces],
+        highlightedDishId: this.highlightedDishId,
+        briefings: [...this.briefings.values()].map(({ id, title }) => ({ id, title })),
+      }),
+      showMap: () => this.showMap(),
+      showStation: (stop) => this.showStation(stop),
+      showVenue: (place, options) => this.showVenue(place, options),
+      showDish: (dish, compareId, comparePlaceId) => this.showDish(dish, compareId, comparePlaceId),
+      updateFilters: (patch) => this.updateFilters(patch),
+      setHighlightedStops: (stopIds, pulse = true) => {
+        this.highlightedStops = [...stopIds];
+        this.renderStationBoard(new Set(this.filtered.map((p) => p.id)));
+        this.engine?.setHighlightedStops(this.highlightedStops, pulse);
+      },
+      setHighlightedPlaces: (placeIds) => {
+        this.highlightedPlaces = [...placeIds];
+        this.engine?.setHighlightedPlaces(this.highlightedPlaces);
+        this.renderDrawer();
+      },
+      setHighlightedDish: (dishId) => {
+        this.highlightedDishId = dishId;
+        this.engine?.setHighlightedDish(dishId);
+        this.renderDrawer();
+      },
+      clearHighlights: () => {
+        this.highlightedStops = [];
+        this.highlightedPlaces = [];
+        this.highlightedDishId = undefined;
+        this.engine?.setHighlightedStops([], false);
+        this.engine?.setHighlightedPlaces([]);
+        this.engine?.setHighlightedDish(undefined);
+        this.renderStationBoard(new Set(this.filtered.map((p) => p.id)));
+        this.renderDrawer();
+      },
+      focusMenu: (dishId) => {
+        if (this.mobile.matches) this.sheetExpanded = true;
+        this.drawerOpen = true;
+        this.renderPanels();
+        this.drawer.focusMenu(dishId);
+      },
+      setFit: (enabled, seating) => this.setFit(enabled, seating),
+      showReviewCard: (card, mode) => this.showReviewCard(card, mode),
+      dismissReviewCard: (cardId) => this.dismissReviewCard(cardId),
+      setDishRotation: (degrees) => {
+        this.rotation = degrees;
+        this.engine?.setDishRotation(degrees * Math.PI / 180);
+        this.renderDrawer();
+      },
+      setTableMode: (useVirtual) => this.setTable(useVirtual),
+      orbitCamera: (yawDeltaDeg, pitchDeltaDeg, zoomFactor) => {
+        this.engine?.orbitCamera(yawDeltaDeg * Math.PI / 180, pitchDeltaDeg * Math.PI / 180, zoomFactor);
+      },
+      focusMapStopCamera: (stopId) => this.engine?.focusMapStopCamera(stopId),
+      resetCamera: () => this.engine?.resetCamera(),
+      setDrawerState: (action) => {
+        if (action === 'close') this.drawerOpen = false;
+        else if (action === 'open') this.drawerOpen = true;
+        else if (action === 'expand') { this.drawerOpen = true; this.sheetExpanded = true; }
+        else if (action === 'collapse') { this.sheetExpanded = false; }
+        this.renderPanels();
+      },
+      setFilterOpen: (open) => this.setFilterOpen(open),
+      setAudioSfx: (enabled) => {
+        if (enabled === this.muted) this.toggleAudio();
+      },
+      openModal: (name) => {
+        this.uploader.close();
+        this.pairing.close();
+        if (this.debug.dialog.open) this.debug.dialog.close();
+        if (this.credits.dialog.open) this.credits.dialog.close();
+        if (this.incomingTrip.dialog.open) this.incomingTrip.dialog.close();
+        if (name === 'upload') this.uploader.open(this.place?.id);
+        else if (name === 'pair') this.pairing.open();
+        else if (name === 'credits') this.credits.open();
+        else if (name === 'debug') this.openDebug();
+      },
+      sendToPairedDevice: (kind) => {
+        if (kind === 'current') {
+          if (!this.place) return false;
+          const sent = this.pairing.send(this.dish
+            ? { type: 'open_dish', place_id: this.place.id, dish_id: this.dish.id }
+            : { type: 'open_place', place_id: this.place.id });
+          if (sent) this.notify('Sent to the paired device.');
+          return sent;
+        }
+        if (!this.trip.data) return false;
+        const sent = this.pairing.send({ type: 'send_trip', trip: this.trip.data });
+        if (sent) this.notify('Trip sent to the paired device.');
+        return sent;
+      },
+      controlXR: async (action) => {
+        if (action === 'exit_xr') {
+          this.engine?.exitXR();
+          return 'Exited XR session';
+        }
+        try {
+          await this.launchXR(action === 'enter_vr' ? 'vr' : 'ar');
+          return action === 'enter_vr' ? 'Launched VR' : 'Launched AR table';
+        } catch (error) {
+          return `XR requires a direct button tap in the browser (${errorText(error)})`;
+        }
+      },
+      announce: (text) => this.notify(text),
+    };
+  }
+
+  private syncLiveContext() {
+    this.liveClient.updateContext();
   }
 
   private notify(text: string) {

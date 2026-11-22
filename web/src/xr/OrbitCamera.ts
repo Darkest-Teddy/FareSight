@@ -182,6 +182,22 @@ export class OrbitCamera {
     }
   }
 
+  nudge(yawDeltaRad: number, pitchDeltaRad: number, zoomFactor = 1): void {
+    this.cancelSpin();
+    if (Number.isFinite(yawDeltaRad)) this.goal.yaw += yawDeltaRad;
+    if (Number.isFinite(pitchDeltaRad)) this.goal.pitch = clamp(this.goal.pitch + pitchDeltaRad,
+      this.goal.minPitch ?? -0.65, this.goal.maxPitch ?? 1.42);
+    if (Number.isFinite(zoomFactor) && zoomFactor > 0 && zoomFactor !== 1) this.zoom(zoomFactor);
+  }
+
+  focusAt(target: pc.Vec3, distance?: number): void {
+    this.cancelSpin();
+    this.goal.pivot.copy(target);
+    if (distance !== undefined && Number.isFinite(distance)) {
+      this.goal.distance = clamp(distance, this.goal.min ?? 0.15, this.goal.max ?? 6);
+    }
+  }
+
   update(dt: number): void {
     if (!this.enabled) return;
     const dragging = this.pointers.size > 0 && this.moved;

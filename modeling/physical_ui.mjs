@@ -2,7 +2,17 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { Model, box, circle, face, loft, rect, rod, TAU } from './geometry.mjs';
+import {
+  Model,
+  box,
+  circle,
+  face,
+  loft,
+  rect,
+  rod,
+  sweep,
+  TAU,
+} from './geometry.mjs';
 
 // Fabrication dimensions are in millimetres. Convert once at the glTF boundary.
 const alloy = '#9697b2',
@@ -1029,53 +1039,140 @@ function menuBook() {
   const cover = part(
     m,
     'MenuBook_Cover',
-    'Hand-stitched oxblood calfskin',
-    0.03,
-    0.53,
+    'Charcoal espresso book linen',
+    0.02,
+    0.78,
   );
-  const pages = part(m, 'MenuBook_Pages', 'Ivory laid paper', 0, 0.8);
-  const hardware = part(
-    m,
-    'MenuBook_Brass',
-    'Brushed binding brass',
-    0.72,
-    0.31,
-  );
-  const cradle = part(
-    m,
-    'MenuBook_Cradle',
-    'Quarter-sawn walnut cradle',
-    0.03,
-    0.46,
-  );
-  coverLeather(m, cover.material);
-  walnutVeneer(m, cradle.material);
-  loft(
-    cradle,
-    [
-      [0, 321, 160],
-      [3, 330, 168],
-      [10, 330, 168],
-      [16, 322, 160],
-      [22, 305, 150],
-    ].map(([y, w, d]) => rect(0, y, 0, w, d, 9)),
-    walnut,
-  );
-  for (let i = 0; i < cradle.positions.length; i += 3) {
-    const [x, y, z] = cradle.positions.slice(i, i + 3);
-    cradle.uvs.push(x / 240, (y + z) / 105);
+  const paper = part(m, 'MenuBook_Pages', 'Uncoated cotton paper', 0, 0.91);
+  const hinge = part(m, 'MenuBook_Hinge', 'Satin dark bronze', 0.32, 0.67);
+  const charcoal = '#262321',
+    foldCloth = '#1e1c1a',
+    darkBronze = '#6e5d48';
+
+  // Warp and weft alternate over and under one another, with slight differences
+  // in yarn width. The weave repeats every 22 mm across the book cloth.
+  const size = 192,
+    pixels = Buffer.alloc(size * (size + 1));
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = x / 6 + 0.06 * Math.sin((TAU * y) / size);
+      const v = y / 6 + 0.08 * Math.sin((TAU * (x + 2 * y)) / size);
+      const warp = Math.sin(Math.PI * u) ** 2,
+        weft = Math.sin(Math.PI * v) ** 2;
+      const warpOnTop = (Math.floor(u) + Math.floor(v)) % 2 === 0;
+      const yarn = warpOnTop
+        ? 0.76 * warp + 0.24 * weft
+        : 0.8 * weft + 0.2 * warp;
+      pixels[y * (size + 1) + x + 1] = Math.round(217 + 36 * yarn);
+    }
   }
+  grayscaleTexture(m, cover.material, 'Plain-weave linen', size, pixels);
+  const clothUVs = (first) => {
+    for (let i = first; i < cover.positions.length; i += 3) {
+      const [x, y, z] = cover.positions.slice(i, i + 3);
+      cover.uvs.push((x + 0.5 * z) / 22, (y + z) / 22);
+    }
+  };
 
   for (const side of signs) {
-    bookBinding(cover, pages, hardware, side);
+    const startCover = cover.positions.length,
+      startPaper = paper.positions.length;
+    const cx = side * 102.6,
+      cy = 142.5,
+      w = 204.3,
+      h = 278.2;
+    const ring = (inset, z) =>
+      outline(
+        cx,
+        cy,
+        z,
+        w - 2 * inset,
+        h - 2 * inset,
+        Math.max(0.7, 2.5 - inset * 0.2),
+      );
+    // The rear is a continuous surface. A 0.30 mm depression forms the
+    // blind-rule border, including its floor and both sloping shoulders.
+    const back = ring(0.65, -7.55);
+    loft(
+      cover,
+      [back, ring(0, -6.85), ring(0, -3.7), ring(0.65, -3.05)],
+      charcoal,
+      { bottom: false },
+    );
+    let outer = back;
+    for (const [inset, z, color] of [
+      [7.25, -7.55, charcoal],
+      [7.6, -7.25, foldCloth],
+      [7.95, -7.25, foldCloth],
+      [8.3, -7.55, charcoal],
+    ]) {
+      const inner = ring(inset, z);
+      for (let i = 0; i < outer.length; i++) {
+        const k = (i + 1) % outer.length;
+        face(cover, [outer[i], outer[k], inner[k], inner[i]], color);
+      }
+      outer = inner;
+    }
+    face(cover, outer, charcoal);
+    clothUVs(startCover);
+    placeBookPart(cover, startCover, side);
+
+    // Three cut paper sections share a 3 mm fore-edge. Their outer and
+    // head/tail cuts sit 6 mm inside the cloth-covered boards.
+    const sheetX = side * 103.25;
+    for (const [bottom, top, w, h, color] of [
+      [-3.15, -2.14, 191.0, 266.2, '#e8e0cf'],
+      [-2.16, -1.17, 190.8, 265.9, '#ede5d6'],
+      [-1.19, -0.15, 191.0, 266.2, '#f3ede0'],
+    ]) {
+      panel(
+        paper,
+        sheetX,
+        cy,
+        w,
+        h,
+        1.05,
+        [
+          [bottom, 0.09],
+          [bottom + 0.15, 0],
+          [top - 0.12, 0],
+          [top, 0.1],
+        ],
+        color,
+      );
+    }
+    // The paper curves down to the hinge only in the narrow unprinted gutter.
+    const gutter = [
+      [0.5, -2.85, '#cfc6b5'],
+      [2.4, -2.25, '#dcd3c2'],
+      [4.8, -0.9, '#e8e0cf'],
+      [7.9, -0.12, '#f3ede0'],
+    ];
+    for (let i = 1; i < gutter.length; i++) {
+      const [a, za] = gutter[i - 1],
+        [b, zb, color] = gutter[i];
+      const strip = [
+        [side * a, 10, za],
+        [side * b, 10, zb],
+        [side * b, 275, zb],
+        [side * a, 275, za],
+      ];
+      face(paper, side > 0 ? strip : strip.reverse(), color);
+    }
+    placeBookPart(paper, startPaper, side);
+
     const name = side < 0 ? 'Menu_Page_Left' : 'Menu_Page_Right';
-    const material = m.material(name + ' vellum', {
-      color: '#efe6d2',
-      rough: 0.82,
+    const material = m.material(name + ' cotton', {
+      color: '#f3ede0',
+      rough: 0.91,
     });
-    const s = m.surface(material, name, bookPoint(side, side * 103, 142.5, 0));
+    const canvas = m.surface(
+      material,
+      name,
+      bookPoint(side, side * 103, cy, 0),
+    );
     face(
-      s,
+      canvas,
       [
         [-95, -132.5],
         [95, -132.5],
@@ -1085,61 +1182,304 @@ function menuBook() {
       '#ffffff',
       uv,
     );
-
-    const x = side * 126,
-      pivot = bookPoint(side, x, 160, -14);
-    box(hardware, x, 22, -64, 26, 3.5, 17, bronze, 3);
-    rod(hardware, [x, 23, -65], pivot, 3.2, brass, 14);
-    rod(
-      hardware,
-      [x - 7, pivot[1], pivot[2]],
-      [x + 7, pivot[1], pivot[2]],
-      4.2,
-      gold,
-      16,
-    );
-    const heel = bookPoint(side, side * 59, 1, -6.8);
-    box(hardware, heel[0], 22, heel[2], 24, 5, 14, bronze, 2.5);
-    rod(
-      hardware,
-      [heel[0], 23, heel[2] + 3],
-      [heel[0], heel[1] + 3.4, heel[2] + 3],
-      3.3,
-      brass,
-      12,
-    );
-    // The two wings of the lip follow the open cover and meet over the spine.
-    rod(
-      hardware,
-      bookPoint(0, 0, 4, -3),
-      bookPoint(side, side * 74, 4, -3),
-      2.5,
-      gold,
-      12,
-    );
   }
 
-  const start = hardware.positions.length;
+  const spine = cover.positions.length;
   panel(
-    hardware,
+    cover,
     0,
     142.5,
-    8.6,
-    281,
-    3.9,
+    6.2,
+    277.5,
+    1.7,
     [
-      [-13.5, 0.8],
-      [-12.6, 0],
-      [-1.7, 0],
-      [-0.35, 0.75],
+      [-7.7, 0.6],
+      [-7.1, 0],
+      [-3.8, 0],
+      [-3.25, 0.4],
+    ],
+    foldCloth,
+  );
+  clothUVs(spine);
+  placeBookPart(cover, spine, 0);
+
+  // Only the rear reveals the narrow metal hinge. Each rivet is seated below
+  // the face of the bar, inside a small countersink.
+  const half = 1.75,
+    bottom = 10,
+    top = 275,
+    rear = -7.97;
+  const rearRect = (y0, y1) =>
+    face(
+      hinge,
+      [
+        [-half, y0, rear],
+        [-half, y1, rear],
+        [half, y1, rear],
+        [half, y0, rear],
+      ],
+      darkBronze,
+    );
+  loft(
+    hinge,
+    [rear, -7.15].map((z) =>
+      outline(0, (bottom + top) / 2, z, 2 * half, top - bottom, 0),
+    ),
+    darkBronze,
+    { bottom: false },
+  );
+  let previous = bottom;
+  for (const y of [24, 261]) {
+    rearRect(previous, y - half);
+    const at = (i, r, z, square = false) => {
+      const a = (TAU * i) / 16,
+        x = Math.cos(a),
+        dy = Math.sin(a);
+      const d = square ? r / Math.max(Math.abs(x), Math.abs(dy)) : r;
+      return [d * x, y + d * dy, z];
+    };
+    const head = [];
+    for (let i = 0; i < 16; i++) {
+      const j = (i + 1) % 16;
+      face(
+        hinge,
+        [
+          at(j, half, rear, true),
+          at(i, half, rear, true),
+          at(i, 1.1, rear),
+          at(j, 1.1, rear),
+        ],
+        darkBronze,
+      );
+      face(
+        hinge,
+        [
+          at(j, 1.1, rear),
+          at(i, 1.1, rear),
+          at(i, 0.84, -7.79),
+          at(j, 0.84, -7.79),
+        ],
+        '#51463b',
+      );
+      head.push(at(i, 0.84, -7.79));
+    }
+    face(hinge, head.reverse(), '#796957');
+    previous = y + half;
+  }
+  rearRect(previous, top);
+  placeBookPart(hinge, 0, 0);
+  return m;
+}
+
+function reviewClipboard() {
+  const m = new Model();
+  const board = part(
+    m,
+    'Clipboard_Board',
+    'Oiled quarter-sawn walnut',
+    0.02,
+    0.52,
+  );
+  const papers = part(m, 'Clipboard_Papers', 'Cotton cover stock', 0, 0.91);
+  const clip = part(m, 'Clipboard_Clip', 'Brushed spring brass', 0.68, 0.39);
+
+  // Four radiused corners continue around the small routed bevel on both faces.
+  const boardRing = (z, inset) => {
+    const points = [];
+    for (let corner = 0; corner < 4; corner++) {
+      const cx = [141, -141, -141, 141][corner],
+        cy = [183, 183, -183, -183][corner];
+      for (let i = 0; i <= 6; i++) {
+        const angle = ((corner + i / 6) * TAU) / 4;
+        points.push([
+          cx + (7 - inset) * Math.cos(angle),
+          cy + (7 - inset) * Math.sin(angle),
+          z,
+        ]);
+      }
+    }
+    return points.reverse();
+  };
+  loft(
+    board,
+    [
+      [-9, 1.3],
+      [-8.6, 0.55],
+      [-7.8, 0],
+      [-1.1, 0],
+      [-0.35, 0.55],
+      [0, 1.3],
+    ].map(([z, d]) => boardRing(z, d)),
+    walnut,
+  );
+  walnutVeneer(m, board.material);
+  for (let i = 0; i < board.positions.length; i += 3) {
+    const [x, y, z] = board.positions.slice(i, i + 3);
+    board.uvs.push((y + 0.5 * z) / 430, (x + z) / 180);
+  }
+
+  for (const [x, y, z0, z1, color] of [
+    [1, -9, 0, 1.24, '#dfd5c3'],
+    [0.65, -8.65, 1.18, 2.51, '#e9dfcf'],
+    [-1, -7, 2.46, 4, '#f3ede0'],
+  ]) {
+    panel(
+      papers,
+      x,
+      y,
+      266,
+      334,
+      1.55,
+      [
+        [z0, 0.16],
+        [z0 + 0.22, 0],
+        [z1 - 0.14, 0],
+        [z1, 0.1],
+      ],
+      color,
+    );
+  }
+  canvas(m, 'Review_Card_Face', [0, -8, 4.6], 262, 330, '#f3ede0');
+
+  // The stationary plate seats against the wood. The folded jaw rocks on a
+  // transverse pin, with its rolled nose just touching the top sheet.
+  panel(
+    clip,
+    0,
+    173.3,
+    107,
+    15.4,
+    3.2,
+    [
+      [-0.15, 0.6],
+      [0.55, 0],
+      [2.55, 0],
+      [3, 0.5],
     ],
     bronze,
   );
-  for (const y of [32, 142.5, 253]) {
-    screw(hardware, 0, y, -0.15, 3.5);
-    screw(hardware, 0, y, -13.6, 3.4, -1);
+  for (const side of signs) {
+    panel(
+      clip,
+      side * 41,
+      170.7,
+      4.6,
+      8,
+      1.4,
+      [
+        [2.8, 0.25],
+        [5.8, 0],
+        [7.4, 0.55],
+      ],
+      brass,
+    );
+    rod(
+      clip,
+      [side * 46, 173.6, -8.7],
+      [side * 46, 173.6, -9.16],
+      1.8,
+      bronze,
+      16,
+    );
+    // The head sits below the raised outer rim of the rivet cup.
+    const seat = (r, z) =>
+      Array.from({ length: 20 }, (_, i) => {
+        const a = (-TAU * i) / 20;
+        return [side * 46 + r * Math.cos(a), 173.6 + r * Math.sin(a), z];
+      });
+    loft(
+      clip,
+      [seat(2.45, 2.9), seat(2.45, 3.2), seat(1.8, 3.58), seat(1.4, 3.27)],
+      brass,
+    );
   }
-  placeBookPart(hardware, start, 0);
+  rod(clip, [-43.4, 169.8, 6.15], [43.4, 169.8, 6.15], 1.48, bronze, 16);
+  for (const side of signs) {
+    const spring = Array.from({ length: 39 }, (_, i) => {
+      const t = i / 38,
+        a = 4 * TAU * t;
+      return [
+        side * (28.3 + 7.8 * t),
+        169.8 + 2.04 * Math.cos(a),
+        6.15 + 2.04 * Math.sin(a),
+      ];
+    });
+    sweep(clip, spring, 0.57, gold, 8);
+  }
+  loft(
+    clip,
+    [
+      [157.65, 4.7, 111.4, 1.5],
+      [158.85, 5.05, 116, 2.1],
+      [160.6, 5.95, 115, 1.8],
+      [164.4, 7.4, 100, 1.5],
+      [167.25, 7.65, 57, 1.45],
+      [170.3, 7.2, 49, 1.5],
+      [174.9, 6.7, 51, 1.5],
+      [178.4, 7.3, 56, 1.55],
+      [180.2, 7.35, 53, 1.55],
+    ].map(([y, z, w, d]) => rect(0, y, z, w, d, 0.65)),
+    brass,
+  );
+  rod(clip, [-55.3, 158.7, 4.75], [55.3, 158.7, 4.75], 0.78, gold, 12);
+
+  const arch = Array.from({ length: 17 }, (_, i) => {
+    const a = Math.PI * (1 - i / 16);
+    return [10.5 * Math.cos(a), 181.4 + 9.35 * Math.sin(a), 2.15];
+  });
+  sweep(
+    clip,
+    [
+      [-13, 176.2, 1.65],
+      [-11, 178.8, 2.1],
+      ...arch,
+      [11, 178.8, 2.1],
+      [13, 176.2, 1.65],
+    ],
+    1.25,
+    brass,
+    12,
+  );
+
+  const key = part(
+    m,
+    'Review_Dismiss_Btn',
+    'Lacquered crimson clasp',
+    0.25,
+    0.45,
+    [112, 165, 5],
+  );
+  panel(
+    key,
+    0,
+    0,
+    48,
+    26,
+    3.1,
+    [
+      [-4.5, 0.8],
+      [-3.7, 0],
+      [-1.65, 0],
+      [-1.1, 0.45],
+    ],
+    brass,
+  );
+  panel(
+    key,
+    0,
+    0,
+    47,
+    25,
+    2.8,
+    [
+      [-1.4, 0.35],
+      [-0.7, 0],
+      [2.9, 0.5],
+      [4.5, 1.65],
+    ],
+    red,
+  );
+  canvas(m, 'Review_Dismiss_Face', [112, 165, 10.2], 40, 19, '#8c313f');
   return m;
 }
 
@@ -1152,6 +1492,7 @@ export function physicalUi(dir) {
     ['table-menu-stand', menuStand],
     ['room-plaque-stand', plaqueStand],
     ['menu-book', menuBook],
+    ['review-clipboard', reviewClipboard],
   ]) {
     const model = build();
     for (const s of model.surfaces) {

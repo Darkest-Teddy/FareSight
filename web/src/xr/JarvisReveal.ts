@@ -1,9 +1,33 @@
 import * as pc from 'playcanvas';
 import { child, clamp } from './sceneSupport';
 
+export const jarvisPoints = { hero: 26_000, prop: 8_000, detail: 2_200 } as const;
+
 export const jarvisPalette = `
 const vec3 jarvisBlue = vec3(0.117647, 0.745098, 1.0);
 const vec3 jarvisIce = vec3(0.784314, 0.968627, 1.0);
+`;
+
+export const jarvisWaves = `
+vec3 jarvisWaveOffsets(float progress, float distance) {
+    float lead = -0.12 + 2.02 * progress - distance;
+    return lead - vec3(0.0, 0.26, 0.56);
+}
+
+float jarvisArrival(float offset) { return smoothstep(-0.08, 0.12, offset); }
+float jarvisGrowth(float offset) { return smoothstep(-0.06, 0.24, offset); }
+
+vec3 jarvisLitBlue(vec3 original) {
+    float lum = clamp(dot(original, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
+    return mix(vec3(0.06, 0.32, 0.56), jarvisBlue, lum);
+}
+
+vec3 jarvisMaterialColor(vec3 blue, vec3 original, float offset) {
+    float color = smoothstep(-0.05, 0.20, offset);
+    float edge = 1.0 - smoothstep(0.005, 0.055, abs(offset - 0.035));
+    vec3 cyan = mix(jarvisBlue, jarvisIce, 0.35);
+    return mix(mix(blue, original, color), cyan, 0.20 * edge);
+}
 `;
 
 const scanSource = `
@@ -12,15 +36,16 @@ uniform vec4 uJarvisBounds;
 uniform vec2 uJarvisHeight;
 uniform mat4 uJarvisWorldToLocal;
 
+const float jarvisMeshJoin = 0.18;
+
 float jarvisDistance(vec3 position) {
     vec3 offset = position - uJarvisBounds.xyz;
-    float radial = length(offset.xz) / uJarvisBounds.w;
-    float height = max(0.0, offset.y) / uJarvisHeight.x;
-    return clamp(mix(radial, height, uJarvisHeight.y), 0.0, 1.0);
+    vec3 unit = offset / uJarvisBounds.w;
+    float radial = length(unit.xz);
+    float height = clamp(offset.y / uJarvisHeight.x, 0.0, 1.0);
+    float variation = 0.025 * sin(16.0 * unit.x + 7.0 * unit.y) * sin(14.0 * unit.z - 4.0 * unit.y);
+    return clamp(mix(radial, height, uJarvisHeight.y) + variation, 0.0, 1.0);
 }
-
-float jarvisLead() { return -0.065 + 1.43 * uJarvisProgress; }
-float jarvisSolid() { return jarvisLead() - 0.27; }
 `;
 
 const pointShader = {
@@ -32,35 +57,39 @@ const pointShader = {
     uniform mat4 matrix_viewProjection;
     ${scanSource}
     ${jarvisPalette}
-    varying vec3 vJarvisColor;
+    ${jarvisWaves}
     varying float vJarvisAlpha;
+    varying float vJarvisGlint;
     void main(void) {
-        float noise = fract(sin(dot(aPosition, vec3(127.1, 311.7, 74.7))) * 43758.5453);
-        float distance = jarvisDistance(aPosition);
-        float leadOffset = jarvisLead() - distance + (noise - 0.5) * 0.053;
-        float scanOffset = jarvisSolid() - distance;
-        float arrived = smoothstep(-0.046, 0.073, leadOffset);
-        float cloud = 1.0 - smoothstep(-0.024, 0.039, scanOffset);
-        float front = 1.0 - smoothstep(0.0, 0.062, abs(leadOffset));
-        float seam = 1.0 - smoothstep(0.0, 0.027, abs(scanOffset));
-        float spark = max(front, seam * 0.88);
-        vec3 raised = aPosition;
-        raised.y += uJarvisBounds.w * (0.020 + 0.055 * noise) * (1.0 - arrived);
-        gl_Position = matrix_viewProjection * matrix_model * vec4(raised, 1.0);
+        vec3 wave = jarvisWaveOffsets(uJarvisProgress, jarvisDistance(aPosition));
+        float arrival = jarvisArrival(wave.x);
+        float grow = jarvisGrowth(wave.y);
+        float fuse = smoothstep(0.21, 0.34, wave.y);
+        gl_Position = matrix_viewProjection * matrix_model * vec4(aPosition, 1.0);
+        // Limit the bias with distance so points on the far side stay occluded.
+        float depthBias = min(0.0012 * gl_Position.w, 0.00007 / max(gl_Position.w, 0.05));
+        gl_Position.z -= clamp(depthBias, 0.0, max(0.0, gl_Position.z + gl_Position.w));
         float worldSize = uJarvisBounds.w * length(matrix_model[1].xyz);
-        gl_PointSize = clamp((3.0 + 2.4 * spark) * smoothstep(0.002, 0.13, worldSize), 1.0, 5.4);
-        vJarvisColor = mix(jarvisBlue, jarvisIce, spark);
-        vJarvisAlpha = arrived * cloud * (0.58 + 0.36 * spark) * (0.67 + 0.33 * noise);
+        float scale = mix(0.55, 1.0, smoothstep(0.012, 0.27, worldSize));
+        gl_PointSize = mix(2.5, 12.0, grow) * scale;
+        float seed = fract(sin(dot(aPosition, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+        float shimmer = 0.87 + 0.13 * sin(27.0 * uJarvisProgress + 6.283 * seed);
+        vJarvisAlpha = arrival * (1.0 - fuse) * mix(0.86, 0.66, grow) * shimmer;
+        vJarvisGlint = 0.20 * grow * shimmer + 0.20 * (1.0 - smoothstep(0.025, 0.095, wave.x));
     }
   `,
   fragmentGLSL: `
-    varying vec3 vJarvisColor;
+    ${jarvisPalette}
     varying float vJarvisAlpha;
+    varying float vJarvisGlint;
     void main(void) {
         float r = length(gl_PointCoord - vec2(0.5)) * 2.0;
-        float intensity = (1.0 - smoothstep(0.28, 1.0, r)) * vJarvisAlpha;
-        if (intensity < 0.012) discard;
-        gl_FragColor = vec4(vJarvisColor, intensity);
+        float core = 1.0 - smoothstep(0.27, 0.59, r);
+        float halo = 1.0 - smoothstep(0.41, 1.0, r);
+        float alpha = (0.80 * core + 0.20 * halo) * vJarvisAlpha;
+        if (alpha < 0.008) discard;
+        vec3 color = mix(jarvisBlue, jarvisIce, vJarvisGlint * core);
+        gl_FragColor = vec4(color * (0.66 + 0.34 * core), alpha);
     }
   `,
 };
@@ -108,38 +137,143 @@ function geometryOf(root: pc.Entity): Geometry[] {
   return geometry;
 }
 
-function samplePositions(geometry: Geometry[], limit: number): Float32Array {
-  const total = geometry.reduce((sum, { mesh }) => sum + mesh.vertexBuffer.numVertices, 0);
-  const capacity = Math.min(limit, total);
-  const positions = new Float32Array(capacity * 3);
-  const stride = Math.max(1, total / Math.max(1, capacity));
-  const position = new pc.Vec3();
-  let cursor = stride / 2;
-  let start = 0;
-  let count = 0;
-  for (const { mesh, transform } of geometry) {
-    const buffer = mesh.vertexBuffer;
-    const end = start + buffer.numVertices;
-    if (cursor < end && count < capacity) {
-      // Read the retained CPU storage without requesting a full vertex copy or GPU upload.
-      const accessor = new pc.VertexIterator(buffer).element[pc.SEMANTIC_POSITION];
-      while (cursor < end && count < capacity) {
-        if (accessor) {
-          const offset = Math.floor(cursor - start) * accessor.stride;
-          const data = accessor.array;
-          position.set(data[offset], data[offset + 1], data[offset + 2]);
-          transform.transformPoint(position, position);
-          positions[count * 3] = position.x;
-          positions[count * 3 + 1] = position.y;
-          positions[count * 3 + 2] = position.z;
-          count++;
-        }
-        cursor += stride;
-      }
-    }
-    start = end;
+interface Surface {
+  positions: Float32Array;
+  indices?: Uint32Array;
+  base: number;
+  baseVertex: number;
+  count: number;
+  areas: Float64Array;
+  area: number;
+}
+
+function readSurface({ mesh, transform }: Geometry): Surface | undefined {
+  const primitive = mesh.primitive[pc.RENDERSTYLE_SOLID];
+  const vertexCount = mesh.vertexBuffer?.numVertices ?? 0;
+  if (!primitive || !vertexCount || !primitive.count) return;
+  const buffer = primitive.indexed ? mesh.indexBuffer[pc.RENDERSTYLE_SOLID] : undefined;
+  if (primitive.indexed && !buffer) return;
+  const positions = new Float32Array(vertexCount * 3);
+  if (!mesh.getPositions(positions)) return;
+  const m = transform.data;
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i];
+    const y = positions[i + 1];
+    const z = positions[i + 2];
+    positions[i] = m[0] * x + m[4] * y + m[8] * z + m[12];
+    positions[i + 1] = m[1] * x + m[5] * y + m[9] * z + m[13];
+    positions[i + 2] = m[2] * x + m[6] * y + m[10] * z + m[14];
   }
-  return positions.subarray(0, count * 3);
+  const indices = buffer && new Uint32Array(buffer.numIndices);
+  if (indices) mesh.getIndices(indices);
+  const { base, count } = primitive;
+  const baseVertex = primitive.baseVertex ?? 0;
+  const triangleCount = primitive.type === pc.PRIMITIVE_TRIANGLES ? Math.floor(count / 3) : 0;
+  const areas = new Float64Array(triangleCount);
+  let area = 0;
+  for (let triangle = 0; triangle < triangleCount; triangle++) {
+    const offset = base + triangle * 3;
+    const a = ((indices ? indices[offset] : offset) + baseVertex) * 3;
+    const b = ((indices ? indices[offset + 1] : offset + 1) + baseVertex) * 3;
+    const c = ((indices ? indices[offset + 2] : offset + 2) + baseVertex) * 3;
+    const ux = positions[b] - positions[a];
+    const uy = positions[b + 1] - positions[a + 1];
+    const uz = positions[b + 2] - positions[a + 2];
+    const vx = positions[c] - positions[a];
+    const vy = positions[c + 1] - positions[a + 1];
+    const vz = positions[c + 2] - positions[a + 2];
+    const nx = uy * vz - uz * vy;
+    const ny = uz * vx - ux * vz;
+    const nz = ux * vy - uy * vx;
+    area += Math.sqrt(nx * nx + ny * ny + nz * nz) || 0;
+    areas[triangle] = area;
+  }
+  return { positions, indices, base, baseVertex, count, areas, area };
+}
+
+function samplePositions(geometry: Geometry[], limit: number): Float32Array {
+  const surfaces = geometry.map(readSurface).filter((surface): surface is Surface => !!surface);
+  const triangles = surfaces.filter(({ area }) => area > 0);
+  const totalArea = triangles.reduce((total, { area }) => total + area, 0);
+  const vertices = surfaces.reduce((total, { count }) => total + count, 0);
+  const accents = Math.min(vertices, totalArea ? Math.round(limit * 0.09) : limit);
+  const coats = totalArea ? limit - accents : 0;
+  const points = new Float32Array((coats + accents) * 3);
+  let seed = 711;
+  const random = (): number => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 0x100000000;
+  };
+
+  // Walk the cumulative areas in order, taking one sample per equal-area stratum.
+  let part = 0;
+  let triangle = 0;
+  let preceding = 0;
+  for (let i = 0; i < coats; i++) {
+    const area = (i + random()) * totalArea / coats;
+    while (part + 1 < triangles.length && area >= preceding + triangles[part].area) {
+      preceding += triangles[part++].area;
+      triangle = 0;
+    }
+    const { positions, indices, base, baseVertex, areas } = triangles[part];
+    while (triangle + 1 < areas.length && area - preceding >= areas[triangle]) triangle++;
+    const offset = base + triangle * 3;
+    const a = ((indices ? indices[offset] : offset) + baseVertex) * 3;
+    const b = ((indices ? indices[offset + 1] : offset + 1) + baseVertex) * 3;
+    const c = ((indices ? indices[offset + 2] : offset + 2) + baseVertex) * 3;
+    const r1 = Math.sqrt(random());
+    const r2 = random();
+    let wa = 1 - r1;
+    let wb = r1 * (1 - r2);
+    let wc = r1 * r2;
+    if (i % 12 === 0) {
+      const edge = Math.floor(random() * 3);
+      wa = edge === 0 ? 0 : edge === 1 ? r2 : 1 - r2;
+      wb = edge === 1 ? 0 : edge === 2 ? r2 : 1 - r2;
+      wc = 1 - wa - wb;
+    }
+    const write = i * 3;
+    for (let axis = 0; axis < 3; axis++) {
+      points[write + axis] = wa * positions[a + axis] + wb * positions[b + axis] + wc * positions[c + axis];
+    }
+  }
+
+  part = 0;
+  preceding = 0;
+  for (let i = 0; i < accents; i++) {
+    const vertex = Math.floor((i + 0.5) * vertices / accents);
+    while (vertex >= preceding + surfaces[part].count) preceding += surfaces[part++].count;
+    const { positions, indices, base, baseVertex } = surfaces[part];
+    const offset = base + vertex - preceding;
+    const index = ((indices ? indices[offset] : offset) + baseVertex) * 3;
+    const write = (coats + i) * 3;
+    points[write] = positions[index];
+    points[write + 1] = positions[index + 1];
+    points[write + 2] = positions[index + 2];
+  }
+  return points;
+}
+
+const pointCache = new WeakMap<pc.Mesh, Map<string, Float32Array>>();
+
+function cachedPoints(geometry: Geometry[], limit: number): Float32Array {
+  if (!geometry.length) return new Float32Array();
+  const key = geometry.map(({ mesh, transform }) =>
+    mesh.id + ':' + Array.from(transform.data, (value) => Math.round(value * 100_000)).join(',')).join('|') + '#' + limit;
+  const mesh = geometry[0].mesh;
+  let cache = pointCache.get(mesh);
+  if (!cache) pointCache.set(mesh, cache = new Map());
+  const previous = cache.get(key);
+  if (previous) {
+    cache.delete(key);
+    cache.set(key, previous);
+    return previous;
+  }
+  const points = samplePositions(geometry, limit);
+  // Moving fingers, keys, or billboards can change the hierarchy each time.
+  if (cache.size >= 4) cache.delete(cache.keys().next().value!);
+  cache.set(key, points);
+  return points;
 }
 
 function scanBounds(geometry: Geometry[]): { originRadius: Float32Array; height: Float32Array } {
@@ -155,27 +289,39 @@ function scanBounds(geometry: Geometry[]): { originRadius: Float32Array; height:
   const height = Math.max(0.002, 2 * half.y);
   return {
     originRadius: new Float32Array([center.x, center.y - half.y, center.z, radius]),
-    height: new Float32Array([height, clamp(height / (height + radius), 0, 0.72)]),
+    height: new Float32Array([height, clamp(0.20 + 0.78 * height / (height + radius), 0.24, 0.58)]),
   };
 }
 
 function cloneForScan(original: pc.StandardMaterial): pc.StandardMaterial {
   const temporary = original.clone();
+  temporary.cull = pc.CULLFACE_NONE;
+  if (original.blendType === pc.BLEND_NONE) {
+    temporary.blendType = pc.BLEND_NORMAL;
+    temporary.depthWrite = true;
+  }
   const chunks = temporary.getShaderChunks(pc.SHADERLANGUAGE_GLSL);
   const declarations = chunks.get('litUserDeclarationPS') ?? '';
   const start = chunks.get('litUserMainStartPS') ?? '';
   const end = chunks.get('litUserMainEndPS') ?? '';
-  chunks.set('litUserDeclarationPS', declarations + scanSource + jarvisPalette);
+  chunks.set('litUserDeclarationPS', declarations + scanSource + jarvisPalette + jarvisWaves);
   chunks.set('litUserMainStartPS', start + `
     vec3 jarvisLocal = (uJarvisWorldToLocal * vec4(vPositionW, 1.0)).xyz;
-    float jarvisOffset = jarvisSolid() - jarvisDistance(jarvisLocal);
-    if (jarvisOffset < 0.0) discard;
+    vec3 jarvisWave = jarvisWaveOffsets(uJarvisProgress, jarvisDistance(jarvisLocal));
+    if (jarvisWave.y < jarvisMeshJoin) discard;
   `);
   chunks.set('litUserMainEndPS', end + `
     #ifdef FORWARD_PASS
-      float jarvisSeam = 1.0 - smoothstep(0.002, 0.038, jarvisOffset);
-      vec3 jarvisSeamColor = mix(jarvisBlue, jarvisIce, 0.82 * jarvisSeam);
-      gl_FragColor.rgb = mix(gl_FragColor.rgb, jarvisSeamColor, jarvisSeam * 0.92);
+      vec3 originalColor = gl_FragColor.rgb;
+      vec3 blue = jarvisLitBlue(originalColor);
+      ${original.cull === pc.CULLFACE_BACK ? `
+        if (!gl_FrontFacing) {
+          originalColor = mix(originalColor, vec3(0.04, 0.13, 0.22), 0.70);
+          blue = mix(blue, vec3(0.10, 0.32, 0.49), 0.55);
+        }
+      ` : ''}
+      gl_FragColor.rgb = jarvisMaterialColor(blue, originalColor, jarvisWave.z);
+      gl_FragColor.a *= smoothstep(jarvisMeshJoin, 0.27, jarvisWave.y);
     #endif
   `);
   temporary.update();
@@ -191,11 +337,11 @@ export class JarvisReveal {
 
   isAnimating(root: pc.Entity): boolean { return this.active.has(root); }
 
-  show(root: pc.Entity, duration = 0.72, limit = 900, delay = 0): void {
+  show(root: pc.Entity, duration = 0.72, limit: number = jarvisPoints.prop, delay = 0): void {
     this.animate(root, 1, duration, limit, delay);
   }
 
-  hide(root: pc.Entity, duration = 0.60, limit = 900, onFinish?: () => void): void {
+  hide(root: pc.Entity, duration = 0.60, limit: number = jarvisPoints.prop, onFinish?: () => void): void {
     this.animate(root, 0, duration, limit, 0, onFinish);
   }
 
@@ -232,7 +378,7 @@ export class JarvisReveal {
     root.enabled = delay <= 0;
   }
 
-  seek(root: pc.Entity, progress: number, limit = 3000): void {
+  seek(root: pc.Entity, progress: number, limit: number = jarvisPoints.hero): void {
     if (!this.enabled || progress <= 0 || progress >= 1) {
       this.finish(root, progress > 0);
       return;
@@ -250,7 +396,7 @@ export class JarvisReveal {
     reveal.progress = progress;
   }
 
-  refresh(root: pc.Entity, duration = 0.72, limit = 900): void {
+  refresh(root: pc.Entity, duration = 0.72, limit: number = jarvisPoints.prop): void {
     const reveal = this.ancestorReveal(root);
     if (reveal) this.releaseResources(reveal);
     else if (root.enabled) this.show(root, duration, limit);
@@ -315,20 +461,23 @@ export class JarvisReveal {
       surface.setParameter('uJarvisBounds', originRadius);
       surface.setParameter('uJarvisHeight', height);
     }
-    const positions = samplePositions(geometry, limit);
+    const positions = cachedPoints(geometry, limit);
     if (!positions.length) return resources;
     const points = child(root, 'Jarvis reveal points');
     const mesh = new pc.Mesh(this.device);
     mesh.setPositions(positions);
     mesh.update(pc.PRIMITIVE_POINTS);
     const material = new pc.ShaderMaterial(pointShader);
-    material.blendType = pc.BLEND_ADDITIVEALPHA;
+    material.blendType = pc.BLEND_NORMAL;
+    material.depthTest = true;
     material.depthWrite = false;
     material.cull = pc.CULLFACE_NONE;
     material.setParameter('uJarvisBounds', originRadius);
     material.setParameter('uJarvisHeight', height);
     material.update();
     const instance = new pc.MeshInstance(mesh, material, points);
+    // Draw the dots after the surface so depth testing keeps them on the visible edge.
+    instance.drawBucket = 0;
     points.addComponent('render', { meshInstances: [instance], castShadows: false });
     resources.points = points;
     resources.pointMaterial = material;

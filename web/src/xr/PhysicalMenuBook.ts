@@ -1,8 +1,9 @@
 import * as pc from 'playcanvas';
+import { hasDishPreview } from '../data/preview3D';
 import type { XRDishData, XRPlaceData } from './bridgeTypes';
 import type { JarvisReveal } from './JarvisReveal';
 import { bindFace, CanvasSurface, chamferedHousing, facePlane, modelNode } from './CanvasPanel3D';
-import { assetBase, child, material, pickBounds, shape, target, type HitTarget, type ModelLibrary, type PickBounds, type XYZ } from './sceneSupport';
+import { assetBase, child, damp, levelYaw, material, pickBounds, shape, target, type HitTarget, type ModelLibrary, type PickBounds, type XYZ } from './sceneSupport';
 
 const pageWidth = 0.190;
 const pageHeight = 0.265;
@@ -11,9 +12,12 @@ const canvasHeight = 1072;
 const rowWidth = 0.174;
 const rightRows = 4;
 const spreadSize = 8;
-const paper = '#f6efe0';
-const ink = '#282019';
-const brassInk = '#825f35';
+const ivoryPaper = '#faf6ee';
+const ink = '#27231f';
+const mutedInk = '#61584f';
+const accentInk = '#8a5743';
+
+let cottonTile: HTMLCanvasElement | undefined;
 
 type Side = 'Left' | 'Right';
 
@@ -27,6 +31,51 @@ interface Row {
   dish: XRDishData;
   top: number;
   height: number;
+  placeName?: string;
+}
+
+export interface MenuComparisonDish { dish: XRDishData; placeName: string }
+
+function paperGrain(): HTMLCanvasElement {
+  if (cottonTile) return cottonTile;
+  const tile = document.createElement('canvas');
+  tile.width = 139;
+  tile.height = 127;
+  const ctx = tile.getContext('2d');
+  if (!ctx) return tile;
+  let seed = 924112;
+  const random = (): number => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 0x100000000;
+  };
+  for (let i = 0; i < 560; i++) {
+    const x = random() * tile.width;
+    const y = random() * tile.height;
+    ctx.fillStyle = i % 5 === 0 ? 'rgba(255,255,255,0.32)' : 'rgba(98,77,52,0.095)';
+    ctx.fillRect(x, y, 0.55 + random() * 1.35, 0.35 + random() * 0.55);
+  }
+  cottonTile = tile;
+  return tile;
+}
+
+function menuSection(place: XRPlaceData): string {
+  if (place.category.includes('karaoke') || place.rooms.some(({ room_type }) => room_type.includes('karaoke'))) {
+    return 'Suites & Sessions';
+  }
+  if (/caf[eé]|coffee|bakery/i.test(place.category)) return 'Coffee & Pastries';
+  return 'Menu';
+}
+
+function menuNotes(place: XRPlaceData): [string, string] {
+  const venueCapacity = place.stated_capacity;
+  const roomCapacity = place.rooms[0]?.stated_capacity;
+  const seating = venueCapacity && venueCapacity > 0 ? `${venueCapacity} seats`
+    : roomCapacity && roomCapacity > 0 ? `Private room seats ${roomCapacity}` : '';
+  const checks = Number.isFinite(place.typical_price) && place.typical_price > 0
+    ? `Typical check $${place.typical_price.toFixed(2)}` : '';
+  const hours = Object.values(place.hours ?? {});
+  const daily = hours.length === 7 && hours.every(([open, close]) => open === hours[0][0] && close === hours[0][1]);
+  return [[seating, checks].filter(Boolean).join('  ·  '), daily ? `Daily  ${hours[0][0]}–${hours[0][1]}` : ''];
 }
 
 function wrappedText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, width: number,
@@ -78,52 +127,68 @@ export class PhysicalMenuBook {
   private active?: string;
   private compared?: string;
   private hovered?: string;
+  private highlighted?: string;
   private spread = 0;
+  private compareSpread = false;
+  private comparisonOptions: readonly MenuComparisonDish[] = [];
   private moved = false;
+  private baseY = 0;
+  private homePosition = new pc.Vec3();
+  private homeRotation = new pc.Quat();
+  private pose?: { position: pc.Vec3; rotation: pc.Quat; world: boolean; settling: boolean };
+  private nextPosition = new pc.Vec3();
+  private nextRotation = new pc.Quat();
 
   constructor(device: pc.GraphicsDevice, parent: pc.Entity, models: ModelLibrary,
-    reveal: JarvisReveal, private selectDish: (id: string) => void) {
-    this.entity = child(parent, 'Restaurant menu book');
-    this.pages = { Left: makePage(this.entity, 'Left', device), Right: makePage(this.entity, 'Right', device) };
-    this.gripBounds = [
-      ...Object.values(this.pages).map(({ frame }) => pickBounds(frame, [0.214, 0.290, 0.032], [0, 0, -0.008])),
-      pickBounds(this.entity, [0.350, 0.044, 0.19], [0, 0.022, 0]),
-    ];
-    const fallback = this.fallback = child(this.entity, 'Procedural menu book');
-    const leather = material('#483026');
-    const walnut = material('#4a3124');
-    const brass = material('#a88352');
-    const pages = material('#d9ccaf');
-    this.fallbackMaterials = [leather, walnut, brass, pages];
-    chamferedHousing(device, fallback, 'Walnut cradle', walnut, [0, 0.010, 0], [0.345, 0.178, 0.020], 0.005)
-      .setLocalEulerAngles(-90, 0, 0);
-    const spine = shape(fallback, 'Leather spine', 'cylinder', leather, [0, 0.152, -0.010], [0.017, 0.286, 0.017]);
+    reveal: JarvisReveal, private selectDish: (id: string) => void, restOnSurface = false,
+    private selectComparison?: (id: string, placeId: string) => void) {
+    this.entity = child(parent, 'Restaurant menu folio');
+    const binding = child(this.entity, 'Folio binding');
+    this.pages = { Left: makePage(binding, 'Left', device), Right: makePage(binding, 'Right', device) };
+    const spine = child(binding, 'Folio spine coordinates', [0, 0.152, -0.010]);
     spine.setLocalEulerAngles(-24, 0, 0);
+    this.gripBounds = [
+      ...Object.values(this.pages).map(({ frame }) => pickBounds(frame, [0.207, 0.284, 0.024], [0, 0, -0.005])),
+      pickBounds(spine, [0.020, 0.278, 0.028]),
+    ];
+    const fallback = this.fallback = new pc.Entity('Procedural linen folio');
+    const linen = material('#2c2b2c');
+    const pages = material('#e8e1d5');
+    this.fallbackMaterials = [linen, pages];
+    shape(fallback, 'Linen spine', 'cylinder', linen, [0, 0.152, -0.010], [0.014, 0.278, 0.012])
+      .setLocalEulerAngles(-24, 0, 0);
     for (const side of ['Left', 'Right'] as const) {
       const { frame, surface } = this.pages[side];
       const board = child(fallback, `${side} cover`);
       board.setLocalPosition(frame.getLocalPosition());
       board.setLocalRotation(frame.getLocalRotation());
-      chamferedHousing(device, board, 'Leather binding', leather, [0, 0, -0.012], [0.211, 0.286, 0.016], 0.004);
-      chamferedHousing(device, board, 'Paper block', pages, [0, 0, -0.006], [0.197, 0.273, 0.010], 0.002);
-      for (const x of [-0.098, 0.098]) {
-        for (const y of [-0.136, 0.136]) {
-          shape(board, 'Brass corner', 'box', brass, [x, y, -0.004], [0.014, 0.012, 0.009]);
-        }
-      }
+      chamferedHousing(device, board, 'Charcoal linen cover', linen, [0, 0, -0.006], [0.202, 0.278, 0.006], 0.0018);
+      chamferedHousing(device, board, 'Cotton paper edge', pages, [0, 0, -0.0022], [0.191, 0.266, 0.004], 0.0008);
       facePlane(board, `Menu_Page_${side}`, surface, [0, 0, 0], pageWidth, pageHeight);
     }
+    const mount = (model: pc.Entity): void => {
+      const minY = model.findComponents('render').reduce((bottom, render) =>
+        render.meshInstances.reduce((min, mesh) => Math.min(min, mesh.aabb.getMin().y), bottom), Infinity);
+      if (Number.isFinite(minY)) {
+        this.baseY = restOnSurface ? 0 : minY;
+        if (restOnSurface) binding.setLocalPosition(0, -minY, 0);
+      }
+      binding.addChild(model);
+    };
+    mount(fallback);
     this.entity.enabled = false;
 
-    void models.load(`${assetBase}menu-book.glb`).then((resource) => {
+    // Version the request because the offline service worker retains prior GLBs by URL.
+    void models.load(`${assetBase}menu-book.glb?rev=linen`).then((resource) => {
       if (!resource || !this.fallback) return;
       const book = resource.instantiateRenderEntity();
-      if (!bindFace(modelNode(book, 'Menu_Page_Left'), this.pages.Left.surface) ||
+      if (modelNode(book, 'MenuBook_Cradle') ||
+        !bindFace(modelNode(book, 'Menu_Page_Left'), this.pages.Left.surface) ||
         !bindFace(modelNode(book, 'Menu_Page_Right'), this.pages.Right.surface)) {
         book.destroy();
         return;
       }
-      this.entity.addChild(book);
+      mount(book);
       this.dropFallback();
       reveal.refresh(this.entity, 0.68);
     });
@@ -136,12 +201,16 @@ export class PhysicalMenuBook {
     const selection = dishes.findIndex(({ id }) => id === active);
     const previousSpread = this.spread;
     if (changedVenue) {
-      this.moved = false;
+      this.resetPose();
       this.spread = 0;
+      this.compareSpread = false;
       this.hovered = undefined;
+      this.highlighted = undefined;
     }
-    if (selection !== -1 && active !== this.active) this.spread = Math.floor(selection / spreadSize);
-    this.spread = Math.min(this.spread, Math.max(0, Math.ceil(dishes.length / spreadSize) - 1));
+    if (!this.compareSpread) {
+      if (selection !== -1 && active !== this.active) this.spread = Math.floor(selection / spreadSize);
+      this.spread = Math.min(this.spread, Math.max(0, Math.ceil(dishes.length / spreadSize) - 1));
+    }
     this.place = place;
     this.dishes = dishes;
     this.neighborhood = neighborhood;
@@ -156,13 +225,81 @@ export class PhysicalMenuBook {
     }
   }
 
-  placeAt(position: XYZ, yaw: number): void {
-    if (this.moved) return;
-    this.entity.setLocalPosition(...position);
-    this.entity.setLocalEulerAngles(0, yaw, 0);
+  setComparisonOptions(options: readonly MenuComparisonDish[]): void {
+    this.comparisonOptions = options;
+    if (!options.length) this.compareSpread = false;
+    this.spread = Math.min(this.spread, this.spreadCount - 1);
+    this.buildRows();
   }
 
-  markMoved(): void { this.moved = true; }
+  private get spreadCount(): number {
+    return Math.max(1, Math.ceil((this.compareSpread ? this.comparisonOptions.length : this.dishes.length) / spreadSize));
+  }
+
+  placeAt(position: XYZ, yaw: number): void {
+    this.homePosition.set(...position);
+    this.homeRotation.setFromEulerAngles(0, yaw, 0);
+    if (this.moved || this.pose) return;
+    this.entity.setLocalPosition(this.homePosition);
+    this.entity.setLocalRotation(this.homeRotation);
+  }
+
+  markMoved(): void {
+    this.moved = true;
+    this.pose = undefined;
+  }
+
+  get venueId(): string | undefined { return this.place?.id; }
+
+  get surfaceBaseOffset(): number { return -this.baseY * this.entity.getLocalScale().y; }
+
+  release(tableY?: number, physicalY?: number): boolean {
+    const position = this.entity.getPosition().clone();
+    const rotation = this.entity.getRotation().clone();
+    const tabletop = tableY === undefined ? undefined : tableY + this.surfaceBaseOffset;
+    const onTable = tabletop !== undefined && (physicalY === undefined ||
+      Math.abs(position.y - tabletop) <= Math.abs(position.y - physicalY) + 0.01);
+    const height = onTable ? tabletop : physicalY;
+    if (height !== undefined) {
+      position.y = height;
+      rotation.setFromAxisAngle(pc.Vec3.UP, levelYaw(this.entity) * pc.math.RAD_TO_DEG);
+      const parent = this.entity.parent;
+      if (onTable && parent) {
+        new pc.Mat4().invert(parent.getWorldTransform()).transformPoint(position, position);
+        rotation.mul2(parent.getRotation().clone().invert(), rotation);
+      }
+    }
+    this.moved = true;
+    this.pose = { position, rotation, world: !onTable, settling: height !== undefined };
+    return height !== undefined;
+  }
+
+  resetPose(): void {
+    if (!this.moved) return;
+    this.moved = false;
+    this.pose = { position: this.homePosition, rotation: this.homeRotation, world: false, settling: true };
+  }
+
+  update(dt: number, reducedMotion: boolean): void {
+    const pose = this.pose;
+    if (!pose) return;
+    const from = pose.world ? this.entity.getPosition() : this.entity.getLocalPosition();
+    const rotation = pose.world ? this.entity.getRotation() : this.entity.getLocalRotation();
+    if (pose.settling && (reducedMotion || (from.distanceSq(pose.position) < 0.000001 && Math.abs(rotation.dot(pose.rotation)) > 0.99999))) {
+      pose.settling = false;
+    }
+    const blend = damp(dt, 16);
+    const position = pose.settling ? this.nextPosition.lerp(from, pose.position, blend) : pose.position;
+    const nextRotation = pose.settling ? this.nextRotation.slerp(rotation, pose.rotation, blend) : pose.rotation;
+    if (pose.world) {
+      this.entity.setPosition(position);
+      this.entity.setRotation(nextRotation);
+    } else {
+      this.entity.setLocalPosition(position);
+      this.entity.setLocalRotation(nextRotation);
+      if (!pose.settling) this.pose = undefined;
+    }
+  }
 
   setHoveredDish(id: string | undefined): void {
     if (this.hovered === id) return;
@@ -170,25 +307,48 @@ export class PhysicalMenuBook {
     this.draw();
   }
 
+  setHighlightedDish(id: string | undefined): void {
+    const changed = this.highlighted !== id;
+    this.highlighted = id;
+    if (id && !this.compareSpread) {
+      const index = this.dishes.findIndex((dish) => dish.id === id);
+      if (index !== -1) {
+        const nextSpread = Math.floor(index / spreadSize);
+        if (nextSpread !== this.spread) {
+          this.spread = nextSpread;
+          this.buildRows();
+          return;
+        }
+      }
+    }
+    if (changed) this.draw();
+  }
+
   private buildRows(): void {
     this.clearTargets();
-    const visible = this.dishes.slice(this.spread * spreadSize, (this.spread + 1) * spreadSize);
-    this.pages.Right.rows = visible.slice(0, rightRows).map((dish, i) => ({ dish, top: 208 + 172 * i, height: 152 }));
-    this.pages.Left.rows = visible.slice(rightRows).map((dish, i) => ({ dish, top: 514 + 121 * i, height: 108 }));
+    const offset = this.spread * spreadSize;
+    if (this.compareSpread) {
+      const rows = this.comparisonOptions.slice(offset, offset + spreadSize);
+      this.pages.Right.rows = rows.slice(0, rightRows).map((entry, i) => ({ ...entry, top: 208 + 172 * i, height: 152 }));
+      this.pages.Left.rows = rows.slice(rightRows).map((entry, i) => ({ ...entry, top: 208 + 172 * i, height: 152 }));
+    } else {
+      const visible = this.dishes.slice(offset, offset + spreadSize);
+      this.pages.Right.rows = visible.slice(0, rightRows).map((dish, i) => ({ dish, top: 208 + 172 * i, height: 152 }));
+      this.pages.Left.rows = visible.slice(rightRows).map((dish, i) => ({ dish, top: 500 + 121 * i, height: 108 }));
+    }
     for (const { frame, rows } of Object.values(this.pages)) {
       for (const { dish, top, height } of rows) {
         const entity = child(frame, dish.name, [0, pageHeight * (0.5 - (top + height / 2) / canvasHeight), 0]);
         this.targets.push(target(entity, [rowWidth, height * pageHeight / canvasHeight, 0.026],
-          () => this.selectDish(dish.id), dish.id));
+          () => { if (this.compareSpread) this.selectComparison?.(dish.id, dish.place_id); else this.selectDish(dish.id); }, dish.id));
       }
     }
-    if (this.dishes.length > spreadSize) {
-      const spreadCount = Math.ceil(this.dishes.length / spreadSize);
+    if (this.spreadCount > 1) {
       for (const direction of [-1, 1]) {
         const next = this.spread + direction;
-        if (next < 0 || next >= spreadCount) continue;
+        if (next < 0 || next >= this.spreadCount) continue;
         const entity = child(this.pages.Right.frame, direction < 0 ? 'Previous menu pages' : 'Next menu pages',
-          [direction * 0.053, pageHeight * (0.5 - 971 / canvasHeight), 0]);
+          [direction * 0.053, pageHeight * (0.5 - 945 / canvasHeight), 0]);
         this.targets.push(target(entity, [0.064, 0.019, 0.026], () => {
           this.spread = next;
           this.hovered = undefined;
@@ -196,145 +356,202 @@ export class PhysicalMenuBook {
         }));
       }
     }
+    if (this.comparisonOptions.length && this.selectComparison) {
+      const entity = child(this.pages.Right.frame, 'Compare 3D dishes', [0, pageHeight * (0.5 - 1018 / canvasHeight), 0]);
+      this.targets.push(target(entity, [0.164, 0.015, 0.026], () => {
+        this.compareSpread = !this.compareSpread;
+        this.spread = 0;
+        this.hovered = undefined;
+        this.buildRows();
+      }, 'menu-compare'));
+    }
     this.draw();
   }
 
   private draw(): void {
     const place = this.place;
     if (!place) return;
-    const spreadCount = Math.ceil(this.dishes.length / spreadSize);
+    const spreadCount = this.spreadCount;
+    const section = this.compareSpread ? 'Compare 3D dishes' : menuSection(place);
+    const canCompare = this.comparisonOptions.length > 0;
+    const primary = this.compareSpread ? this.dishes.find(({ id }) => id === this.active) : undefined;
+    const notes = menuNotes(place);
     for (const side of ['Left', 'Right'] as const) {
       const { rows, surface } = this.pages[side];
-      const rowState = rows.map(({ dish }) => [dish.name, dish.price, dish.portion_note, this.hovered === dish.id,
-        this.active === dish.id, this.compared === dish.id]);
-      surface.draw(JSON.stringify([side, place.name, place.category, place.vibe, place.typical_price, place.rooms[0]?.stated_capacity,
-        this.neighborhood, this.spread, spreadCount, rowState]), (ctx, w, h) => {
-        ctx.fillStyle = paper;
-        ctx.fillRect(0, 0, w, h);
-        ctx.strokeStyle = brassInk;
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(18, 18, w - 36, h - 36);
-        ctx.strokeStyle = '#b39974';
-        ctx.strokeRect(24, 24, w - 48, h - 48);
+      const rowState = rows.map(({ dish, placeName }) => [dish.name, dish.price, placeName ?? dish.portion_note, hasDishPreview(dish), this.hovered === dish.id,
+        this.highlighted === dish.id, this.active === dish.id, this.compared === dish.id]);
+      surface.draw(JSON.stringify([side, place.name, place.vibe, section, notes,
+        this.neighborhood, this.spread, spreadCount, this.compareSpread, primary?.name, canCompare, this.hovered === 'menu-compare', rowState]), (ctx, w, h) => {
+        this.drawPaper(ctx, side, w, h);
         ctx.textBaseline = 'top';
-        if (side === 'Left') this.drawIntroduction(ctx, place, rows.length > 0);
-        else {
-          ctx.fillStyle = brassInk;
-          ctx.font = '600 25px system-ui, sans-serif';
-          ctx.fillText(place.name.toUpperCase(), 54, 58, w - 108);
+        if (side === 'Left' && !this.compareSpread) this.drawIntroduction(ctx, place, section, notes, rows.length > 0);
+        else if (side === 'Left' && !rows.length && primary) {
+          this.drawSmallCaps(ctx, 'On the table', 215, 33);
+          this.drawRule(ctx, 282, 102, w - 102);
+          ctx.textAlign = 'center';
           ctx.fillStyle = ink;
-          ctx.font = '700 69px Georgia, serif';
-          ctx.fillText('Menu Items', 50, 94, w - 100);
-          this.drawRule(ctx, 182);
-          if (!rows.length) {
-            ctx.fillStyle = brassInk;
-            ctx.font = '500 32px system-ui, sans-serif';
-            ctx.fillText('No dish previews available', 54, 232, w - 108);
+          ctx.font = '600 56px Georgia, serif';
+          ctx.fillText(primary.name, w / 2, 340, w - 104);
+          ctx.fillStyle = mutedInk;
+          ctx.font = 'italic 34px Georgia, serif';
+          ctx.fillText(place.name, w / 2, 421, w - 104);
+          ctx.font = '32px Georgia, serif';
+          ctx.fillText('Pick a second dish from the facing page.', w / 2, 555, w - 104);
+          ctx.textAlign = 'left';
+        }
+        else {
+          this.drawSmallCaps(ctx, section, 104, 35);
+          this.drawRule(ctx, 168, 52, w - 52);
+          if (!rows.length && !this.compareSpread) {
+            ctx.font = 'italic 31px Georgia, serif';
+            ctx.fillStyle = mutedInk;
+            ctx.textAlign = 'center';
+            ctx.fillText('No dishes listed', w / 2, 236);
+            ctx.textAlign = 'left';
           }
         }
         for (const row of rows) this.drawRow(ctx, row);
         if (side === 'Right' && spreadCount > 1) {
-          ctx.font = '600 26px system-ui, sans-serif';
-          ctx.fillStyle = brassInk;
+          this.drawRule(ctx, 908, 52, w - 52);
+          ctx.font = 'italic 26px Georgia, serif';
+          ctx.fillStyle = mutedInk;
           ctx.textAlign = 'center';
-          ctx.fillText(`${this.spread + 1} / ${spreadCount}`, w / 2, 958);
+          ctx.fillText(`${this.spread + 1} / ${spreadCount}`, w / 2, 931);
           for (const direction of [-1, 1]) {
             if (this.spread + direction < 0 || this.spread + direction >= spreadCount) continue;
             const x = w / 2 + direction * 0.053 * w / pageWidth;
-            ctx.strokeStyle = brassInk;
-            ctx.strokeRect(x - 120, 937, 240, 68);
-            ctx.fillText(direction < 0 ? '← Previous' : 'Next →', x, 956);
+            ctx.fillText(direction < 0 ? '← Previous' : 'Next →', x, 931);
           }
           ctx.textAlign = 'left';
+        }
+        if (side === 'Right' && canCompare) {
+          this.drawRule(ctx, 982, 52, w - 52);
+          if (this.hovered === 'menu-compare') {
+            ctx.fillStyle = 'rgba(155, 118, 66, 0.11)';
+            ctx.fillRect(52, 990, w - 104, 55);
+          }
+          this.drawSmallCaps(ctx, this.compareSpread ? '← Restaurant menu' : 'Compare 3D dishes →', 1001, 24);
         }
       });
     }
   }
 
-  private drawRule(ctx: CanvasRenderingContext2D, y: number): void {
-    ctx.fillStyle = brassInk;
-    ctx.fillRect(52, y, 317, 2);
-    ctx.fillRect(399, y, 317, 2);
+  private drawPaper(ctx: CanvasRenderingContext2D, side: Side, width: number, height: number): void {
+    ctx.fillStyle = ivoryPaper;
+    ctx.fillRect(0, 0, width, height);
+    const gutter = side === 'Left' ? width : 0;
+    const gradient = ctx.createLinearGradient(gutter, 0, gutter + (side === 'Left' ? -124 : 124), 0);
+    gradient.addColorStop(0, '#e7dfd0');
+    gradient.addColorStop(0.38, 'rgba(216, 205, 187, 0.37)');
+    gradient.addColorStop(1, 'rgba(216, 205, 187, 0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+    const grain = ctx.createPattern(paperGrain(), 'repeat');
+    if (grain) {
+      ctx.fillStyle = grain;
+      ctx.fillRect(0, 0, width, height);
+    }
+  }
+
+  private drawRule(ctx: CanvasRenderingContext2D, y: number, from: number, to: number): void {
+    ctx.fillStyle = 'rgba(97, 88, 79, 0.48)';
+    ctx.fillRect(from, y, to - from, 1.5);
+  }
+
+  private drawSmallCaps(ctx: CanvasRenderingContext2D, text: string, y: number, size = 25): void {
     ctx.save();
-    ctx.translate(384, y + 1);
-    ctx.rotate(Math.PI / 4);
-    ctx.fillRect(-5, -5, 10, 10);
+    ctx.fillStyle = ink;
+    ctx.font = `600 ${size}px Georgia, serif`;
+    ctx.letterSpacing = '5px';
+    ctx.textAlign = 'center';
+    ctx.fillText(text.toUpperCase(), canvasWidth / 2, y, canvasWidth - 104);
     ctx.restore();
   }
 
-  private drawIntroduction(ctx: CanvasRenderingContext2D, place: XRPlaceData, overflow: boolean): void {
-    ctx.fillStyle = brassInk;
-    ctx.font = '600 25px system-ui, sans-serif';
-    const category = place.category.replaceAll('_', ' ');
-    ctx.fillText([category, this.neighborhood].filter(Boolean).join('  /  ').toUpperCase(), 54, 63, 660);
-    ctx.font = '700 65px Georgia, serif';
+  private drawIntroduction(ctx: CanvasRenderingContext2D, place: XRPlaceData,
+    section: string, notes: [string, string], overflow: boolean): void {
+    const center = canvasWidth / 2;
+    const city = place.stop_id === 'place-harsq' ? 'Cambridge' : 'Boston';
+    const area = [city, this.neighborhood].filter(Boolean).join(' · ');
+    this.drawSmallCaps(ctx, area, overflow ? 64 : 161);
+    ctx.textAlign = 'center';
     ctx.fillStyle = ink;
-    wrappedText(ctx, place.name, 50, 109, 668, 71, 2);
-    this.drawRule(ctx, 266);
-    ctx.fillStyle = '#533f31';
-    ctx.font = '400 33px Georgia, serif';
-    wrappedText(ctx, place.vibe, 54, 292, 660, 37, 3);
-    const capacity = place.rooms[0]?.stated_capacity;
-    const notes = [capacity ? `Seats ${capacity} in ${place.rooms[0].name}` : '', `Typically $${place.typical_price.toFixed(2)}`].filter(Boolean);
-    ctx.fillStyle = brassInk;
-    ctx.font = '600 26px system-ui, sans-serif';
-    ctx.fillText(notes.join('  ·  '), 54, 415, 660);
-    ctx.font = '700 32px Georgia, serif';
-    ctx.fillStyle = ink;
-    ctx.fillText(overflow ? 'Featured Specials' : 'House Highlights', 52, 465, 664);
-    if (!overflow) {
-      ctx.fillStyle = '#533f31';
-      ctx.font = '400 33px Georgia, serif';
-      if (this.dishes.length) {
-        ctx.fillText('Select any dish to view it in 3D.', 54, 523, 660);
-        ctx.font = '600 26px system-ui, sans-serif';
-        ctx.fillStyle = brassInk;
-        ctx.fillText('Trip estimates include transit fare.', 54, 576, 660);
-      }
-      this.drawRule(ctx, 660);
+    ctx.font = `600 ${overflow ? 60 : 74}px Georgia, serif`;
+    wrappedText(ctx, place.name, center, overflow ? 108 : 218, 650, overflow ? 64 : 78, 2);
+    this.drawRule(ctx, overflow ? 247 : 391, center - 58, center + 58);
+    ctx.fillStyle = mutedInk;
+    ctx.font = 'italic 33px Georgia, serif';
+    wrappedText(ctx, place.vibe, center, overflow ? 278 : 428, 615, 39, 2);
+    if (overflow) {
+      this.drawSmallCaps(ctx, `${section} · continued`, 429);
+      this.drawRule(ctx, 475, 51, canvasWidth - 51);
     }
+    ctx.fillStyle = mutedInk;
+    ctx.font = '400 25px Georgia, serif';
+    for (const [i, note] of notes.filter(Boolean).entries()) {
+      ctx.fillText(note, center, (overflow ? 990 : 894) + i * 33, 670);
+    }
+    ctx.textAlign = 'left';
   }
 
-  private drawRow(ctx: CanvasRenderingContext2D, { dish, top, height }: Row): void {
-    const width = canvasWidth * rowWidth / pageWidth;
-    const x = (canvasWidth - width) / 2;
-    const label = dish.id === this.active ? 'ON TABLE' : dish.id === this.compared ? 'COMPARE' : '';
-    const hovered = dish.id === this.hovered;
-    if (hovered || label) {
-      ctx.fillStyle = hovered ? '#f2e4c1' : '#eee3cc';
-      ctx.fillRect(x, top, width, height);
-      ctx.strokeStyle = hovered ? '#a37329' : '#b39464';
-      ctx.lineWidth = hovered ? 4 : 2;
-      ctx.strokeRect(x + 2, top + 2, width - 4, height - 4);
-    } else {
-      ctx.fillStyle = '#c9b697';
-      ctx.fillRect(x + 11, top + height, width - 22, 1);
+  private drawRow(ctx: CanvasRenderingContext2D, { dish, top, height, placeName }: Row): void {
+    const rowPixels = canvasWidth * rowWidth / pageWidth;
+    const rowLeft = (canvasWidth - rowPixels) / 2;
+    const left = rowLeft + 20;
+    const right = canvasWidth - left;
+    const compact = height < 120;
+    const state = dish.id === this.active ? 'Previewing' : dish.id === this.compared ? 'Comparing' : dish.id === this.highlighted ? 'Spotlight' : '';
+    const hovered = dish.id === this.hovered || dish.id === this.highlighted;
+    if (hovered) {
+      ctx.fillStyle = dish.id === this.highlighted ? 'rgba(138, 87, 67, 0.17)' : 'rgba(155, 118, 66, 0.11)';
+      ctx.fillRect(rowLeft + 4, top + 4, rowPixels - 8, height - 8);
+      if (dish.id === this.highlighted) {
+        ctx.strokeStyle = accentInk;
+        ctx.lineWidth = 3;
+        ctx.strokeRect(rowLeft + 5, top + 5, rowPixels - 10, height - 10);
+      }
     }
-    const inset = 24;
     const price = `$${dish.price.toFixed(2)}`;
-    ctx.font = '650 30px system-ui, sans-serif';
+    ctx.font = '400 31px "Courier New", monospace';
     const priceWidth = ctx.measureText(price).width;
-    const textRight = x + width - inset;
     ctx.fillStyle = ink;
-    ctx.fillText(price, textRight - priceWidth, top + 17);
-    ctx.font = '700 36px Georgia, serif';
-    const nameWidth = width - inset * 2 - priceWidth - 46;
-    ctx.fillText(dish.name, x + inset, top + 12, nameWidth);
-    const nameEnd = x + inset + Math.min(nameWidth, ctx.measureText(dish.name).width);
-    ctx.fillStyle = '#9e835d';
-    for (let at = nameEnd + 13; at < textRight - priceWidth - 10; at += 8) ctx.fillRect(at, top + 40, 2, 2);
-    const labelWidth = label ? 132 : 0;
-    ctx.font = '400 28px Georgia, serif';
-    ctx.fillStyle = '#5e4b3d';
-    wrappedText(ctx, dish.portion_note, x + inset, top + 58, width - inset * 2 - labelWidth, 28, height > 120 ? 2 : 1);
-    if (label) {
-      ctx.fillStyle = '#72512d';
-      ctx.fillRect(textRight - labelWidth + 8, top + height - 36, labelWidth - 8, 28);
-      ctx.fillStyle = paper;
-      ctx.font = '700 16px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(label, textRight - (labelWidth - 8) / 2, top + height - 31);
+    ctx.textAlign = 'right';
+    ctx.fillText(price, right, top + 16);
+    ctx.textAlign = 'left';
+
+    const tagSpace = hasDishPreview(dish) ? 48 : 0;
+    const titleWidth = right - left - priceWidth - tagSpace - 43;
+    ctx.font = '600 39px Georgia, serif';
+    const naturalWidth = ctx.measureText(dish.name).width;
+    if (naturalWidth > titleWidth) ctx.font = `600 ${Math.max(29, 39 * titleWidth / naturalWidth)}px Georgia, serif`;
+    ctx.fillText(dish.name, left, top + 10, titleWidth);
+    const nameEnd = left + Math.min(titleWidth, ctx.measureText(dish.name).width);
+    if (tagSpace) {
+      ctx.fillStyle = accentInk;
+      ctx.font = 'italic 600 25px Georgia, serif';
+      ctx.fillText('3D', nameEnd + 10, top + 23, tagSpace - 12);
+    }
+    ctx.fillStyle = mutedInk;
+    for (let x = nameEnd + tagSpace + 11; x < right - priceWidth - 10; x += 7) ctx.fillRect(x, top + 42, 1.5, 1.5);
+    if (hovered) {
+      ctx.fillStyle = accentInk;
+      ctx.fillRect(left, top + 53, nameEnd - left, 1);
+    }
+
+    ctx.fillStyle = mutedInk;
+    ctx.font = `italic ${compact ? 25 : 29}px Georgia, serif`;
+    const descriptionWidth = right - left - (compact && state ? 143 : 0);
+    wrappedText(ctx, placeName ?? dish.portion_note, left, top + 60, descriptionWidth, 32, compact ? 1 : 2);
+    if (state) {
+      ctx.font = 'italic 25px Georgia, serif';
+      ctx.textAlign = 'right';
+      ctx.fillStyle = mutedInk;
+      ctx.fillText(state, right, top + height - 35);
       ctx.textAlign = 'left';
+      ctx.fillStyle = accentInk;
+      ctx.beginPath();
+      ctx.arc(right - ctx.measureText(state).width - 12, top + height - 21, 3.7, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 
@@ -347,11 +564,15 @@ export class PhysicalMenuBook {
     this.clearTargets();
     this.place = undefined;
     this.dishes = [];
+    this.comparisonOptions = [];
+    this.compareSpread = false;
     for (const page of Object.values(this.pages)) page.rows = [];
     this.hovered = undefined;
+    this.highlighted = undefined;
     this.active = undefined;
     this.compared = undefined;
     this.moved = false;
+    this.pose = undefined;
     this.spread = 0;
     this.entity.enabled = false;
   }

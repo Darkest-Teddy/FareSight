@@ -1,9 +1,10 @@
 import * as pc from 'playcanvas';
 import type { XRAssetData, XRManifestData, XRPlaceData, XRRoomData } from './bridgeTypes';
-import { chamferedHousing, PhysicalPlaque } from './CanvasPanel3D';
-import type { JarvisReveal } from './JarvisReveal';
+import { isSplat, menuDishes } from '../data/preview3D';
+import { PhysicalPlaque } from './CanvasPanel3D';
+import { jarvisPoints, type JarvisReveal } from './JarvisReveal';
 import { PhysicalMenuBook } from './PhysicalMenuBook';
-import { isSplat, type SplatLoader } from './SplatLoader';
+import type { SplatLoader } from './SplatLoader';
 import { assetBase, child, cyan, material, shape, type HitTarget, type ModelLibrary, type XYZ } from './sceneSupport';
 
 type Seating = XRRoomData['seating'];
@@ -18,14 +19,8 @@ export class VenueSplatScene {
   private peopleRoot: pc.Entity;
   private header: PhysicalPlaque;
   private fitPanel: PhysicalPlaque;
-  private headerStand: pc.Entity;
-  private fitStand: pc.Entity;
   private plaqueModel: Promise<pc.ContainerResource | null>;
   private gallery: PhysicalPlaque[] = [];
-  private lectern: pc.Entity;
-  private lecternTop: pc.Entity;
-  private lecternColumn: pc.Entity;
-  private lecternMaterials = [material('#523729'), material('#9c784b')];
   private figureMaterials = [material(cyan, 0.34), material('#ff9467', 0.36)];
   private standMaterial = material('#4b433b');
   private place?: XRPlaceData;
@@ -50,23 +45,9 @@ export class VenueSplatScene {
     this.galleryRoot = child(this.cardsRoot, 'Photo gallery arc');
     this.peopleRoot = child(this.cardsRoot, 'Group size preview');
     this.plaqueModel = models.load(`${assetBase}room-plaque-stand.glb`);
-    this.header = this.makePlaque(this.cardsRoot, 'Preview provenance', 0.84, 0.245);
+    this.header = this.makePlaque(this.cardsRoot, 'Preview provenance', 0.69, 0.202);
     this.fitPanel = this.makePlaque(this.peopleRoot, 'Floor-space estimate', 0.85, 0.205);
-    this.headerStand = this.mountPlaque(this.header);
-    this.fitStand = this.mountPlaque(this.fitPanel);
     this.menu = new PhysicalMenuBook(device, this.cardsRoot, models, reveal, selectDish);
-    this.lectern = child(this.cardsRoot, 'Host lectern');
-    const [walnut, brass] = this.lecternMaterials;
-    this.lecternColumn = shape(this.lectern, 'Walnut upright', 'cylinder', walnut, [0, 0.5, 0], [0.076, 1, 0.076]);
-    chamferedHousing(device, this.lectern, 'Weighted walnut foot', walnut, [0, 0.024, 0], [0.36, 0.29, 0.048], 0.011)
-      .setLocalEulerAngles(-90, 0, 0);
-    shape(this.lectern, 'Brass foot collar', 'cylinder', brass, [0, 0.055, 0], [0.108, 0.018, 0.108]);
-    this.lecternTop = child(this.lectern, 'Walnut reading shelf');
-    chamferedHousing(device, this.lecternTop, 'Brass shelf rim', brass, [0, -0.009, 0], [0.438, 0.277, 0.018], 0.005)
-      .setLocalEulerAngles(-90, 0, 0);
-    chamferedHousing(device, this.lecternTop, 'Walnut shelf', walnut, [0, -0.021, 0], [0.434, 0.273, 0.024], 0.006)
-      .setLocalEulerAngles(-90, 0, 0);
-    this.lectern.enabled = false;
     this.peopleRoot.enabled = false;
     this.header.entity.enabled = false;
     this.galleryRoot.enabled = false;
@@ -104,7 +85,7 @@ export class VenueSplatScene {
     this.manifest = manifest;
     this.asset = asset;
     if (!sameRoom) this.currentRoomReady = false;
-    this.menu.setMenu(place, manifest?.menu_items.map(({ dish }) => dish) ?? place.dishes, neighborhood);
+    this.menu.setMenu(place, menuDishes(place, manifest), neighborhood);
     this.positionCards();
     this.drawHeader();
     if (contentChanged) this.buildGallery();
@@ -123,7 +104,7 @@ export class VenueSplatScene {
     this.splats.setVisible('room', showRoom);
     if (this.cardsVisible === showCards) return;
     this.cardsVisible = showCards;
-    for (const entity of [this.header.entity, this.lectern, this.menu.entity]) {
+    for (const entity of [this.header.entity, this.menu.entity]) {
       if (showCards) this.reveal.show(entity, entity === this.menu.entity ? 0.74 : 0.66);
       else this.reveal.hide(entity, 0.54);
     }
@@ -143,7 +124,7 @@ export class VenueSplatScene {
     if (this.fitVisible === visible) return;
     this.fitVisible = visible;
     if (visible) this.reveal.show(this.peopleRoot, 0.78);
-    else this.reveal.hide(this.peopleRoot, 0.48, 900, () => {
+    else this.reveal.hide(this.peopleRoot, 0.48, jarvisPoints.prop, () => {
       if (this.fit.enabled) return;
       for (const figure of this.figures) figure.destroy();
       this.figures = [];
@@ -160,7 +141,7 @@ export class VenueSplatScene {
     this.asset = null;
     this.fitKey = '';
     this.setPresentation(false, false);
-    for (const entity of [this.header.entity, this.lectern, this.menu.entity, this.galleryRoot, this.peopleRoot]) {
+    for (const entity of [this.header.entity, this.menu.entity, this.galleryRoot, this.peopleRoot]) {
       this.reveal.finish(entity, false);
     }
     for (const panel of this.gallery) panel.destroy();
@@ -172,22 +153,14 @@ export class VenueSplatScene {
 
   private positionCards(): void {
     const [x, y, z] = this.spawn;
-    this.header.entity.setLocalPosition(x, y + 0.31, z - 1.40);
-    this.fitPanel.entity.setLocalPosition(x, y - 0.28, z - 1.10);
+    this.header.entity.setLocalPosition(x - 0.10, y + 0.21, z - 1.18);
+    this.fitPanel.entity.setLocalPosition(x - 0.33, y - 0.25, z - 1.12);
     this.galleryRoot.setLocalPosition(x, y - 0.09, z);
-    this.groundStand(this.headerStand);
-    this.groundStand(this.fitStand);
     for (const panel of this.gallery) {
       const stand = panel.entity.findByName('Exhibit stand');
       if (stand instanceof pc.Entity) this.groundStand(stand);
     }
-    const height = Math.max(0.4, y - 0.56);
-    this.lectern.setLocalPosition(x + 0.28, 0, z - 0.92);
-    this.lectern.setLocalEulerAngles(0, -16, 0);
-    this.lecternColumn.setLocalPosition(0, height / 2, 0);
-    this.lecternColumn.setLocalScale(0.076, height, 0.076);
-    this.lecternTop.setLocalPosition(0, height, 0);
-    this.menu.placeAt([x + 0.28, height, z - 0.92], -16);
+    this.menu.placeAt([x + 0.24, y - 0.42, z - 0.74], -16);
   }
 
   private drawHeader(): void {
@@ -308,7 +281,6 @@ export class VenueSplatScene {
     this.menu.destroy();
     this.root.destroy();
     this.standMaterial.destroy();
-    for (const surface of this.lecternMaterials) surface.destroy();
     for (const surface of this.figureMaterials) surface.destroy();
   }
 }

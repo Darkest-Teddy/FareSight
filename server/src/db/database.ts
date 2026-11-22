@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { Asset, GenerationJob, Place } from '@faresight/shared';
+import { sampleReviews, type Asset, type GenerationJob, type Place } from '@faresight/shared';
 import { demoAssets, places } from './seed.ts';
 import type { AtlasPosedFrame, AtlasSplat } from '../services/atlasClient.ts';
 
@@ -36,6 +36,7 @@ export interface PendingReview {
   author_label: string;
   text: string;
   status: 'pending_review' | 'approved' | 'rejected';
+  sample?: boolean;
   created_at: string;
 }
 
@@ -87,14 +88,27 @@ export class Store {
       CREATE TABLE IF NOT EXISTS worker_lease (id INTEGER PRIMARY KEY CHECK (id = 1), owner TEXT NOT NULL, expires INTEGER NOT NULL) STRICT;
     `);
     this.transaction(() => {
-      for (const place of places) this.sqlite.prepare('INSERT OR IGNORE INTO places VALUES (?, ?)').run(place.id, JSON.stringify(place));
+      for (const place of places) {
+        this.sqlite.prepare('INSERT OR IGNORE INTO places VALUES (?, ?)').run(place.id, JSON.stringify(place));
+        // Seed-owned public facts and surveyed positions follow the seed; runtime fields (assets, dishes) stay as stored.
+        const stored = this.get('places', place.id)!;
+        const { name, vibe, hours, details, lat, lon, walk_from_stop_m } = place;
+        this.put('places', { ...stored, name, vibe, hours, details, lat, lon, walk_from_stop_m });
+      }
       // Venues dropped from the catalog because they sit outside their station's model.
       for (const id of ['allston-bostongoods-01', 'allston-coreanos-01', 'allston-brightonmusic-01'])
         this.sqlite.prepare('DELETE FROM places WHERE id = ?').run(id);
-      // Seeded venues keep their surveyed position even when the database predates a correction.
-      const locate = this.sqlite.prepare(`UPDATE places SET data = json_set(data, '$.lat', ?, '$.lon', ?, '$.walk_from_stop_m', ?) WHERE id = ?`);
-      for (const place of places) locate.run(place.lat, place.lon, place.walk_from_stop_m, place.id);
       for (const asset of demoAssets) this.sqlite.prepare('INSERT OR IGNORE INTO assets VALUES (?, ?)').run(asset.id, JSON.stringify(asset));
+      const reviewed = new Set(this.all('reviews').map(({ place_id }) => place_id));
+      for (const place of this.all('places')) {
+        if (place.reviews.length || reviewed.has(place.id)) continue;
+        for (const review of sampleReviews(place.id)) {
+          this.put('reviews', {
+            id: review.id, place_id: place.id, author_label: review.author, text: review.text,
+            created_at: review.created_at, status: 'approved', sample: true,
+          });
+        }
+      }
     });
   }
 
