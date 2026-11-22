@@ -798,7 +798,7 @@ export class PlayCanvasApp implements FareSightSceneEngine {
   private setupXR(xr: pc.XrManager): void {
     this.surfaces?.destroy();
     this.surfaces = new PhysicalSurfaces(xr, this.rig);
-    this.presence = new XRPresence(xr, xr.app.root, this.rig, this.camera, this.picker, {
+    this.presence = new XRPresence(xr, xr.app.root, this.rig, this.camera, this.picker, this.models, {
       buttons: this.actions.targets,
       targets: () => [...this.reviewDeck.active.flatMap(({ targets }) => targets), ...this.sceneTargets()],
       selectEmpty: () => {

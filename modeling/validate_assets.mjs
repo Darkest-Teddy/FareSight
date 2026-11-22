@@ -20,6 +20,8 @@ const gaussians = {
 };
 const uiModels = [
   'vr-control-deck',
+  'vr-controller-left',
+  'vr-controller-right',
   'venue-pin-flag',
   'station-medallion',
   'table-menu-stand',
