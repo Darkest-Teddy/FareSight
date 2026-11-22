@@ -107,7 +107,7 @@ export async function createApp(config: Config = getConfig(), options: { logger?
   if (options.worker !== false) {
     app.addHook('onReady', async () => {
       stopWorker = startJobWorker(store, config, logError, captures);
-      if (captures) stopBridge = startCaptureBridge(store, config, captures, logError);
+      if (captures?.settings.buildCaptures) stopBridge = startCaptureBridge(store, config, captures, logError);
     });
   }
   return app;

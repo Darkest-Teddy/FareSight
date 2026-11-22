@@ -27,7 +27,7 @@ const captures = {
   accessKey: process.env.TEST_S3_ACCESS_KEY ?? 'faresight',
   secretKey: process.env.TEST_S3_SECRET_KEY ?? 'faresight-secret',
   region: 'us-east-1', rawBucket: 'test-raw', splatBucket: 'test-splats',
-  appOrigins: ['*'], workerId: 'test-worker', minFrames: 2,
+  appOrigins: ['*'], workerId: 'test-worker', minFrames: 2, buildCaptures: true,
 };
 captures.databaseUrlDirect = captures.databaseUrl;
 captures.cdnBaseUrl = `${captures.endpoint}/${captures.splatBucket}`;

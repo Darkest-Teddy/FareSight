@@ -9,7 +9,7 @@ const store = new Store(config.database);
 const captures = await openCaptures(config);
 const stopMirror = captures && mirrorJobs(store, captures, console.error);
 const stop = startJobWorker(store, config, console.error, captures);
-const stopBridge = captures && startCaptureBridge(store, config, captures);
+const stopBridge = captures?.settings.buildCaptures ? startCaptureBridge(store, config, captures) : undefined;
 let stopping = false;
 async function shutdown() {
   if (stopping) return;

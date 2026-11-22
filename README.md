@@ -67,6 +67,8 @@ Optional. When `DATABASE_URL` and the `VULTR_S3_*` variables are set, room photo
 
 `GET /api/captures` lists captures and `DELETE /api/captures/:id` removes a capture's rows and every object under its prefixes. Listing and deleting require `X-Admin-Passcode`. Creating a capture, requesting upload URLs, registering frames, and completing a capture accept `X-Upload-Passcode`. Dishes and the web app's Upload studio keep using `POST /api/uploads`. Without these variables nothing changes: photos and splats stay on the server's disk.
 
+Every server that shares the database claims jobs from the same queue and builds them with its own Atlas key. Set `CAPTURE_BUILDS=false` on a machine that should leave the building to another server, for example a laptop pointed at the production database. Each server copies the rooms built elsewhere into its own catalog, so they show up everywhere either way.
+
 ```bash
 # Local stand-ins: Postgres on :54329 and MinIO on :9009
 docker compose up -d
@@ -99,6 +101,8 @@ pnpm --filter @faresight/server run deploy-web        # Add --dry-run to see wha
 | `VULTR_CDN_PULL_ZONE_ID` | The pull zone's ID (see below). |
 
 `VITE_API_ORIGIN` is read by the build, not by `deploy-web`: it is the public address of the Fastify server. The CDN serves files only, so the app cannot reach `/api` through it. Leave it unset to ship the built-in demo data.
+
+`VITE_CONTRIBUTE_URL` is also read by the build: it is the public address of Vantage Contribute. Both pages check the visitor before they draw anything. A phone is sent to that address; everyone else, Meta Quest included, sees the landing page (`/intro.html`) first and reaches the app from its buttons. Opening `/index.html` directly in a new tab leads back to the landing page. Without `VITE_CONTRIBUTE_URL`, phones get the landing page too.
 
 Deploy once so the bucket exists, and in the Vultr console create a CDN pull zone whose origin is `https://<WEB_BUCKET>.<endpoint host>`, for example `https://faresight-web.ewr2.vultrobjects.com`. Put its ID in `VULTR_CDN_PULL_ZONE_ID`. The last two rows are optional: without them the files are still uploaded, but the CDN is not purged.
 
