@@ -5,11 +5,13 @@ import {
 import { createFareSightEngine, type FareSightSceneEngine, type SceneMode } from '../xr';
 import { SoundEngine } from '../audio/SoundEngine';
 import { api, type PairMessage, type Trip } from '../api/client';
+import { auth } from '../api/discoverClient';
 import { offlineCatalog, offlineManifest } from '../data/fallbackData';
 import { countPreviewsByStop, describe3DCount, isSplat } from '../data/preview3D';
 import { buildComparisonBriefingCard, buildPlaceBriefingCard, loadLiveReviews, loadPlaceDecision, maxBriefingCards, placeDecision, type BriefingCard, type BriefingMode } from '../data/reviewBriefing';
 import { LiveController, type AppControlSurface } from '../live/LiveController';
 import { RealtimeVoice } from '../voice/RealtimeVoice';
+import { AccountModal } from './AccountModal';
 import { AdminModal } from './AdminModal';
 import { ArrivalsBell } from './ArrivalsBell';
 import { attribution } from './AttributionModal';
@@ -68,6 +70,8 @@ export class AppShell {
   private readonly mobile = matchMedia('(max-width: 768px)');
   private readonly discover: DiscoverView;
   private readonly bell: ArrivalsBell;
+  private readonly account: AccountModal;
+  private readonly accountButton: HTMLButtonElement;
   private readonly viewToggle = element('div', 'view-toggle');
   /**
    * Discover is a flat 2D page, not a scene in the 3D engine, so it is tracked separately from
@@ -215,6 +219,12 @@ export class AppShell {
       this.setMenuOpen(false);
       this.moreButton.focus();
     });
+    this.account = new AccountModal((user) => {
+      this.accountButton.textContent = user.display_name;
+      this.notify(`Signed in as ${user.display_name}.`);
+    });
+    this.accountButton = button('Sign in', () => void this.openAccount(), 'quiet account-button');
+
     this.discover = new DiscoverView((place) => void this.openDiscoverPlace(place));
     this.discover.root.hidden = true;
     this.bell = new ArrivalsBell(() => this.setDiscoverOpen(true));
@@ -230,7 +240,7 @@ export class AppShell {
       this.viewToggle.append(tab);
     }
 
-    operations.append(this.bell.root, this.vrButton, this.xrExit, this.liveDock.trigger, more);
+    operations.append(this.accountButton, this.bell.root, this.vrButton, this.xrExit, this.liveDock.trigger, more);
     // Between the two groups, so it reads as centred.
     head.append(lead, this.viewToggle, operations);
 
@@ -308,7 +318,7 @@ export class AppShell {
     }
 
     root.replaceChildren(this.canvas, this.canvasNotice, head, this.stationBoard, this.filterBar.root, this.drawer.root,
-      this.discover.root, this.reviewModal.root, this.liveDock.root, tabs, this.notice);
+      this.discover.root, this.reviewModal.root, this.liveDock.root, tabs, this.notice, this.account.root);
     document.addEventListener('keydown', (event) => {
       if (!(event.target instanceof Element && event.target.closest('dialog[open]'))) this.reviewModal.dismissOnEscape(event);
     });
@@ -332,6 +342,7 @@ export class AppShell {
     // The bell watches for arrivals on every view, not just Discover, so somebody exploring the
     // 3D map still learns that a place was added.
     this.bell.start();
+    void this.restoreSession();
     window.setInterval(() => {
       if (document.visibilityState !== 'visible') return;
       void this.refreshTransit();
@@ -706,6 +717,41 @@ export class AppShell {
     // Contributed places live only on Discover. Until their detail view exists, say so plainly
     // rather than navigating somewhere that cannot show them.
     this.notify('This place was added from the phone app. Its 3D view opens here once the scan finishes.');
+  }
+
+  /**
+   * Shows who is signed in, if anyone.
+   *
+   * Also redeems the handoff token the Expo app injects before the page loads, which is how a
+   * native sign-in becomes a web session without the long-lived token entering the WebView.
+   */
+  private async restoreSession() {
+    const handoff = (window as { faresightHandoffToken?: string }).faresightHandoffToken;
+    if (handoff) {
+      delete (window as { faresightHandoffToken?: string }).faresightHandoffToken;
+      try {
+        const user = await auth.exchange(handoff);
+        this.accountButton.textContent = user.display_name;
+        return;
+      } catch { /* Fall through and show the signed-out state. */ }
+    }
+    try {
+      const status = await auth.status();
+      if (status.user) this.accountButton.textContent = status.user.display_name;
+      // Nothing to sign into, so do not offer it.
+      this.accountButton.hidden = !status.enabled;
+    } catch { /* Offline or no server: leave the button as it is. */ }
+  }
+
+  private async openAccount() {
+    const status = await auth.status().catch(() => undefined);
+    if (status?.user) {
+      await auth.logout();
+      this.accountButton.textContent = 'Sign in';
+      this.notify('Signed out.');
+      return;
+    }
+    await this.account.open();
   }
 
   private syncViewToggle() {

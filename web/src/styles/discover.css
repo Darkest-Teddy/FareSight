@@ -564,3 +564,122 @@
   .toast-stack { right: 0.75rem; left: 0.75rem; bottom: calc(var(--phone-bar) + 0.75rem); }
   .toast { min-width: 0; }
 }
+
+/* --- Account dialog --- */
+
+.account-button { white-space: nowrap; }
+
+.account-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(5 8 18 / 72%);
+  backdrop-filter: blur(6px);
+}
+
+.account-modal[hidden] { display: none; }
+
+.account-dialog {
+  position: relative;
+  width: min(23rem, 100%);
+  padding: 1.75rem;
+  border: 1px solid var(--edge);
+  border-radius: 1rem;
+  background: var(--panel);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 55%);
+}
+
+.account-close {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.account-close:hover { color: var(--text); }
+
+.account-title { margin: 0 0 0.35rem; font-size: 1.35rem; }
+.account-subtitle { margin: 0 0 1.25rem; color: var(--muted); font-size: 0.88rem; }
+
+.account-google { display: flex; justify-content: center; min-height: 2.5rem; }
+.account-google[hidden] { display: none; }
+
+.account-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.1rem 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.account-divider::before, .account-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--edge-soft);
+}
+
+.account-divider[hidden] { display: none; }
+
+.account-form { display: flex; flex-direction: column; gap: 0.85rem; }
+
+.account-field { display: flex; flex-direction: column; gap: 0.3rem; }
+.account-field[hidden] { display: none; }
+.account-field > span { color: var(--muted); font-size: 0.78rem; }
+
+.account-input {
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  background: var(--canvas);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.92rem;
+}
+
+.account-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.account-submit {
+  margin-top: 0.35rem;
+  padding: 0.7rem 1rem;
+  border: 0;
+  border-radius: 0.6rem;
+  background: var(--accent);
+  color: #0b1020;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.account-submit:disabled { opacity: 0.6; cursor: default; }
+
+.account-error {
+  margin: 0;
+  color: var(--error);
+  font-size: 0.82rem;
+}
+
+.account-error[hidden] { display: none; }
+
+.account-switch {
+  display: block;
+  width: 100%;
+  margin-top: 1rem;
+  padding: 0.5rem;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
