@@ -38,7 +38,7 @@ export function registerCatalog(app: FastifyInstance, store: Store, config: Conf
       if (review.status !== 'approved') reviews.delete(review.id);
       else reviews.set(review.id, {
         id: review.id, author: review.author_label, text: review.text, created_at: review.created_at,
-        rating: reviews.get(review.id)?.rating ?? (review.sample ? 0 : 5), sample: review.sample,
+        rating: review.rating ?? reviews.get(review.id)?.rating ?? (review.sample ? 0 : 5), sample: review.sample,
       });
     }
     return {

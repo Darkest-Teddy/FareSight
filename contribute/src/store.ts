@@ -23,6 +23,8 @@ export type ScanState =
 
 const CODE_KEY = 'faresight.contribute.code';
 const SCANS_KEY = 'faresight.contribute.scans';
+const REVIEWS_KEY = 'faresight.contribute.reviews';
+const NAME_KEY = 'faresight.contribute.name';
 const activeStages = new Set(['queued', 'generating', 'downloading', 'converting']);
 
 function read<T>(key: string, fallback: T): T {
@@ -190,3 +192,40 @@ class ScanTracker {
 
 export const inviteCode = new InviteCode();
 export const scans = new ScanTracker();
+
+/** A review sent from this phone that the server has not published yet. */
+export interface SentReview {
+  id: string;
+  placeId: string;
+  author: string;
+  text: string;
+  rating: number;
+  createdAt: string;
+}
+
+/** Remembers the reviews sent from this phone, so their author still sees them while they wait for approval. */
+class SentReviews {
+  private list = read<SentReview[]>(REVIEWS_KEY, []);
+
+  /** The name used last time, so it does not have to be typed again. */
+  get author() { return read<string>(NAME_KEY, ''); }
+
+  add(review: SentReview) {
+    this.list = [review, ...this.list];
+    write(REVIEWS_KEY, this.list);
+    write(NAME_KEY, review.author);
+  }
+
+  /** The reviews still waiting at a place. Any the server now publishes are forgotten here. */
+  waiting(placeId: string, published: readonly { id: string }[]) {
+    const live = new Set(published.map((review) => review.id));
+    const kept = this.list.filter((review) => review.placeId !== placeId || !live.has(review.id));
+    if (kept.length !== this.list.length) {
+      this.list = kept;
+      write(REVIEWS_KEY, kept);
+    }
+    return kept.filter((review) => review.placeId === placeId);
+  }
+}
+
+export const sentReviews = new SentReviews();

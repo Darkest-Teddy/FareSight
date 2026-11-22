@@ -48,8 +48,10 @@ export class NetworkView {
   private readonly counts = new Map<string, HTMLElement>();
   private readonly trains = new Map<string, SVGGElement>();
   private readonly trainLayer = svg('g', { class: 'net-trains' });
-  private readonly live = el('p', 'live-pill');
-  private readonly liveCount = el('span');
+  /** How far the whole map is along: places already in 3D out of all of them. */
+  private readonly progress = el('p', 'progress-pill');
+  private readonly progressText = el('span');
+  private readonly progressArc = svg('circle', { cx: 12, cy: 12, r: 9, pathLength: 1, class: 'count-arc' });
   private readonly unsubscribe: () => void;
   private trainTimer = 0;
   private leaving = false;
@@ -76,9 +78,11 @@ export class NetworkView {
     this.focal.forEach((station, index) => this.addNode(station, index));
 
     const mapHost = el('div', 'network-map');
-    this.live.hidden = true;
-    this.live.append(el('i'), this.liveCount);
-    mapHost.append(this.map.root, this.live);
+    const ring = svg('svg', { viewBox: '0 0 24 24', class: 'count-ring', 'aria-hidden': 'true' });
+    ring.append(svg('circle', { cx: 12, cy: 12, r: 9, class: 'count-track' }), this.progressArc);
+    this.progress.hidden = true;
+    this.progress.append(ring, this.progressText);
+    mapHost.append(this.map.root, this.progress);
 
     this.root.append(mapHost);
 
@@ -198,6 +202,11 @@ export class NetworkView {
         node.setAttribute('aria-label', station.name);
       }
     }
+    const all = this.focal.flatMap((station) => catalog.at(station.stopId));
+    const inThreeD = all.filter((place) => coverage(place).room).length;
+    this.progress.hidden = catalog.status !== 'ready' || !all.length;
+    this.progressText.textContent = inThreeD === all.length ? `All ${all.length} places in 3D` : `${inThreeD} of ${all.length} places in 3D`;
+    this.progressArc.style.strokeDashoffset = String(1 - (all.length ? inThreeD / all.length : 0));
   }
 
   /** Zooms into the tapped stop, then hands over to its neighborhood view. */
@@ -216,8 +225,7 @@ export class NetworkView {
     try {
       ({ vehicles } = await api.vehicles());
     } catch {
-      // Trains are decoration here. The map works without them, but must not claim to be live.
-      this.live.hidden = true;
+      // Trains are decoration here. The map works without them.
       return;
     }
     if (!this.alive) return;
@@ -251,7 +259,5 @@ export class NetworkView {
       train.remove();
       this.trains.delete(id);
     }
-    this.liveCount.textContent = `${seen.size} ${seen.size === 1 ? 'train' : 'trains'} moving now`;
-    this.live.hidden = !seen.size;
   }
 }

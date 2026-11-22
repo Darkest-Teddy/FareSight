@@ -1,8 +1,9 @@
 import type { Place, Stop } from '@faresight/shared';
 import { catalog } from '../catalog';
-import { categoryLabel, coverage, loadArea, projectToArea, type AreaData, type AreaLayer } from '../data';
-import { button, el, errorText, haptic, icon, iconButton, svg } from '../dom';
+import { categoryLabel, coverage, loadArea, projectToArea, reviewSummary, servesDishes, type AreaData, type AreaLayer } from '../data';
+import { button, el, errorText, haptic, icon, iconButton, svg, type IconName } from '../dom';
 import { MapCanvas, type Box } from '../MapCanvas';
+import { reviewSheet } from '../ui/ReviewSheet';
 
 type SelectSource = 'pin' | 'restore';
 
@@ -32,8 +33,8 @@ export class StationView {
   private readonly mapHost = el('div', 'station-map');
   private readonly summary = el('p', 'view-sub');
   private readonly pins = new Map<string, HTMLButtonElement>();
-  /** The line under each pin's name that says what the place still needs. */
-  private readonly notes = new Map<string, HTMLElement>();
+  /** The short card about the selected place, over the bottom of the map. */
+  private readonly overview = el('aside', 'place-overview');
   private readonly tagWidths = new Map<string, number>();
   private readonly points = new Map<string, [number, number]>();
   private readonly unsubscribe: () => void;
@@ -105,7 +106,7 @@ export class StationView {
   private build(area: AreaData) {
     this.map?.destroy();
     this.pins.clear();
-    this.notes.clear();
+    this.overview.hidden = true;
     this.tagWidths.clear();
     this.points.clear();
     const [bx, by, bw, bh] = area.bounds;
@@ -133,16 +134,10 @@ export class StationView {
 
       const pin = button('', () => this.tapPin(place), 'pin');
       pin.style.setProperty('--i', String(index));
-      // Every pin carries its place's name. The fuller label replaces it when the pin is selected;
-      // tapping that label, or the pin again, opens the place.
-      const label = el('span', 'pin-name');
-      const text = el('span', 'pin-text');
-      const note = el('small');
-      text.append(el('strong', '', place.name), note);
-      label.append(text, icon('next'));
-      pin.append(el('span', 'pin-tag', place.name), label, el('span', 'pin-head', String(place.pin_index + 1)));
+      // Every pin carries its place's name. Tapping one opens the short overview of the place;
+      // tapping it again goes straight to adding photos.
+      pin.append(el('span', 'pin-tag', place.name), el('span', 'pin-head', String(place.pin_index + 1)));
       this.pins.set(place.id, pin);
-      this.notes.set(place.id, note);
       const anchor = el('div');
       anchor.append(pin);
       map.addMarker(anchor, point[0], point[1]);
@@ -154,7 +149,7 @@ export class StationView {
       recenter.classList.toggle('is-visible', zoom > 1.08);
       this.declutter(map.current.scale, area.station);
     };
-    this.mapHost.replaceChildren(map.root, recenter, el('p', 'map-credit', `© ${area.attribution.replace(' (ODbL)', '')}`));
+    this.mapHost.replaceChildren(map.root, recenter, el('p', 'map-credit', `© ${area.attribution.replace(' (ODbL)', '')}`), this.overview);
     this.syncNeeds();
 
     // The first time, pick up the place the person came back from. When the list changes under an open
@@ -206,8 +201,6 @@ export class StationView {
     for (const place of this.places) {
       const done = coverage(place).room;
       if (!done) waiting++;
-      const note = this.notes.get(place.id);
-      if (note) note.textContent = `${categoryLabel(place)} · ${done ? 'In 3D' : 'Needs photos'}`;
       const pin = this.pins.get(place.id);
       pin?.classList.toggle('is-done', done);
       pin?.setAttribute('aria-label', `${place.pin_index + 1}. ${place.name}. ${done ? 'The space is in 3D.' : 'The space needs photos.'}`);
@@ -216,6 +209,53 @@ export class StationView {
     this.summary.textContent = this.places.length
       ? `${lines} · ${this.places.length} places, ${waiting} need photos`
       : `${lines} · No places listed yet`;
+    this.renderOverview();
+  }
+
+  /**
+   * The overview of the selected place, kept to what someone needs before deciding to go in:
+   * what it is, whether its space and its menu are in 3D yet, and one line of what people say.
+   */
+  private renderOverview() {
+    const place = this.places.find((entry) => entry.id === this.selected);
+    this.overview.hidden = !place;
+    if (!place) return;
+    const status = coverage(place);
+    const head = el('header', 'overview-head');
+    const title = el('div', 'overview-title');
+    title.append(el('h2', '', place.name), el('p', '', `${categoryLabel(place)} · ${place.walk_from_stop_m} m from the stop`));
+    head.append(el('span', 'card-number', String(place.pin_index + 1)), title,
+      iconButton('close', 'Close the overview', () => this.clearSelection(), 'overview-close'));
+
+    const facts = el('ul', 'facts');
+    facts.append(this.fact('room', '3D space', status.room ? 'In 3D' : 'Needs photos', status.room));
+    if (servesDishes(place)) {
+      facts.append(this.fact('dish', 'Menu', status.dishes ? `${status.dishesDone} of ${status.dishes} dishes in 3D` : 'No dishes yet',
+        status.dishes > 0 && status.dishesDone === status.dishes));
+    }
+    const review = reviewSummary(place);
+    const reviews = button('', () => reviewSheet.open(place), 'fact fact-reviews');
+    const words = el('span', 'fact-text');
+    words.append(
+      el('strong', '', review.rating ? `${review.rating.toFixed(1)} ★ on ${review.source}` : 'Reviews'),
+      el('small', '', review.quote ?? 'No reviews yet. Be the first.'),
+    );
+    reviews.append(icon('star'), words, icon('next'));
+    const row = el('li');
+    row.append(reviews);
+    facts.append(row);
+
+    const cta = button('Add photos', () => this.actions.openPlace(place), 'primary overview-cta');
+    cta.append(icon('next'));
+    this.overview.replaceChildren(head, el('p', 'overview-about', place.vibe), facts, cta);
+  }
+
+  private fact(symbol: IconName, label: string, value: string, done: boolean) {
+    const row = el('li', done ? 'fact is-done' : 'fact');
+    const mark = el('i', 'fact-mark');
+    mark.append(icon(done ? 'check' : 'camera'));
+    row.append(icon(symbol), el('span', 'fact-label', label), el('b', '', value), mark);
+    return row;
   }
 
   /**
@@ -334,11 +374,12 @@ export class StationView {
       pin.classList.toggle('is-selected', id === place.id);
       pin.parentElement?.classList.toggle('is-raised', id === place.id);
     }
+    this.renderOverview();
 
     const { width, height } = map.size;
     const scale = Math.min(width, height) / (FOCUS_SPAN_M * area.unitsPerMeter);
-    // Sit the pin a little below centre so its name label has room above it.
-    const view = { cx: point[0], cy: point[1] - 16 / scale, scale };
+    // The overview covers the bottom of the map, so the pin goes to the middle of what is left above it.
+    const view = { cx: point[0], cy: point[1] + (this.overview.offsetHeight / 2 - 10) / scale, scale };
     if (source === 'restore') map.set(view);
     else void map.fly(view, 520);
 
@@ -348,6 +389,7 @@ export class StationView {
   private clearSelection() {
     this.selected = undefined;
     this.root.classList.remove('has-selection');
+    this.renderOverview();
     for (const pin of this.pins.values()) {
       pin.classList.remove('is-selected');
       pin.parentElement?.classList.remove('is-raised');

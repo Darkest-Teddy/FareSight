@@ -44,9 +44,9 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 [hidden] { display: none !important; }
-h1, h2, p, ol, ul, figure { margin: 0; }
+h1, h2, h3, p, ol, ul, figure { margin: 0; }
 ol, ul { padding: 0; list-style: none; }
-button, input { font: inherit; color: inherit; }
+button, input, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; touch-action: manipulation; transition: transform .14s var(--ease-out), background-color .2s, border-color .2s, opacity .2s; }
 button:active:not(:disabled) { transform: scale(.96); }
 button:disabled { cursor: default; }
@@ -182,15 +182,15 @@ button:disabled { cursor: default; }
 
 /* ---- Shared pieces ---- */
 /* Every raised surface is the same pane of glass. Rules further down only set its shape. */
-.wordmark, .icon-button, .tabbar, .live-pill, .stop-tag, .pin-name, .kind-card, .kind-note, .tips, .add-tile,
+.wordmark, .icon-button, .tabbar, .progress-pill, .stop-tag, .place-overview, .kind-card, .kind-note, .tips, .add-tile,
 .segmented, .chip, .text-input, .code-input, .scan-card, .sheet-dialog, .sweep-card, .sweep-hint, .sweep-dome {
   border: 1px solid var(--glass-edge);
   background: var(--glass);
   box-shadow: var(--glass-shine), var(--glass-shadow);
 }
-.live-pill, .stop-tag, .pin-name { background: var(--glass-thick); }
+.progress-pill, .stop-tag, .place-overview { background: var(--glass-thick); }
 /* Only what floats over other content blurs it: blurring every card in a list is slow on phones. */
-.wordmark, .icon-button, .tabbar, .live-pill, .stop-tag, .pin-name, .sheet-dialog, .sweep-card, .sweep-hint, .sweep-dome {
+.wordmark, .icon-button, .tabbar, .progress-pill, .stop-tag, .place-overview, .sheet-dialog, .sweep-card, .sweep-hint, .sweep-dome {
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
 }
@@ -284,7 +284,7 @@ button:disabled { cursor: default; }
 .train-dot { fill: #fff; stroke: var(--line); stroke-width: 2.8px; }
 .train-glow { fill: var(--line); opacity: .3; }
 .train-ping { fill: none; stroke: var(--line); stroke-width: 2px; transform-box: fill-box; transform-origin: center; animation: train-ping 3s ease-out var(--beat, 0s) infinite; }
-.live-pill {
+.progress-pill {
   position: absolute;
   /* Centred in the row of the floating top buttons. */
   top: calc(max(.6rem, env(safe-area-inset-top)) + .45rem);
@@ -294,16 +294,18 @@ button:disabled { cursor: default; }
   display: flex;
   align-items: center;
   gap: .5rem;
-  padding: .36rem .8rem .38rem .7rem;
+  padding: .36rem .85rem .38rem .6rem;
   border-radius: 999px;
-  color: var(--muted);
+  color: var(--text);
+  white-space: nowrap;
   font-size: .72rem;
   font-weight: 650;
   pointer-events: none;
   animation: fade-in .5s both;
   transition: opacity .25s;
 }
-.live-pill i { width: .46rem; height: .46rem; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 0 rgb(79 227 255 / 60%); animation: beacon 1.8s ease-out infinite; }
+.progress-pill .count-ring { color: var(--accent); }
+.progress-pill .count-track { stroke: rgb(255 255 255 / 16%); }
 
 .is-intro .line-tube, .is-intro .line-core { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 1.25s var(--ease-out) forwards; animation-delay: calc(var(--i) * 90ms); }
 .is-intro .line-core { animation-delay: calc(var(--i) * 90ms + 160ms); }
@@ -353,7 +355,7 @@ button:disabled { cursor: default; }
 .stop-node[data-side=bottom] .stop-tag { top: calc(100% + .2rem); left: 50%; translate: -50% 0; }
 .stop-node[data-side=right] .stop-tag { left: calc(100% + .25rem); top: 50%; translate: 0 -50%; }
 .stop-node[data-side=left] .stop-tag { right: calc(100% + .25rem); top: 50%; translate: 0 -50%; }
-.is-diving .live-pill { opacity: 0; }
+.is-diving .progress-pill { opacity: 0; }
 .is-diving .stop-node:not(.is-diving), .is-diving .stop-tag { opacity: 0; transition: opacity .25s; }
 .is-diving .map-svg { animation: fade-out .3s .2s both; }
 .stop-node.is-diving .stop-halo { border: 0; background: var(--line); animation: dive-burst .52s ease-out forwards; }
@@ -459,32 +461,93 @@ button:disabled { cursor: default; }
   transition: opacity .2s;
 }
 .pin.is-selected .pin-tag { opacity: 0; }
-.pin-name {
-  position: absolute;
-  bottom: calc(100% + .45rem);
-  display: flex;
-  align-items: center;
-  gap: .45rem;
-  /* Sized by its own text, not by the narrow pin it hangs from. */
-  width: max-content;
-  max-width: 15rem;
-  padding: .4rem .55rem .42rem .8rem;
-  border-color: var(--accent);
-  border-radius: 1rem;
-  text-align: left;
-  opacity: 0;
-  transform: translateY(.3rem) scale(.9);
-  transition: opacity .2s, transform .3s var(--spring);
-  pointer-events: none;
-}
-.pin-text { display: grid; gap: 1px; min-width: 0; }
-.pin-text strong { overflow: hidden; font-size: .82rem; font-weight: 700; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
-.pin-text small { color: var(--muted); font-size: .68rem; font-weight: 550; white-space: nowrap; }
-.pin.is-done .pin-text small { color: var(--ok); }
-.pin-name .icon { width: 1rem; height: 1rem; color: var(--accent); }
-.pin.is-selected .pin-name { opacity: 1; transform: none; pointer-events: auto; }
+.pin.is-selected .pin-tag { border-color: var(--accent); }
 .pin.is-selected .pin-head { transform: scale(1.28); box-shadow: 0 0 0 .25rem rgb(79 227 255 / 60%), 0 .4rem .9rem rgb(0 0 0 / 55%); }
 .has-selection .pin:not(.is-selected) { opacity: .78; }
+
+/* ---- Place overview: the short card about the selected place ---- */
+.place-overview {
+  position: absolute;
+  inset: auto .6rem .6rem;
+  z-index: 3;
+  display: grid;
+  gap: .7rem;
+  padding: 1rem;
+  border-radius: var(--radius);
+  animation: sheet-up .34s var(--ease-out);
+}
+.overview-head { display: flex; align-items: center; gap: .65rem; }
+.card-number {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 28%, #ffe2a8, #e8a849 58%, #b17a2a);
+  color: #2a1c05;
+  font-size: .8rem;
+  font-weight: 800;
+}
+.overview-title { display: grid; gap: .1rem; min-width: 0; margin-right: auto; }
+.overview-title h2 { overflow: hidden; font-size: 1.05rem; font-weight: 720; letter-spacing: -.03em; text-overflow: ellipsis; white-space: nowrap; }
+.overview-title p { color: var(--muted); font-size: .76rem; }
+.overview-close { flex: none; width: 2.2rem; height: 2.2rem; box-shadow: none; }
+.overview-close .icon { width: 1rem; height: 1rem; }
+.overview-about { display: -webkit-box; overflow: hidden; color: var(--muted); font-size: .84rem; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+/* Each fact is one quiet row: what it is on the left, how it stands on the right. */
+.facts { display: grid; gap: .4rem; }
+.fact {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  width: 100%;
+  min-height: 2.7rem;
+  padding: .45rem .7rem;
+  border: 0;
+  border-radius: 1rem;
+  background: rgb(255 255 255 / 6%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 10%);
+  font-size: .86rem;
+  text-align: left;
+}
+.fact > .icon { width: 1.15rem; height: 1.15rem; color: var(--muted); }
+.fact-label { font-weight: 620; }
+.fact b { margin-left: auto; color: var(--amber); font-size: .8rem; font-weight: 650; }
+.fact.is-done b { color: var(--ok); }
+.fact-mark { display: grid; place-items: center; flex: none; width: 1.4rem; height: 1.4rem; border-radius: 50%; background: rgb(255 181 71 / 20%); color: var(--amber); }
+.fact-mark .icon { width: .85rem; height: .85rem; stroke-width: 2.2; }
+.fact.is-done .fact-mark { background: rgb(111 231 176 / 20%); color: var(--ok); }
+.fact-reviews > .icon:first-child { color: var(--amber); }
+.fact-text { display: grid; gap: 1px; min-width: 0; margin-right: auto; }
+.fact-text strong { font-size: .86rem; font-weight: 650; }
+.fact-text small { overflow: hidden; color: var(--muted); font-size: .74rem; text-overflow: ellipsis; white-space: nowrap; }
+.overview-cta { width: 100%; }
+.overview-cta .icon { width: 1.1rem; height: 1.1rem; }
+
+/* ---- Reviews sheet ---- */
+.review-sheet[open] { display: flex; flex-direction: column; max-height: min(88dvh, 46rem); }
+.review-sheet .sheet-form { overflow-y: auto; overscroll-behavior: contain; }
+.review-list { display: grid; gap: .5rem; }
+.review, .review-empty { padding: .7rem .85rem; border-radius: 1rem; background: rgb(255 255 255 / 6%); }
+.review { display: grid; gap: .3rem; }
+.review-empty { color: var(--muted); font-size: .84rem; }
+.review-head { display: flex; align-items: center; flex-wrap: wrap; gap: .25rem .5rem; font-size: .82rem; }
+.review-head strong { font-weight: 680; }
+.review-head small { margin-left: auto; color: var(--muted); font-size: .7rem; }
+.review p { color: var(--muted); font-size: .84rem; line-height: 1.45; overflow-wrap: anywhere; }
+.review-chip { padding: .08rem .45rem; border-radius: 2rem; background: rgb(255 255 255 / 10%); color: var(--muted); font-size: .64rem; font-weight: 700; }
+.review-chip.is-waiting { background: rgb(255 181 71 / 15%); color: var(--amber); }
+.stars { color: rgb(255 255 255 / 22%); font-size: .8rem; letter-spacing: .05em; }
+.stars b { color: var(--amber); font-weight: 400; }
+.review-yours { margin-top: .3rem; font-size: .95rem; font-weight: 700; letter-spacing: -.02em; }
+.star-picker { display: flex; gap: .15rem; margin-inline: -.4rem; }
+.star-picker button { width: 2.75rem; height: 2.75rem; padding: 0; border: 0; border-radius: 50%; background: none; color: rgb(255 255 255 / 24%); font-size: 1.7rem; line-height: 1; }
+.star-picker button.is-on { color: var(--amber); }
+/* Taller than a one-line field, which is what .text-input sets further down. */
+.review-sheet .review-text { min-height: 5.6rem; resize: none; line-height: 1.4; }
+.form-ok { color: var(--ok); font-size: .82rem; line-height: 1.4; }
+.form-ok:empty { display: none; }
 
 /* ---- Venue view: add photos ---- */
 .venue-body, .scans-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; display: grid; align-content: start; gap: 1.1rem; padding: .5rem 1.1rem 1.2rem; -webkit-mask-image: linear-gradient(transparent, #000 .7rem, #000 calc(100% - 1.4rem), transparent); mask-image: linear-gradient(transparent, #000 .7rem, #000 calc(100% - 1.4rem), transparent); }

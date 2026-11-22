@@ -80,6 +80,26 @@ export function categoryLabel(place: Place) {
   return tag ? tag.charAt(0).toUpperCase() + tag.slice(1) : categoryNames[place.category];
 }
 
+/** What people say about a place, boiled down to one rating and one line. */
+export interface ReviewSummary {
+  rating?: number;
+  /** Where the rating comes from: FareSight's own reviews, or a public source such as Tripadvisor. */
+  source?: string;
+  quote?: string;
+}
+
+export function reviewSummary(place: Place): ReviewSummary {
+  // Sample notes carry no stars. Reviews from real visitors do, and they count before any outside rating.
+  const rated = place.reviews.filter((review) => review.rating > 0);
+  const outside = place.details?.ratings[0];
+  const written = place.reviews.filter((review) => !review.sample).at(-1);
+  return {
+    rating: rated.length ? rated.reduce((sum, review) => sum + review.rating, 0) / rated.length : outside?.rating,
+    source: rated.length ? 'FareSight' : outside?.source,
+    quote: written?.text ?? place.details?.review_highlights[0] ?? place.reviews[0]?.text,
+  };
+}
+
 /** Dishes only make sense where food is served. */
 export function servesDishes(place: Place) {
   return place.dishes.length > 0 || ['restaurant', 'study', 'market'].includes(place.category);

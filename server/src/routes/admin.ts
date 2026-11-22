@@ -40,6 +40,8 @@ export function registerAdminAndCommunity(app: FastifyInstance, store: Store, co
         properties: {
           author_label: { type: 'string', minLength: 1, maxLength: 80 },
           text: { type: 'string', minLength: 1, maxLength: 1000 },
+          // Stars out of five. Optional, so a plain visit note is still accepted.
+          rating: { type: 'integer', minimum: 1, maximum: 5 },
         },
       },
     },
@@ -54,6 +56,7 @@ export function registerAdminAndCommunity(app: FastifyInstance, store: Store, co
       place_id: place.id,
       author_label,
       text,
+      rating: body.rating,
       status: 'pending_review',
       created_at: new Date().toISOString(),
     };
@@ -105,7 +108,7 @@ export function registerAdminAndCommunity(app: FastifyInstance, store: Store, co
           if (place && !place.reviews.some((entry) => entry.id === review.id)) {
             place.reviews.push({
               id: review.id,
-              rating: 5,
+              rating: review.rating ?? 5,
               author: review.author_label,
               text: review.text,
               created_at: review.created_at,

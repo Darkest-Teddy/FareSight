@@ -40,6 +40,7 @@ const icons = {
   locate: 'M4 4h5M4 4v5M20 4h-5M20 4v5M4 20h5M4 20v-5M20 20h-5M20 20v-5',
   clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7.5V12l3 2',
   alert: 'M12 4l9 16H3L12 4zM12 10v4.5M12 17.5h.01',
+  star: 'M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.9 6.8 19.6l1-5.8-4.3-4.1 5.9-.8L12 3.5z',
 } as const;
 export type IconName = keyof typeof icons;
 

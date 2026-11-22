@@ -134,4 +134,8 @@ export const api = {
   },
 
   vehicles: () => request<{ vehicles: MbtaVehicle[] }>('/mbta/vehicles'),
+
+  /** Sends a review of a place. The server publishes it once a FareSight admin approves it. */
+  review: (placeId: string, review: { author_label: string; text: string; rating: number }) =>
+    request<{ id: string; created_at: string }>(`/restaurants/${pathId(placeId)}/reviews`, review),
 };
