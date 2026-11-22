@@ -224,7 +224,9 @@ function parseModel(name) {
       // Floor lowered from 15000: the sculpture now uses flat track plates instead of swept
       // tubes and has no deck, street grid or river, so the honest triangle count is far lower.
       // The ceiling is the one that matters for performance and is unchanged.
-      ? [4000, 55000, 12]
+      // 13 draws: the ground needs a material of its own so it can render unlit and its rim can
+      // reach the backdrop exactly. Everything else still shares.
+      ? [4000, 55000, 13]
       : uiModels.includes(name)
         ? [1, 5000, 20]
         : [1, 5000, 8];

@@ -255,6 +255,12 @@ export class MapSculptureScene {
         for (const mesh of render.meshInstances) {
           const surface = mesh.material;
           if (!(surface instanceof pc.StandardMaterial)) continue;
+          // The ground renders unlit so its rim reaches the backdrop colour exactly. Lit, the
+          // faded edge never quite matched and the last row of quads read as a hard border.
+          if (mesh.node.name === 'Ground plane') {
+            surface.useLighting = false;
+            surface.update();
+          }
           const line = /^Lacquer (#[0-9a-f]{6})$/i.exec(mesh.node.name);
           if (line) {
             this.lineSurfaces.set(line[1].toLowerCase(),

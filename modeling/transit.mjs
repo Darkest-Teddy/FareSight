@@ -505,7 +505,15 @@ export function mapSculpture(dir) {
   // the order between them does not matter to the renderer.
   const blocks = cityBlocks(city, lines, slabTop);
   // Buildings set how far out the ground reaches; the spine keeps it continuous between them.
-  groundBlob(city, [...blocks.sites, ...blocks.spine], slabTop - 0.0006);
+  //
+  // Its own surface, not the city's. The ground's rim fades to the renderer's backdrop colour and
+  // has to land on it exactly, or the last row of quads shows up as a hard edge where the
+  // geometry stops. Sharing a lit material made that impossible: lighting and the city's emission
+  // shift the rendered colour away from the vertex colour, so the fade could never quite arrive.
+  // The runtime turns lighting off for this one material, which is also free -- the ground is a
+  // flat plane and lighting only ever tinted it uniformly.
+  const ground = batch('Ground plane', { rough: 1, metal: 0 });
+  groundBlob(ground, [...blocks.sites, ...blocks.spine], slabTop - 0.0006);
   if (process.env.FARESIGHT_VERBOSE) console.log('city blocks placed:', blocks.count);
 
   // Transfer posts tie stacked platforms of different lines together.
