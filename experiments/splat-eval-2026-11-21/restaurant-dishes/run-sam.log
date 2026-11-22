@@ -1,0 +1,12 @@
+submitted eljefes-tacos sam 01a200d1-642f-7e51-9b4f-dfef2f3d39d8
+succeeded eljefes-tacos sam 22.46999979019165 0.02
+submitted eljefes-burrito sam 01a200d1-e7cd-7e91-8c4f-b4859995b4d9
+succeeded eljefes-burrito sam 24.881999969482422 0.02
+submitted shudaxia-hotpot sam 01a200d2-9539-70c0-b9a7-cf6693f38de2
+failed shudaxia-hotpot sam HTTP 422 from https://queue.fal.run/fal-ai/sam-3/requests/01a200d2-9539-70c0-b9a7-cf6693f38de2: {"detail":[{"loc":["body","prompt"],"msg":"Auto-segmentation produced no masks. Try a different prompt, provide mask_urls, or lower detection_threshold (currently None).","type":"value_error"}]}
+submitted shudaxia-beef sam 01a200d2-a376-7001-ad92-15bca5823486
+failed shudaxia-beef sam HTTP 422 from https://queue.fal.run/fal-ai/sam-3/requests/01a200d2-a376-7001-ad92-15bca5823486: {"detail":[{"loc":["body","prompt"],"msg":"Auto-segmentation produced no masks. Try a different prompt, provide mask_urls, or lower detection_threshold (currently None).","type":"value_error"}]}
+submitted starbucks-drink sam 01a200d2-b1a3-7ed0-a8bf-e23647d5c9d9
+succeeded starbucks-drink sam 18.405999898910522 0.02
+submitted starbucks-pastry sam 01a200d3-1416-7900-b909-d86d42432994
+succeeded starbucks-pastry sam 12.96399998664856 0.02

@@ -71,7 +71,7 @@ function showStatus(text) {
 let catalog = { rooms: [], dishes: { providerOrder: [], dishes: [] } };
 const state = {
   mode: 'rooms',
-  roomId: null, roomConfig: null, roomTier: '100k', overlay: false, overlayOpacity: 0.5,
+  roomId: null, roomConfig: null, roomTier: 'fixed-100k', overlay: false, overlayOpacity: 0.5,
   dish: null, dishLayout: 'all', dishTier: '60k',
 };
 let generation = 0;
@@ -367,7 +367,8 @@ async function showRoom(keepView = false) {
   // Splat and depth-mesh data are in the source PLY / OpenCV frame; render poses are in
   // the engine frame (x, y flipped). A 180° roll about Z maps one onto the other.
   const root = new pc.Entity('room-root');
-  root.setLocalEulerAngles(0, 0, 180);
+  // SOGs converted from Atlas SPZ already load in the engine frame (cfg.rootRoll = 0).
+  root.setLocalEulerAngles(0, 0, cfg.rootRoll ?? 180);
   world.addChild(root);
 
   showStatus(`Loading ${tier.label}…`);
@@ -442,8 +443,11 @@ function roomPanel() {
     h('h2', {}, 'Configuration · WorldMirror cost per run'),
     h('div', { class: 'grid2' },
       h('span'), h('span', { class: 'head' }, '518 px'), h('span', { class: 'head' }, '952 px'),
-      h('span', { class: 'rowhead' }, '2 photos'), cell(2, 518), cell(2, 952),
-      h('span', { class: 'rowhead' }, '3 photos'), cell(3, 518), cell(3, 952)),
+      [...new Set(configs.filter((x) => x.kind === 'splat' && x.resolution).map((x) => x.photos))].sort((a, b) => a - b)
+        .flatMap((n) => [h('span', { class: 'rowhead' }, `${n} photos`), cell(n, 518), cell(n, 952)])),
+    configs.some((x) => x.method) && h('div', { class: 'row', style: 'margin-top:6px' },
+      configs.filter((x) => x.method).map((x) => h('button', { 'aria-pressed': pressed(x.id === state.roomConfig), onclick: pick(x.id) },
+        `${x.method} · ${x.photos} photos + ${x.generated} generated · ${money(x.costUsd)}`))),
     depth && h('div', { class: 'row', style: 'margin-top:6px' },
       h('button', { 'aria-pressed': pressed(depth.id === state.roomConfig), onclick: pick(depth.id) }, '1 photo · free depth mesh (2.5D)')),
     cfg && [
@@ -459,7 +463,7 @@ function roomPanel() {
         style: 'width:100%', oninput: (e) => { state.overlayOpacity = +e.target.value; applyOverlay(); } }),
       h('h2', {}, 'Result'),
       h('div', { class: 'card' },
-        h('header', {}, h('b', {}, cfg.kind === 'depth' ? 'Depth baseline' : `${cfg.photos} photos · ${cfg.resolution} px`),
+        h('header', {}, h('b', {}, cfg.kind === 'depth' ? 'Depth baseline' : cfg.method ? `${cfg.method} · ${cfg.photos} photos + ${cfg.generated} generated` : `${cfg.photos} photos · ${cfg.resolution} px`),
           cfg.kind === 'depth' ? h('span', { class: 'verdict na' }, 'Baseline') : verdict(cfg.publishable)),
         h('dl', {},
           h('dt', {}, 'Inference cost'), h('dd', {}, money(cfg.costUsd)),

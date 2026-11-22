@@ -1,6 +1,6 @@
 import {
   STOPS, type Asset, type GenerationJob, type IntakeSelectionResult,
-  type LiveSessionRequest, type LiveSessionResponse, type LiveStatusResponse,
+  type LiveReviewsResponse, type LiveSessionRequest, type LiveSessionResponse, type LiveStatusResponse,
   type MarbleTier, type MbtaAlert, type MbtaPrediction, type MbtaSource, type MbtaVehicle,
   type PairingMessage, type Place, type RestaurantManifest, type Stop, type TripEstimate, type Vector3,
 } from '@faresight/shared';
@@ -48,12 +48,14 @@ export function assetUrl(path: string): string {
   return url.href;
 }
 
-async function request<T>(path: string, body?: object | FormData, passcode?: string, cancel?: AbortSignal): Promise<T> {
+async function request<T>(
+  path: string, body?: object | FormData, passcode?: string, cancel?: AbortSignal, timeoutMs = body ? 90_000 : 6_000,
+): Promise<T> {
   const multipart = body instanceof FormData;
   const headers = new Headers({ accept: 'application/json' });
   if (body && !multipart) headers.set('content-type', 'application/json');
   if (passcode) headers.set('x-admin-passcode', passcode);
-  const timeout = AbortSignal.timeout(body ? 90_000 : 6_000);
+  const timeout = AbortSignal.timeout(timeoutMs);
   const response = await fetch(apiOrigin + '/api' + path, {
     method: body ? 'POST' : 'GET',
     headers,
@@ -80,6 +82,7 @@ export const api = {
   },
   manifest: (id: string) => request<RestaurantManifest>(`/restaurants/${pathId(id)}/manifest`),
   place: (id: string) => request<Place>(`/restaurants/${pathId(id)}`),
+  liveReviews: (id: string) => request<LiveReviewsResponse>(`/restaurants/${pathId(id)}/live-reviews`, undefined, undefined, undefined, 25_000),
   review: (id: string, data: { author_label: string; text: string }) =>
     request<unknown>(`/restaurants/${pathId(id)}/reviews`, data),
   vehicles: () => request<{ vehicles: MbtaVehicle[]; source: MbtaSource; updated_at: string }>('/mbta/vehicles'),
@@ -150,10 +153,9 @@ export const api = {
   moderate: (type: ModerationKind, id: string, action: 'approve' | 'reject', passcode: string) =>
     request<unknown>('/admin/moderation', { type, id, action }, passcode),
   createPair: () => request<{ code: string }>('/pairing/create', {}),
-  realtimeSession: (signal: AbortSignal) =>
-    request<{ client_secret: string; expires_at: number; model: string }>('/realtime/session', {}, undefined, signal),
   liveStatus: () => request<LiveStatusResponse>('/live/status'),
-  createLiveSession: (data: LiveSessionRequest) => request<LiveSessionResponse>('/live/sessions', data),
+  createLiveSession: (data: LiveSessionRequest, signal?: AbortSignal) =>
+    request<LiveSessionResponse>('/live/sessions', data, undefined, signal),
   logs: (logs: string[]) => request<unknown>('/debug/logs', { logs }),
 };
 

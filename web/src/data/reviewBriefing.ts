@@ -1,4 +1,4 @@
-import { computeTripEstimate, type MbtaSource, type Place, type Stop } from '@faresight/shared';
+import { computeTripEstimate, formatDishPrice, type Dish, type LiveReviewItem, type LiveReviewsResponse, type MbtaSource, type Place, type Stop } from '@faresight/shared';
 import { api, type Alert, type Prediction } from '../api/client';
 import { oneWayCost, type Filters } from '../ui/state';
 import { has3D, has3DRoom, hasDishPreview, isSplat } from './preview3D';
@@ -6,8 +6,30 @@ import { has3D, has3DRoom, hasDishPreview, isSplat } from './preview3D';
 export interface BriefingFact { label: string; value: string }
 export interface BriefingReview {
   placeId?: string; placeName?: string; author: string; text: string; sample?: boolean; unverified?: boolean;
+  live?: boolean; source?: string; rating?: number; date_label?: string; url?: string;
 }
-export interface BriefingListItem { label: string; detail?: string; badge?: string }
+export type ReviewSnapshot = Omit<BriefingReview, 'author' | 'placeId' | 'placeName'> &
+  { id: string; author_label: string; created_at: string; sample: boolean };
+
+export function catalogReviewSnapshots(place: Place): ReviewSnapshot[] {
+  return place.reviews.map(({ id, author, text, created_at, sample }) =>
+    ({ id, author_label: author, text, created_at, sample: !!sample }));
+}
+
+export function liveBriefingReview(review: LiveReviewItem): BriefingReview {
+  return { ...review, live: true, sample: false, unverified: false };
+}
+
+const liveLookups = new Map<string, Promise<LiveReviewsResponse>>();
+
+export function loadLiveReviews(placeId: string): Promise<LiveReviewsResponse> {
+  const active = liveLookups.get(placeId);
+  if (active) return active;
+  const lookup = api.liveReviews(placeId).finally(() => liveLookups.delete(placeId));
+  liveLookups.set(placeId, lookup);
+  return lookup;
+}
+export interface BriefingListItem { label: string; detail?: string; badge?: string; url?: string }
 export interface BriefingComparison {
   placeId?: string; name: string; subtitle?: string; metrics: BriefingFact[]; note?: string;
 }
@@ -59,9 +81,9 @@ export interface PlaceDecision {
     source: MbtaSource | 'checking' | 'unavailable'; arrivals: Prediction[]; alerts: Alert[];
     alertsAvailable: boolean;
   };
-  dishes: { id: string; name: string; price: number; portionNote: string; has3D: boolean }[];
+  dishes: (Pick<Dish, 'id' | 'name' | 'price'> & { priceLabel: string; portionNote: string; has3D: boolean })[];
   rooms: { name: string; statedCapacity: number; seating: string; price: number; priceUnit: string; has3D: boolean }[];
-  reviews: { id: string; author_label: string; text: string; created_at: string; sample: boolean }[];
+  reviews: ReviewSnapshot[];
   /** Researched public facts: hours note, awards, aggregate ratings and review highlights. */
   details: Place['details'] | null;
 }
@@ -121,14 +143,14 @@ export function placeDecision(place: Place, stop: Stop, filters: Filters, now = 
     },
     transit: { source: 'checking', arrivals: [], alerts: [], alertsAvailable: false },
     dishes: place.dishes.map((dish) => ({
-      id: dish.id, name: dish.name, price: dish.price, portionNote: dish.portion_note, has3D: hasDishPreview(dish),
+      id: dish.id, name: dish.name, price: dish.price, priceLabel: formatDishPrice(dish.price),
+      portionNote: dish.portion_note, has3D: hasDishPreview(dish),
     })),
     rooms: place.rooms.map((room) => ({
       name: room.name, statedCapacity: room.stated_capacity, seating: room.seating, price: room.price,
       priceUnit: room.price_unit, has3D: !!room.asset_id || isSplat(room.asset),
     })),
-    reviews: place.reviews.map((review) => ({ id: review.id, author_label: review.author,
-      text: review.text, created_at: review.created_at, sample: !!review.sample })),
+    reviews: catalogReviewSnapshots(place),
     details: place.details ?? null,
   };
 }
@@ -186,7 +208,7 @@ export function buildComparisonBriefingCard(decisions: PlaceDecision[], startSto
   }];
   if (reviews.length) sections.push({ kind: 'reviews', heading: 'Diner reviews', items: reviews });
   if (picks.length) sections.push({ kind: 'list', heading: 'Menu picks', items: picks.map(({ entry, dish }) => ({
-    label: `${dish.name} · ${money(dish.price)}`, detail: entry.name, badge: dish.has3D ? '3D' : undefined,
+    label: `${dish.name} · ${dish.priceLabel}`, detail: entry.name, badge: dish.has3D ? '3D' : undefined,
   })) });
   const alerts = [...new Set(decisions.flatMap(({ transit }) => transit.alerts.map(({ header }) => header)))];
   if (alerts.length) sections.push({ kind: 'list', heading: 'Service alerts', items: alerts.map((label) => ({ label })) });
@@ -202,17 +224,23 @@ export function buildComparisonBriefingCard(decisions: PlaceDecision[], startSto
   };
 }
 
-export function buildPlaceBriefingCard(details: PlaceDecision): BriefingCard {
+export function buildPlaceBriefingCard(details: PlaceDecision, web?: LiveReviewsResponse): BriefingCard {
   const { trip, transit } = details;
   const sections: BriefingSection[] = [{ kind: 'text', heading: 'Overview', body:
     `${details.vibe}\n${trip.costBasis} · ${money(trip.roundTripTotal)} with return fare · ${trip.rideMinutes} min estimated ride.` }];
   const facts = details.details;
-  if (facts?.ratings.length || facts?.review_highlights.length) sections.push({ kind: 'list', heading: 'What Reviewers Say', items: [
-    ...(facts.ratings.map(({ source, rating, count }) => ({
+  const ratings = web?.live ? web.ratings : facts?.ratings ?? [];
+  const highlights = web?.live ? web.highlights : facts?.review_highlights ?? [];
+  if (ratings.length || highlights.length) sections.push({ kind: 'list', heading: web?.live ? 'Live web ratings and highlights' : 'What reviewers say', items: [
+    ...(ratings.map(({ source, rating, count, url }) => ({
       label: `${source} ${rating.toFixed(1)} / 5`, detail: count ? `${count.toLocaleString('en-US')} reviews` : undefined,
+      url: web?.live ? url ?? undefined : undefined,
     }))),
-    ...facts.review_highlights.map((label) => ({ label })),
+    ...highlights.map((label) => ({ label })),
   ] });
+  if (web?.live && web.reviews.length) {
+    sections.push({ kind: 'reviews', heading: 'Live web reviews', items: web.reviews.map(liveBriefingReview) });
+  }
   if (facts?.awards.length) sections.push({ kind: 'list', heading: 'Recognition', items: facts.awards.map((award) => ({
     label: [award.title, award.year].filter(Boolean).join(', '), detail: award.org,
   })) });
@@ -220,7 +248,7 @@ export function buildPlaceBriefingCard(details: PlaceDecision): BriefingCard {
     author: review.author_label, text: review.text, sample: review.sample,
   })) } : { kind: 'text', heading: 'Diner Reviews', body: 'No approved reviews yet.' });
   if (details.dishes.length) sections.push({ kind: 'list', heading: 'Menu Highlights', items: details.dishes.map((dish) => ({
-    label: `${dish.name} · ${money(dish.price)}`, detail: dish.portionNote, badge: dish.has3D ? '3D' : undefined,
+    label: `${dish.name} · ${dish.priceLabel}`, detail: dish.portionNote, badge: dish.has3D ? '3D' : undefined,
   })) });
   if (details.rooms.length) sections.push({ kind: 'list', heading: 'Rooms', items: details.rooms.map((room) => ({
     label: room.name, detail: `${room.statedCapacity} ${room.seating} · ${money(room.price)} ${room.priceUnit}`,

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" role="img" aria-labelledby="open-door-title">
+  <title id="open-door-title">FareSight — Open Door</title>
+  <g fill="#3ccb78">
+    <path d="M25 67V20L58 5 78 15V58L67 63V22L58 18 36 28V62Z"/>
+    <path d="M42 34 60 26V61L42 69Z"/>
+    <path d="M66 70 83 62 83 73 45 91 13 76 25 70 45 79Z"/>
+  </g>
+</svg>

@@ -1,5 +1,5 @@
-import type { BriefingAction, BriefingCard, BriefingFact, BriefingSection } from '../data/reviewBriefing';
-import { button, element, modal } from './dom';
+import type { BriefingAction, BriefingCard, BriefingFact, BriefingReview, BriefingSection } from '../data/reviewBriefing';
+import { button, element, link, modal } from './dom';
 
 interface BriefingActions {
   dismiss(cardId?: string): void;
@@ -19,6 +19,28 @@ function factList(facts: BriefingFact[], className: string): HTMLDListElement {
   return list;
 }
 
+export function renderBriefingReview(review: BriefingReview): HTMLElement {
+  const article = element('article', 'briefing-review');
+  const author = element('header');
+  author.append(element('strong', '', review.author));
+  if (review.placeName) author.append(element('span', 'muted', review.placeName));
+  if (review.source) {
+    const label = element('span', 'briefing-sample', review.source);
+    if (review.url) {
+      try { label.replaceChildren(link(review.source, review.url)); } catch { /* Keep the text attribution. */ }
+    }
+    author.append(label);
+  }
+  if (review.rating !== undefined) author.append(element('span', 'muted', `${review.rating} / 5`));
+  if (review.date_label) author.append(element('span', 'muted', review.date_label));
+  const provenance = review.sample ? 'Sample diner note' : review.unverified ? 'Unverified excerpt' : '';
+  if (provenance) author.append(element('span', 'briefing-sample', provenance));
+  const quote = element('blockquote');
+  quote.textContent = review.text;
+  article.append(author, quote);
+  return article;
+}
+
 function renderSection(section: BriefingSection): HTMLElement {
   const node = element('section', 'briefing-section');
   node.dataset.kind = section.kind;
@@ -28,24 +50,13 @@ function renderSection(section: BriefingSection): HTMLElement {
       node.append(element('p', 'briefing-copy', section.body));
       break;
     case 'reviews':
-      for (const review of section.items) {
-        const article = element('article', 'briefing-review');
-        const author = element('header');
-        author.append(element('strong', '', review.author));
-        if (review.placeName) author.append(element('span', 'muted', review.placeName));
-        const provenance = review.sample ? 'Sample diner note' : review.unverified ? 'Unverified excerpt' : '';
-        if (provenance) author.append(element('span', 'briefing-sample', provenance));
-        const quote = element('blockquote');
-        quote.textContent = review.text;
-        article.append(author, quote);
-        node.append(article);
-      }
+      node.append(...section.items.map(renderBriefingReview));
       break;
     case 'list': {
       const list = element('ul', 'briefing-list');
       for (const item of section.items) {
         const row = element('li');
-        row.append(element('strong', '', item.label));
+        row.append(item.url ? link(item.label, item.url) : element('strong', '', item.label));
         if (item.badge) row.append(element('span', 'briefing-badge', item.badge));
         if (item.detail) row.append(element('p', 'muted', item.detail));
         list.append(row);

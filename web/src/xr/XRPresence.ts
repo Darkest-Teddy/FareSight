@@ -1,5 +1,6 @@
 import * as pc from 'playcanvas';
 import type { GrabbableDish } from './DishTableScene';
+import { DishGrabMotion } from './DishPhysics';
 import type { VRReviewCard } from './VRReviewCard';
 import type { PhysicalMenuBook } from './PhysicalMenuBook';
 import type { SurfaceMatch } from './PhysicalSurfaces';
@@ -99,6 +100,7 @@ interface HandheldGrab extends HandheldTarget {
   reach?: { from: pc.Vec3; elapsed: number };
   position: pc.Vec3;
   orientation: pc.Quat;
+  motion?: DishGrabMotion;
   lostSince?: number;
 }
 
@@ -513,8 +515,10 @@ export class XRPresence {
     }
     target.dish?.setHeld(true);
     target.menu?.markMoved();
+    const motion = target.dish ? new DishGrabMotion() : undefined;
+    motion?.reset(entity.getPosition(), entity.getRotation());
     this.handhelds.set(source, { ...target, kind, offset, rotation, reach, menuVenue: target.menu?.venueId,
-      position: entity.getPosition().clone(), orientation: entity.getRotation().clone() });
+      position: entity.getPosition().clone(), orientation: entity.getRotation().clone(), motion });
     pointer.selectConsumed = true;
     pointer.flashUntil = performance.now() + 140;
     this.pulse(source, 0.22, 18);
@@ -563,6 +567,8 @@ export class XRPresence {
     }
     entity.setPosition(grab.position);
     entity.setRotation(grab.orientation);
+    if (reach) grab.motion?.reset(grab.position, grab.orientation);
+    else if (dt > 0) grab.motion?.sample(grab.position, grab.orientation);
     grab.menu?.markMoved();
     return true;
   }
@@ -583,10 +589,12 @@ export class XRPresence {
       return;
     }
 
-    const { entity, dish, menu } = grab;
+    const { entity, dish, menu, motion } = grab;
     const at = entity.getPosition();
     const surface = (dish || menu) && this.actions.snapSurface(entity, at);
-    const settling = menu ? menu.release(this.actions.menuTabletop(menu, at), surface?.y) : dish?.onRelease(surface?.y);
+    motion?.release();
+    const settling = menu ? menu.release(this.actions.menuTabletop(menu, at), surface?.y)
+      : dish?.onRelease(surface?.y, motion?.velocity, motion?.angularVelocity);
     this.pulse(source, settling ? 0.28 : 0.18, 18);
   }
 

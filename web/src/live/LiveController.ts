@@ -1,10 +1,10 @@
 import {
-  MBTA_SUBWAY_FARE, type Dish, type LiveToolName, type Place, type RestaurantManifest, type Stop,
+  formatDishPrice, MBTA_SUBWAY_FARE, type Dish, type LiveToolName, type Place, type RestaurantManifest, type Stop,
 } from '@faresight/shared';
 import { api, type Alert, type Prediction, type Trip } from '../api/client';
 import { has3D, has3DDish, has3DRoom, isSplat } from '../data/preview3D';
 import { composeBriefingCard } from '../data/composeBriefing';
-import { loadPlaceDecision, nextTrainLabel, type BriefingCard, type BriefingMode, type PlaceDecision } from '../data/reviewBriefing';
+import { catalogReviewSnapshots, loadLiveReviews, loadPlaceDecision, nextTrainLabel, type BriefingCard, type BriefingMode, type PlaceDecision } from '../data/reviewBriefing';
 import { cravings, initialFilters, matchingPlaces, oneWayCost, type Craving, type Filters } from '../ui/state';
 import type { Seating } from '../ui/PlaceDrawer';
 import type { SceneMode } from '../xr';
@@ -166,6 +166,10 @@ function validCardId(id: unknown): id is string {
   return typeof id === 'string' && /^[a-z0-9][a-z0-9-]{0,47}$/.test(id);
 }
 
+function dishPrice({ price }: Dish) {
+  return { price, price_label: formatDishPrice(price) };
+}
+
 export class LiveController {
   private readonly reviewSnapshots = new Map<string, PlaceDecision['reviews']>();
   private nextCard = 0;
@@ -177,6 +181,8 @@ export class LiveController {
     const stop = state.stops.find(({ stop_id }) => stop_id === args.stopId);
     const place = state.places.find(({ id }) => id === args.placeId);
     switch (name) {
+      case 'get_current_view':
+        return { result: { ok: true, currentView: this.describeContext() } };
       case 'list_places': {
         if (args.stopId !== undefined && !stop) return { result: { ok: false, error: 'Unknown stop ID.' } };
         const craving = cravings.find(([id]) => id === args.craving)?.[0] ?? state.filters.craving;
@@ -228,6 +234,20 @@ export class LiveController {
         if (!place || !venueStop) return { result: { ok: false, error: 'Unknown venue ID.' } };
         const details = await this.reviewDetails(place, venueStop, state.filters);
         return { result: { ok: true, details } };
+      }
+      case 'get_live_reviews': {
+        if (!place) return { result: { ok: false, error: 'Unknown venue ID.' } };
+        const response = await loadLiveReviews(place.id).catch(() => ({
+          place_id: place.id, live: false, fetched_at: new Date().toISOString(),
+          ratings: place.details?.ratings ?? [], highlights: place.details?.review_highlights ?? [], reviews: [],
+        }));
+        const reviews = response.reviews.map((review) => ({ ...review, live: true, sample: false }));
+        if (response.live) {
+          const catalog = this.reviewSnapshots.get(place.id)?.filter(({ live }) => !live) ?? catalogReviewSnapshots(place);
+          this.reviewSnapshots.set(place.id, [...reviews.map(({ author, ...review }) =>
+            ({ ...review, author_label: author, created_at: response.fetched_at })), ...catalog]);
+        }
+        return { result: { ok: true, placeName: place.name, ...response, reviews } };
       }
       case 'compare_places': {
         const ids: unknown[] = Array.isArray(args.placeIds) ? args.placeIds : [];
@@ -283,7 +303,7 @@ export class LiveController {
 
   private async reviewDetails(place: Place, stop: Stop, filters: Filters): Promise<PlaceDecision> {
     const details = await loadPlaceDecision(place, stop, filters);
-    this.reviewSnapshots.set(place.id, details.reviews);
+    this.reviewSnapshots.set(place.id, [...this.reviewSnapshots.get(place.id)?.filter(({ live }) => live) ?? [], ...details.reviews]);
     return details;
   }
 
@@ -382,7 +402,7 @@ export class LiveController {
           .map(({ dish, dish_asset }) => ({
             id: dish.id,
             name: dish.name,
-            price: dish.price,
+            ...dishPrice(dish),
             portion_note: dish.portion_note,
             has_3d: Boolean(dish_asset || dish.asset_id),
           })),
@@ -395,7 +415,7 @@ export class LiveController {
           price_unit: room.price_unit,
         })),
       } : null,
-      active_dish: state.dish ? { id: state.dish.id, name: state.dish.name, price: state.dish.price } : null,
+      active_dish: state.dish ? { id: state.dish.id, name: state.dish.name, ...dishPrice(state.dish) } : null,
       compare_dish_id: state.compareId || null,
       inside_room: state.inside,
       will_we_fit: { enabled: state.fit, seating: state.seating, group_size: state.filters.groupSize },
@@ -476,7 +496,7 @@ export class LiveController {
         has_3d_room: has3DRoom(place),
         has_3d_dish: has3DDish(place),
         stated_capacity: place.stated_capacity ?? null,
-        dishes: place.dishes.map((d) => ({ id: d.id, name: d.name, price: d.price, has_3d: Boolean(d.asset_id) })),
+        dishes: place.dishes.map((d) => ({ id: d.id, name: d.name, ...dishPrice(d), has_3d: Boolean(d.asset_id) })),
       };
     });
 
@@ -688,7 +708,7 @@ export class LiveController {
           menu_items: menuItems.map(({ dish, dish_asset }) => ({
             id: dish.id,
             name: dish.name,
-            price: dish.price,
+            ...dishPrice(dish),
             portion_note: dish.portion_note,
             has_3d_preview: Boolean(dish_asset),
           })),
@@ -740,13 +760,13 @@ export class LiveController {
       result: {
         ok: true,
         place: { id: targetPlace.id, name: targetPlace.name },
-        highlighted_dish: highlighted ? { id: highlighted.id, name: highlighted.name, price: highlighted.price } : null,
+        highlighted_dish: highlighted ? { id: highlighted.id, name: highlighted.name, ...dishPrice(highlighted) } : null,
         menu_items: menuItems.map(({ dish, dish_asset }) => ({
           id: dish.id,
           name: dish.name,
-          price: dish.price,
+          ...dishPrice(dish),
           portion_note: dish.portion_note,
-          plate_diameter_cm: dish.plate_diameter_m ? Math.round(dish.plate_diameter_m * 100) : null,
+          plate_diameter_cm: dish.plate_diameter_m ? Number((dish.plate_diameter_m * 100).toFixed(1)) : null,
           has_3d_preview: Boolean(dish_asset),
         })),
       },
@@ -826,12 +846,13 @@ export class LiveController {
         dish: {
           id: manifestItem.dish.id,
           name: manifestItem.dish.name,
-          price: manifestItem.dish.price,
+          ...dishPrice(manifestItem.dish),
           portion_note: manifestItem.dish.portion_note,
           scale_label: manifestItem.dish_asset.scale_label,
         },
         comparing_with: comparison ? {
-          id: comparison.dish.id, name: comparison.dish.name, place_id: comparison.place.id, place_name: comparison.place.name,
+          id: comparison.dish.id, name: comparison.dish.name, ...dishPrice(comparison.dish),
+          place_id: comparison.place.id, place_name: comparison.place.name,
         } : null,
       },
       actionLabel: comparison

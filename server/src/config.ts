@@ -53,7 +53,7 @@ export function getConfig() {
     openaiBaseUrl: (process.env.OPENAI_API_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, ''),
     openaiLiveModel: process.env.OPENAI_LIVE_MODEL || 'gpt-live-1.1',
     openaiLiveBackendModel: process.env.OPENAI_LIVE_BACKEND_MODEL || 'gpt-6-luna',
-    openaiLiveVoice: process.env.OPENAI_LIVE_VOICE || 'marin',
+    openaiLiveVoice: process.env.OPENAI_LIVE_VOICE || 'ballad',
     atlasKey: process.env.WLT_API_KEY ?? process.env.WORLDLABS_API_KEY,
     atlasBaseUrl: (process.env.WLT_API_BASE_URL || 'https://api.atlas.worldlabs.ai/api/v2').replace(/\/+$/, ''),
     replicateKey: process.env.REPLICATE_API_TOKEN,

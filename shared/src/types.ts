@@ -73,11 +73,30 @@ export interface PlaceRating {
   url: string | null;
 }
 
+export interface LiveReviewItem {
+  id: string;
+  author: string;
+  source: string;
+  text: string;
+  rating?: number;
+  date_label?: string;
+  url?: string;
+}
+
+export interface LiveReviewsResponse {
+  place_id: string;
+  live: boolean;
+  fetched_at: string;
+  ratings: PlaceRating[];
+  highlights: string[];
+  reviews: LiveReviewItem[];
+}
+
 export interface Dish {
   id: string;
   place_id: string;
   name: string;
-  price: number;
+  price: number | null;
   portion_note: string;
   plate_diameter_m?: number;
   asset_id?: string | null;
