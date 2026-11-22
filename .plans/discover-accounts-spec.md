@@ -1,10 +1,13 @@
 # Discover: contributor accounts and user-added places
 
-**Status:** specification, not yet implemented
+**Status:** implemented on `feat/accounts-discover`. Sections 1-13 describe the design;
+section 14 records how each open item was actually settled and where the implementation
+departed from this document.
 **Repository:** `github.com/Darkest-Teddy/FareSight`
 **Written:** 2026-11-22
-**Scope decision:** real product, built properly. Nothing is deferred silently. Every
-shortcut and every unresolved item appears in "Open items" at the end.
+**Scope:** demo. The scope was originally "real product, built properly" and was changed by
+the user partway through. Section 14 states exactly what that cost: no password reset, and
+Google Places optional rather than required.
 
 ---
 
@@ -707,9 +710,44 @@ runs `pnpm typecheck`, `pnpm build`, `pnpm --filter @faresight/server test`, and
 
 ---
 
-## 14. Open items
+## 14. Open items, and how each was resolved
 
-These need a decision or an action outside this document. None of them block Phase 1.
+The scope was later changed from "real product" to **demo**, and every item below was settled
+during implementation rather than left open.
+
+| # | Item | Resolution |
+|---|---|---|
+| 1 | **Google Places API key** | **Made optional, not required.** `.env` has no Google credential, and the handoff document records `places.googleapis.com` answering `403 PERMISSION_DENIED` for the project behind the existing key: Places is not enabled and enabling it needs a console action and billing. The whole module therefore degrades: with no key the nearby search returns an empty list, contributors type a name, and cards carry no score. `/api/health` reports `places: false`. Nothing blocks on it. |
+| 2 | **Email provider for password reset** | **Reset is not built, and Google is the recovery path.** The repository has no outbound email and a demo does not justify adding one. Someone who signs in with Google can always get back in. An account created with a password and then forgotten is unrecoverable, which is stated here rather than discovered later. `password_resets` exists in the migration so adding the flow later needs no schema change. |
+| 3 | **Google Places retention terms** | **Sidestepped by D13.** Because Google data ranks nothing, no history of review counts is needed. `place_google_cache` holds only the latest value per place, refreshed after a day. `google_place_id` is retained; nothing else is. The terms still need reading before any public launch. |
+| 4 | **Argon2id dependency** | **Used the scrypt fallback.** `node:crypto` provides scrypt, so no native module is added. Parameters are `N = 2^16, r = 8, p = 1`, about 100 ms per hash, stored with the hash so they can be raised later without invalidating existing passwords. |
+| 5 | **Museums and hotels** | **Added a More chip** covering `museum`, `hotel` and `activity`, which the reference chips leave reachable only under All. |
+| 6 | **The two unmerged branches** | **Not merged; flagged.** This work is built on `main` in `feat/accounts-discover`. `t3/desktop-liquid-glass-redesign` (8 commits) rewrites `web/src/ui/AppShell.ts`, the same file the Map/Discover switch is added to, so merging it afterwards will conflict there. That is a decision for whoever owns both branches. |
+
+### 14.1 Changes to the specification found during implementation
+
+- **Ten stations, not five.** `main` gained Haymarket, Copley, Aquarium, Central and Coolidge
+  Corner while this was being written. Because D6 keeps contributed places off the station maps,
+  this only widens the set of candidate station *labels*.
+- **Velocity needed correcting.** The first version gated a place's whole score on more than one
+  distinct session having engaged with it. Since the `upload` event carries the contributor's own
+  session, a newly added place scored zero until a stranger found it: reachable under New, never
+  under Popular, which defeats the sort. An upload costs a real account and real photographs, so
+  it is now trusted on its own and the multi-session guard applies only to the cheap anonymous
+  signals.
+- **Discover is not a `SceneMode`.** Section 7.1 implied adding it to the engine's scene machine.
+  It is a flat page instead, overlaid while the canvas is hidden and the renderer paused through
+  a new `setPaused`. Every engine switch would otherwise have to handle a mode with no 3D scene.
+- **Sessions use bearer tokens, not cookies.** Section 10.3 specified `httpOnly` cookies. The API
+  is a different origin from both front ends and its CORS is `*`, which a cookie cannot accompany.
+  The token is in `localStorage` on web and the platform keychain on the phone. The trade is that
+  a script on the page can read the web token; it is revocable and expiring, and the native app
+  never exposes its own token to the WebView.
+
+## 15. Superseded open items
+
+Kept verbatim as they were written, so the resolutions in section 14 can be read against the
+original wording. **This list is historical. Do not act on it; see section 14.**
 
 1. **Google Places API key.** `.env` has no Google credential. `GOOGLE_PLACES_API_KEY` must
    be provisioned, with billing and a quota, before Phase 3. Nearby search and place details
@@ -732,7 +770,7 @@ These need a decision or an action outside this document. None of them block Pha
 
 ---
 
-## 15. Assumptions
+## 16. Assumptions
 
 Stated so they can be corrected rather than discovered later.
 

@@ -726,9 +726,12 @@ export class AppShell {
    * native sign-in becomes a web session without the long-lived token entering the WebView.
    */
   private async restoreSession() {
-    const handoff = (window as { faresightHandoffToken?: string }).faresightHandoffToken;
+    // Same global the Expo app injects and the contribute app reads, so one convention covers
+    // all three clients.
+    const native = window as unknown as { __FARESIGHT_HANDOFF__?: string };
+    const handoff = native.__FARESIGHT_HANDOFF__;
     if (handoff) {
-      delete (window as { faresightHandoffToken?: string }).faresightHandoffToken;
+      delete native.__FARESIGHT_HANDOFF__;
       try {
         const user = await auth.exchange(handoff);
         this.accountButton.textContent = user.display_name;
