@@ -119,6 +119,12 @@ h2 { font-size: clamp(2.1rem, 4.5vw, 4.1rem); }
 .beat-inside .copy { text-shadow: 0 2px 15px rgb(7 8 11 / 86%); }
 .beat-inside .lead { margin-inline: auto; max-width: 38ch; }
 .beat-inside .pill { margin-top: 1.25rem; }
+.look-hint { display: none; margin-top: .9rem; font-size: .8rem; color: var(--dim); }
+body[data-room=ready] .look-hint { display: block; }
+/* Inside the room a drag turns the visitor's head. Vertical swipes still scroll the page. */
+:root[data-look] { cursor: grab; touch-action: pan-y pinch-zoom; user-select: none; -webkit-user-select: none; }
+:root[data-look=held] { cursor: grabbing; }
+:root[data-look] a { cursor: pointer; }
 
 .status {
   position: fixed; inset: auto 0 clamp(2.5rem, 9vh, 6rem); z-index: 5;

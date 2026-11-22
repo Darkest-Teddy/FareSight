@@ -52,6 +52,7 @@ const scrolled = () => Math.max(0, Math.min(window.scrollY / travel, 1));
 let eased = scrolled();
 let opening = 0;
 let chapter = '';
+let lookState = '';
 
 function frame(dt: number): number {
   const goal = scrolled();
@@ -59,10 +60,20 @@ function frame(dt: number): number {
   if (Math.abs(goal - eased) < 0.00005) eased = goal;
   if (body.dataset.state === 'ready') opening = reducedMotion.matches ? 1 : Math.min(1, opening + dt / 1.1);
 
+  // Inside the room the visitor can turn their head. As they turn away, the copy clears off the view.
+  const away = scene.lookAway;
+  const look = !scene.lookReady ? '' : scene.lookHeld ? 'held' : 'ready';
+  if (look !== lookState) {
+    lookState = look;
+    if (look) root.dataset.look = look;
+    else delete root.dataset.look;
+  }
+
   for (const beat of beats) {
     const arrive = ramp(eased, ...beat.enter);
     const leave = ramp(eased, ...beat.exit);
-    const shown = Math.round(arrive * (1 - leave) * opening * 1000) / 1000;
+    const clear = beat.node.id === 'inside' ? 1 - away : 1;
+    const shown = Math.round(arrive * (1 - leave) * opening * clear * 1000) / 1000;
     if (shown === beat.shown) continue;
     beat.shown = shown;
     beat.node.style.visibility = shown > 0.004 ? 'visible' : 'hidden';
@@ -72,7 +83,7 @@ function frame(dt: number): number {
   }
 
   const interior = body.dataset.room === 'ready' ? ramp(eased, ROOM_START, 0.98) : 0;
-  veil.style.opacity = (interior * 0.38).toFixed(3);
+  veil.style.opacity = (interior * 0.38 * (1 - away)).toFixed(3);
   root.style.setProperty('--interior', interior.toFixed(3));
   meter.style.transform = `scaleX(${eased.toFixed(4)})`;
   const current = eased < 0.36 ? 'map' : eased < 0.82 ? 'station' : eased < 0.955 ? 'place' : 'inside';

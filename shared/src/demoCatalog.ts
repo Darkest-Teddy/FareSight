@@ -40,7 +40,7 @@ const listings: Listing[][] = [
     ['kenmore-jefes-01', "El Jefe's Taqueria", 'restaurant', 42.34926, -71.09680, 160, 12, '10:00', '04:00', ['tacos', 'burritos', 'late night'], 'Build-your-own tacos and burritos before or after a game.', true, true],
     ['kenmore-eastern-01', 'Eastern Standard Kitchen and Drinks', 'restaurant', 42.34722, -71.10131, 660, 34, '16:00', '23:00', ['brasserie', 'burgers', 'dinner'], 'Brasserie booths and a long bar near Fenway.', true, true],
     ['kenmore-esplanade-01', 'Charles River Esplanade', 'outdoor', 42.35096, -71.09561, 610, 0, '06:00', '22:00', ['river walk', 'picnic', 'sunset'], 'Riverside paths with a view across the Charles toward Cambridge.', true],
-    ['kenmore-shudaxia-01', 'Shu Daxia Hot Pot', 'restaurant', 42.34969, -71.10026, 420, 36, '12:00', '22:30', ['hot pot', 'sichuan', 'groups'], 'Sichuan hot pot dining room on Commonwealth Ave with ornate woodwork and group tables.', true, true],
+    ['kenmore-shudaxia-01', 'Shu Daxia Hot Pot', 'restaurant', 42.34880, -71.09952, 370, 36, '12:00', '22:30', ['hot pot', 'sichuan', 'groups'], 'Sichuan hot pot dining room on Commonwealth Ave with ornate woodwork and group tables.', true, true],
   ],
   [
     ['harvard-cafe-01', 'Charles & Folio Study Café', 'study', 42.37364, -71.11832, 120, 9.25, '08:00', '20:00', ['matcha', 'tiramisu', 'study'], 'Window seats and long tables for a study break.', true],
