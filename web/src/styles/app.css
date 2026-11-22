@@ -171,6 +171,10 @@ small { color: var(--muted); }
 .voice-dock > .message { padding-inline: .25rem; }
 .voice-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .375rem; }
 .voice-controls [aria-pressed=true] { border-color: var(--ink); background: var(--ink); color: var(--on-ink); }
+/* Pressed controls are dark with light text, so hovering darkens instead of taking the pale hover fill. */
+@media (hover: hover) {
+  .voice-controls [aria-pressed=true]:hover:not(:disabled) { border-color: var(--ink-soft); background: var(--ink-soft); color: var(--on-ink); }
+}
 .voice-feed {
   flex: 1;
   min-height: 5.5rem;
