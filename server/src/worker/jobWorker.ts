@@ -173,14 +173,14 @@ async function advance(store: Store, config: Config, initialJob: JobRecord, leas
       const original = job.original_spz_path ?? job.original_ply_path;
       if (!original) throw new TerminalProviderError('Original splat checkpoint is missing');
       // A TRELLIS dish arrives standing on its head, so it is turned over. Before that, the turned model is
-      // checked against its photo: the check can leave it unturned or hold it for a person, never fail the job.
+      // checked against its photo: the check can leave it unturned or flag it, never fail or hold the job.
       const turns = job.kind === 'dish' && job.provider === 'trellis-replicate' && Boolean(job.original_ply_path);
       if (turns && job.dish_orientation === undefined) {
         const dish_orientation = await checkDishOrientation(config, job.dish_name, referencePhoto(), original);
         set({
           dish_orientation, progress: 90,
           status_message: dish_orientation.verdict === 'upright' ? 'Checked: the dish stands upright'
-            : dish_orientation.held ? `The dish needs a look before it goes live: ${dish_orientation.reason}`
+            : dish_orientation.held ? `The dish may not stand upright: ${dish_orientation.reason}`
             : dish_orientation.reason,
         });
         return;
@@ -216,15 +216,12 @@ async function advance(store: Store, config: Config, initialJob: JobRecord, leas
         source_photos: inputs().map((upload) => upload.url), captured_on: new Date().toISOString().slice(0, 10),
         status: 'needs_review', metadata: converted.metadata,
       };
-      // A model the upright check could not vouch for is never published by itself, even with auto-publish on.
-      const held = job.dish_orientation?.held ? job.dish_orientation : undefined;
       store.transaction(() => {
         const reviewed = store.updateJob(job, {
-          status: 'needs_review', progress: progress.needs_review,
-          status_message: description(job, held ? `Held for review: ${held.reason}` : 'Ready to review'),
+          status: 'needs_review', progress: progress.needs_review, status_message: description(job, 'Ready to review'),
           error: null, asset_id: asset.id, converted_asset_path: converted.path,
         }, lease);
-        if (config.autoPublish && !held) publishAsset(store, asset, reviewed, {}, lease);
+        if (config.autoPublish) publishAsset(store, asset, reviewed, {}, lease);
         else store.put('assets', asset);
       });
     }

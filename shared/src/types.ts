@@ -211,7 +211,7 @@ export interface DishOrientation {
   verdict: 'upright' | 'upside_down' | 'on_its_side' | 'unrecognizable' | 'several_objects' | 'unchecked';
   /** Whether the provider's file was turned over to get there. */
   turned_over: boolean;
-  /** True when the model is not published by itself and waits for a person to look at it. */
+  /** True when the check could not vouch for the model. It is a flag only: publishing does not wait on it. */
   held: boolean;
   confidence: number;
   /** The feature the check went by, or why it could not run. */
