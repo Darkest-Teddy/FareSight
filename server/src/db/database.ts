@@ -23,6 +23,9 @@ export interface Upload {
 
 export interface JobRecord extends GenerationJob {
   submission_pending?: boolean;
+  idempotency_key?: string;
+  request_fingerprint?: string;
+  terminal_failure?: boolean;
   world_id?: string;
   atlas_input_asset_ids?: string[];
   posed_frames?: AtlasPosedFrame[];
@@ -58,8 +61,12 @@ type RecordByTable = {
   debug_logs: DebugLogEntry;
 };
 
+export interface WorkerLease { owner: string; generation: number }
+export class WorkerLeaseLost extends Error {}
+
 export class Store {
   readonly sqlite: DatabaseSync;
+  private jobUpdates?: Map<string, JobRecord>;
   /** Called after every job change. Capture storage uses it to mirror job progress into Postgres. */
   onJobUpdate?: (job: JobRecord) => void;
 
@@ -87,11 +94,15 @@ export class Store {
         updated_at TEXT GENERATED ALWAYS AS (json_extract(data, '$.updated_at')) STORED
       ) STRICT;
       CREATE INDEX IF NOT EXISTS job_queue ON jobs(status, updated_at);
+      CREATE UNIQUE INDEX IF NOT EXISTS job_idempotency ON jobs(json_extract(data, '$.idempotency_key'));
       CREATE TABLE IF NOT EXISTS reviews (id TEXT PRIMARY KEY, data TEXT NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS debug_logs (id TEXT PRIMARY KEY, data TEXT NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS worker_lease (id INTEGER PRIMARY KEY CHECK (id = 1), owner TEXT NOT NULL, expires INTEGER NOT NULL) STRICT;
     `);
     this.transaction(() => {
+      if (!this.sqlite.prepare("SELECT 1 FROM pragma_table_info('worker_lease') WHERE name = 'generation'").get()) {
+        this.sqlite.exec('ALTER TABLE worker_lease ADD COLUMN generation INTEGER NOT NULL DEFAULT 0');
+      }
       for (const asset of demoAssets) {
         const stored = this.get('assets', asset.id);
         if (!stored || stored.backend === 'prebuilt-demo') this.put('assets', asset);
@@ -103,7 +114,10 @@ export class Store {
           this.put('places', place);
           continue;
         }
-        const { name, vibe, hours, details, lat, lon, walk_from_stop_m } = place;
+        const {
+          name, vibe, hours, details, lat, lon, walk_from_stop_m, stop_id, pin_index,
+          typical_price, cravings, family_friendly, evening_venue,
+        } = place;
         const seedDishIds = new Set(place.dishes.map(({ id }) => id));
         const dishes = new Map(stored.dishes
           .filter(({ id, asset_id }) => seedDishIds.has(id) || !asset_id || !isSeedAsset(asset_id))
@@ -112,17 +126,33 @@ export class Store {
           if (isSeedAsset(dishes.get(dish.id)?.asset_id)) dishes.set(dish.id, dish);
         }
         const seedRoom = isSeedAsset(stored.room_asset_id);
+        const refreshPreviews = <T extends { id: string; asset_id?: string | null }>(seed: T[], previous: T[], inheritRoom = false) => {
+          const uploaded = new Map(previous.filter((entry) => !isSeedAsset(entry.asset_id)).map((entry) => [entry.id, entry]));
+          return [
+            ...seed.map((entry) => ({
+              ...entry,
+              asset_id: uploaded.get(entry.id)?.asset_id
+                ?? (inheritRoom && !seedRoom && entry.asset_id && entry.asset_id === place.room_asset_id ? stored.room_asset_id : entry.asset_id),
+            })),
+            ...[...uploaded.values()].filter((entry) => !seed.some(({ id }) => id === entry.id)),
+          ];
+        };
         const hasUploadedPreview = !seedRoom || stored.dishes.some(({ asset_id }) => !isSeedAsset(asset_id));
         this.put('places', {
-          ...stored, name, vibe, hours, details, lat, lon, walk_from_stop_m,
+          ...stored, name, vibe, hours, details, lat, lon, walk_from_stop_m, stop_id, pin_index,
+          typical_price, cravings, family_friendly, evening_venue,
+          rooms: refreshPreviews(place.rooms, stored.rooms ?? [], true),
+          seat_views: refreshPreviews(place.seat_views, stored.seat_views ?? []),
           room_asset_id: seedRoom ? place.room_asset_id : stored.room_asset_id,
           dishes: [...dishes.values()],
           seed_status: hasUploadedPreview ? stored.seed_status : place.seed_status,
           price_checked_on: hasUploadedPreview ? stored.price_checked_on : place.price_checked_on,
         });
       }
-      // Venues dropped from the catalog because they sit outside their station's model.
-      for (const id of ['allston-bostongoods-01', 'allston-coreanos-01', 'allston-brightonmusic-01']) {
+      // Retire previously seeded venues while preserving the original uploaded files.
+      for (const id of ['allston-bostongoods-01', 'allston-coreanos-01', 'allston-brightonmusic-01', 'bu-ramen-01', 'allston-karaoke-01']) {
+        this.sqlite.prepare('DELETE FROM upload_places WHERE place_id = ?').run(id);
+        this.sqlite.prepare("DELETE FROM reviews WHERE json_extract(data, '$.place_id') = ?").run(id);
         this.sqlite.prepare('DELETE FROM places WHERE id = ?').run(id);
       }
       const reviewed = new Set(this.all('reviews').map(({ place_id }) => place_id));
@@ -187,40 +217,76 @@ export class Store {
     return row && JSON.parse(String(row.data));
   }
 
-  updateJob(job: JobRecord, changes: Partial<JobRecord>): JobRecord {
+  jobByIdempotencyKey(key: string): JobRecord | undefined {
+    const row = this.sqlite.prepare("SELECT data FROM jobs WHERE json_extract(data, '$.idempotency_key') = ?").get(key);
+    return row && JSON.parse(String(row.data));
+  }
+
+  hasAssetFile(url: string, includePending: boolean): boolean {
+    return Boolean(this.sqlite.prepare(`
+      SELECT 1 FROM assets
+      WHERE (json_extract(data, '$.status') = 'ready'
+        OR (? = 1 AND json_extract(data, '$.status') IN ('needs_review', 'pending_review')))
+      AND ? IN (json_extract(data, '$.url'), json_extract(data, '$.preview_url'), json_extract(data, '$.thumbnail_url'),
+        json_extract(data, '$.original_ply_url'), json_extract(data, '$.original_spz_url'))
+      LIMIT 1
+    `).get(Number(includePending), url));
+  }
+
+  updateJob(job: JobRecord, changes: Partial<JobRecord>, lease?: WorkerLease): JobRecord {
     const updated = { ...job, ...changes, updated_at: new Date().toISOString() };
-    this.put('jobs', updated);
-    this.onJobUpdate?.(updated);
+    if (!lease) this.put('jobs', updated);
+    else if (!this.sqlite.prepare(`
+      UPDATE jobs SET data = ? WHERE id = ? AND EXISTS (
+        SELECT 1 FROM worker_lease WHERE owner = ? AND generation = ? AND expires > ?
+      )
+    `).run(JSON.stringify(updated), job.id, lease.owner, lease.generation, Date.now()).changes) throw new WorkerLeaseLost();
+    if (this.jobUpdates) this.jobUpdates.set(updated.id, updated);
+    else this.onJobUpdate?.(updated);
     return updated;
+  }
+
+  assertWorker(lease: WorkerLease): void {
+    if (!this.sqlite.prepare('SELECT 1 FROM worker_lease WHERE owner = ? AND generation = ? AND expires > ?')
+      .get(lease.owner, lease.generation, Date.now())) throw new WorkerLeaseLost();
   }
 
   transaction<T>(action: () => T): T {
     this.sqlite.exec('BEGIN IMMEDIATE');
+    const updates = new Map<string, JobRecord>();
+    this.jobUpdates = updates;
+    let value: T;
     try {
-      const value = action();
+      value = action();
       this.sqlite.exec('COMMIT');
-      return value;
     } catch (error) {
       this.sqlite.exec('ROLLBACK');
       throw error;
+    } finally {
+      this.jobUpdates = undefined;
     }
+    for (const job of updates.values()) this.onJobUpdate?.(job);
+    return value;
   }
 
-  claimWorker(owner: string): boolean {
+  claimWorker(owner: string): WorkerLease | undefined {
     const now = Date.now();
-    return Number(this.sqlite.prepare(`
-      INSERT INTO worker_lease VALUES (1, ?, ?)
-      ON CONFLICT (id) DO UPDATE SET owner = excluded.owner, expires = excluded.expires
-      WHERE owner = excluded.owner OR expires < ?
-    `).run(owner, now + 30_000, now).changes) === 1;
+    const row = this.sqlite.prepare(`
+      INSERT INTO worker_lease (id, owner, expires, generation) VALUES (1, ?, ?, 1)
+      ON CONFLICT (id) DO UPDATE SET owner = excluded.owner, expires = excluded.expires,
+        generation = CASE WHEN owner = excluded.owner AND expires > ? THEN generation ELSE generation + 1 END
+      WHERE owner = excluded.owner OR expires <= ?
+      RETURNING generation
+    `).get(owner, now + 30_000, now, now);
+    return row ? { owner, generation: Number(row.generation) } : undefined;
   }
 
   releaseWorker(owner: string): void {
-    this.sqlite.prepare('DELETE FROM worker_lease WHERE owner = ?').run(owner);
+    this.sqlite.prepare('UPDATE worker_lease SET expires = 0 WHERE owner = ?').run(owner);
   }
 }
 
 export function publicJob(job: JobRecord): GenerationJob {
-  const { submission_pending, world_id, preview_download_pending, atlas_input_asset_ids, posed_frames, atlas_splat, ...publicFields } = job;
+  const { submission_pending, idempotency_key, request_fingerprint, terminal_failure, world_id, preview_download_pending, atlas_input_asset_ids, posed_frames, atlas_splat, ...publicFields } = job;
   return publicFields;
 }

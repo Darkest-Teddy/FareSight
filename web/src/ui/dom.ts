@@ -30,14 +30,39 @@ export function field(label: string, control: HTMLElement) {
   return node;
 }
 
-export function link(label: string, url: string) {
+export function httpUrl(url?: string | null): URL | undefined {
+  if (!url) return;
+  try {
+    const target = new URL(url);
+    if (target.protocol === 'https:' || target.protocol === 'http:') return target;
+  } catch { /* The caller can render the label without a link. */ }
+}
+
+export function link(label: string, url?: string | null) {
+  const target = httpUrl(url);
+  if (!target) return element('span', '', label);
   const node = element('a', 'text-link', label);
-  const target = new URL(url);
-  if (target.protocol !== 'https:' && target.protocol !== 'http:') throw new TypeError('Invalid link URL');
   node.href = target.href;
   node.target = '_blank';
   node.rel = 'noopener noreferrer';
   return node;
+}
+
+export function replacePreservingFocus(host: HTMLElement, fallback: HTMLElement, ...children: HTMLElement[]): void {
+  const focused = document.activeElement;
+  const restore = focused instanceof HTMLElement && host.contains(focused) && focused !== host;
+  host.replaceChildren(...children);
+  if (!restore || document.activeElement === focused) return;
+  if (host.contains(focused)) { focused.focus({ preventScroll: true }); return; }
+  const key = (node: HTMLElement) => node.dataset.focusKey ?? node.dataset.control ??
+    node.getAttribute('aria-label') ?? node.getAttribute('href') ?? node.textContent;
+  const replacement = [...host.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input, select, textarea')]
+    .find((node) => node.tagName === focused.tagName && key(node) === key(focused));
+  if (replacement) replacement.focus({ preventScroll: true });
+  else {
+    fallback.tabIndex = -1;
+    fallback.focus({ preventScroll: true });
+  }
 }
 
 export function message(text: string, problem = false) {

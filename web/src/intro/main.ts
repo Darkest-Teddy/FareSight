@@ -1,11 +1,5 @@
 import { IntroScene, ROOM_START } from './IntroScene';
 
-/**
- * Scroll is the only input. The page is a tall, empty track; the canvas and the copy are fixed
- * on top of it. Every frame reads how far the track has travelled, eases toward it, and hands
- * the eased value to the 3D stage and to the copy. No scroll listeners are involved.
- */
-
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const root = document.documentElement;
 const body = document.body;
@@ -45,12 +39,10 @@ const ramp = (value: number, from: number, to: number): number => {
 
 let travel = 1;
 const measure = () => { travel = Math.max(1, root.scrollHeight - window.innerHeight); };
-new ResizeObserver(measure).observe(body);
 measure();
 
 const scrolled = () => Math.max(0, Math.min(window.scrollY / travel, 1));
 let eased = scrolled();
-let opening = 0;
 let chapter = '';
 let lookState = '';
 
@@ -58,7 +50,6 @@ function frame(dt: number): number {
   const goal = scrolled();
   eased += (goal - eased) * (reducedMotion.matches ? 1 : 1 - Math.exp(-dt * 5.2));
   if (Math.abs(goal - eased) < 0.00005) eased = goal;
-  if (body.dataset.state === 'ready') opening = reducedMotion.matches ? 1 : Math.min(1, opening + dt / 1.1);
 
   // Inside the room the visitor can turn their head. As they turn away, the copy clears off the view.
   const away = scene.lookAway;
@@ -73,12 +64,12 @@ function frame(dt: number): number {
     const arrive = ramp(eased, ...beat.enter);
     const leave = ramp(eased, ...beat.exit);
     const clear = beat.node.id === 'inside' ? 1 - away : 1;
-    const shown = Math.round(arrive * (1 - leave) * opening * clear * 1000) / 1000;
+    const shown = Math.round(arrive * (1 - leave) * clear * 1000) / 1000;
     if (shown === beat.shown) continue;
     beat.shown = shown;
     beat.node.style.visibility = shown > 0.004 ? 'visible' : 'hidden';
     beat.copy.style.opacity = String(shown);
-    const drift = reducedMotion.matches ? 0 : (1 - arrive * opening) * 30 - leave * 30;
+    const drift = reducedMotion.matches ? 0 : (1 - arrive) * 30 - leave * 30;
     beat.copy.style.transform = `translate3d(0, ${drift.toFixed(2)}px, 0)`;
   }
 
@@ -104,31 +95,60 @@ for (const link of document.querySelectorAll<HTMLAnchorElement>('[data-to]')) {
   });
 }
 
-/** Without WebGL the copy still plays; it only loses the model behind it. */
-function playWithoutStage(): void {
-  let last = performance.now();
-  const tick = (now: number) => {
-    frame(Math.min(0.1, (now - last) / 1000));
-    last = now;
-    requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
+const scene = new IntroScene(canvas, frame);
+const events = new AbortController();
+let stageReady = false;
+let fallbackFrame = 0;
+let last = 0;
+
+function wake() {
+  if (stageReady) { scene.wake(); return; }
+  if (!fallbackFrame) {
+    last = performance.now();
+    fallbackFrame = requestAnimationFrame(tick);
+  }
 }
 
-const scene = new IntroScene(canvas, frame);
-scene.init().then((roomReady) => {
+function tick(now: number) {
+  fallbackFrame = 0;
+  frame(Math.min(0.1, (now - last) / 1000));
+  last = now;
+  if (eased !== scrolled()) fallbackFrame = requestAnimationFrame(tick);
+}
+
+const observer = new ResizeObserver(() => { measure(); wake(); });
+observer.observe(body);
+window.addEventListener('scroll', wake, { passive: true, signal: events.signal });
+window.addEventListener('resize', () => { measure(); wake(); }, { signal: events.signal });
+reducedMotion.addEventListener('change', wake, { signal: events.signal });
+frame(0);
+
+scene.init((roomReady) => {
   body.dataset.room = roomReady ? 'ready' : 'missing';
   if (!roomReady) roomTag.textContent = '3D interior unavailable';
+}).then(() => {
+  if (events.signal.aborted) return;
+  cancelAnimationFrame(fallbackFrame);
+  fallbackFrame = 0;
+  stageReady = true;
   body.dataset.state = 'ready';
   status.hidden = true;
   scene.start();
 }).catch((error: unknown) => {
+  if (events.signal.aborted) return;
   console.error(error);
+  stageReady = false;
   scene.destroy();
   body.dataset.state = 'ready';
   body.dataset.stage = 'missing';
   roomTag.textContent = '3D interior unavailable';
   status.textContent = 'The 3D model could not load on this device. The app still works.';
-  playWithoutStage();
+  wake();
 });
-window.addEventListener('pagehide', (event) => { if (!event.persisted) scene.destroy(); });
+window.addEventListener('pagehide', (event) => {
+  if (event.persisted) return;
+  events.abort();
+  observer.disconnect();
+  cancelAnimationFrame(fallbackFrame);
+  scene.destroy();
+}, { signal: events.signal });

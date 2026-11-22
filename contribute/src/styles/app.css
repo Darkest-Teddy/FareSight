@@ -591,6 +591,8 @@ button:disabled { cursor: default; }
 .photo-hint { margin-top: .6rem; }
 .photo-hint:empty { display: none; }
 .photo-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; }
+.photo-feedback:not(:empty) { display: grid; gap: .25rem; margin-top: .5rem; overflow-wrap: anywhere; }
+.photo-feedback:empty { display: block; }
 .shot { position: relative; aspect-ratio: 1; overflow: hidden; border-radius: 1.15rem; background: var(--raised); animation: pop .4s var(--spring); }
 .shot img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .shot-fallback { display: none; position: absolute; inset: 0; margin: auto; color: var(--muted); }
@@ -663,7 +665,7 @@ button:disabled { cursor: default; }
 .scan-pill { flex: none; padding: .2rem .6rem; border: 1px solid var(--accent); border-radius: 2rem; color: var(--accent); font-size: .7rem; font-weight: 700; }
 [data-status=needs_review] .scan-pill { border-color: var(--amber); color: var(--amber); }
 [data-status=ready] .scan-pill { border-color: var(--ok); background: rgb(111 231 176 / 14%); color: var(--ok); }
-[data-status=failed] .scan-pill, [data-status=missing] .scan-pill { border-color: var(--error); color: var(--error); }
+:is([data-status=failed], [data-status=rejected], [data-status=missing]) .scan-pill { border-color: var(--error); color: var(--error); }
 .steps { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .step { position: relative; display: grid; justify-items: center; gap: .35rem; color: #7783a3; font-size: .6rem; font-weight: 600; text-align: center; }
 .step::before { content: ''; position: absolute; top: .34rem; right: 50%; width: 100%; height: 2px; background: var(--edge-soft); transition: background-color .4s; }
@@ -681,10 +683,10 @@ button:disabled { cursor: default; }
 .scan-bar i::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgb(255 255 255 / 65%), transparent); translate: -100% 0; animation: sheen 1.5s ease-in-out infinite; }
 [data-status=needs_review] .scan-bar i { background: var(--amber); }
 [data-status=ready] .scan-bar i { background: var(--ok); }
-[data-status=failed] .scan-bar i, [data-status=missing] .scan-bar i { background: var(--error); }
-:is([data-status=needs_review], [data-status=ready], [data-status=failed], [data-status=missing]) .scan-bar i::after { display: none; }
+:is([data-status=failed], [data-status=rejected], [data-status=missing]) .scan-bar i { background: var(--error); }
+:is([data-status=needs_review], [data-status=ready], [data-status=failed], [data-status=rejected], [data-status=missing]) .scan-bar i::after { display: none; }
 .scan-note { color: var(--muted); font-size: .82rem; line-height: 1.45; overflow-wrap: anywhere; }
-[data-status=failed] .scan-note { color: var(--error); }
+[data-status=failed] .scan-note, [data-status=rejected] .scan-note { color: var(--error); }
 .scan-actions { display: flex; gap: .4rem; }
 .scan-actions:empty { display: none; }
 

@@ -8,14 +8,17 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { gunzipSync, gzipSync } from 'node:zlib';
+import Fastify from 'fastify';
 import { createApp } from '../dist/app.js';
 import { getConfig } from '../dist/config.js';
 import { createPool, migrate } from '../dist/db/pg.js';
+import { registerCaptures } from '../dist/routes/captures.js';
+import { createPasscodeGuards } from '../dist/services/passcodes.js';
 import { frameKey, uploadTarget } from '../dist/services/captureKeys.js';
 import { createObjectStorage } from '../dist/services/objectStorage.js';
 import { upgradeSpz } from '../dist/services/spzUpgrade.js';
 
-const placeId = 'bu-ramen-01';
+const placeId = 'harvard-cafe-01';
 const captures = {
   databaseUrl: process.env.TEST_DATABASE_URL ?? 'postgres://faresight:faresight@localhost:54329/faresight',
   endpoint: process.env.TEST_S3_ENDPOINT ?? 'http://localhost:9009',
@@ -63,7 +66,7 @@ async function setup(t, overrides = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'faresight-capture-'));
   const demo = join(dir, 'demo');
   await mkdir(demo);
-  await writeFile(join(demo, 'room-ramen-house.ply'), fixturePly());
+  await writeFile(join(demo, 'room-study-cafe.ply'), fixturePly());
   const config = {
     ...getConfig(), database: join(dir, 'faresight.db'), uploads: join(dir, 'uploads'), outputs: join(dir, 'outputs'),
     demoAssets: [demo], host: '127.0.0.1', port: 0, mode: 'demo', adminPasscode: 'test-passcode',
@@ -142,6 +145,22 @@ test('upload names map to keys inside the capture and nothing else', () => {
   assert.ok('error' in uploadTarget(id, { name: 'frames/000001.jpg', content_type: 'image/png', size: 1000 }));
   assert.ok('error' in uploadTarget(id, { name: 'frames/000001.jpg', content_type: 'image/jpeg', size: 9 * 1024 * 1024 }));
   assert.ok('error' in uploadTarget(id, { name: 'frames.json', content_type: 'text/html', size: 10 }));
+});
+
+test('capture uploads accept the contributor header while listing and deletion require admin', async (t) => {
+  const app = Fastify();
+  t.after(() => app.close());
+  const config = { ...getConfig(), adminPasscode: 'test-admin', contributorPasscode: 'test-upload' };
+  registerCaptures(app, { get: () => ({ id: placeId }) }, config, createPasscodeGuards(config), {
+    pool: { query: async () => ({ rows: [{ id: '9b1c0000-0000-4000-8000-000000000000' }] }) },
+  }, {});
+  const headers = { 'x-upload-passcode': 'test-upload' };
+  const create = { method: 'POST', url: '/api/captures', payload: { place_id: placeId } };
+  const created = await app.inject({ ...create, headers });
+  assert.equal(created.statusCode, 201);
+  assert.equal((await app.inject(create)).statusCode, 401);
+  assert.equal((await app.inject({ url: '/api/captures', headers })).statusCode, 401);
+  assert.equal((await app.inject({ method: 'DELETE', url: '/api/captures/' + created.json().capture_id, headers })).statusCode, 401);
 });
 
 test('an SPZ version 2 file is rewritten as version 3 with the same rotations', () => {

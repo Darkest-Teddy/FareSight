@@ -49,14 +49,14 @@ export async function sendCapture(options: {
   files: File[];
   tier: RoomModelTier;
   capture?: CaptureUpload;
-  onCapture(capture: CaptureUpload): void;
+  onCheckpoint(capture: CaptureUpload): Promise<void>;
   onFrame(seq: number, state: 'sending' | 'sent' | 'failed', sent: number): void;
 }) {
   const { placeId, files, tier, onFrame } = options;
   let capture = options.capture;
   if (!capture) {
     capture = { id: await withCode((code) => api.createCapture(placeId, deviceInfo(), code)), sent: new Set() };
-    options.onCapture(capture);
+    await options.onCheckpoint(capture);
   }
   const { id, sent } = capture;
   if (capture.completed) return { captureId: id, job: await api.captureJob(id) };
@@ -104,11 +104,13 @@ export async function sendCapture(options: {
     const batch = landed.slice(start, start + REGISTER_BATCH);
     await withCode((code) => api.registerFrames(id, batch, code));
     for (const { seq } of batch) sent.add(seq);
+    await options.onCheckpoint(capture);
   }
   if (failure) throw failure;
 
   await put(urlFor(FRAMES_JSON), manifest, 'application/json');
   await withCode((code) => api.completeCapture(id, tier, code));
   capture.completed = true;
+  await options.onCheckpoint(capture);
   return { captureId: id, job: await api.captureJob(id) };
 }

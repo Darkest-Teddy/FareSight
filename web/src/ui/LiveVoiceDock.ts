@@ -96,8 +96,10 @@ export class LiveVoiceDock {
   }
 
   setOpen(open: boolean): void {
+    const restore = !open && !this.root.hidden && this.root.contains(document.activeElement);
     this.root.hidden = !open;
     this.trigger.setAttribute('aria-expanded', String(open));
+    if (restore) this.trigger.focus({ preventScroll: true });
   }
 
   setModel(model: string): void {
@@ -105,6 +107,7 @@ export class LiveVoiceDock {
   }
 
   setState(state: VoiceState, detail?: string): void {
+    if (state === 'idle') this.setOpen(false);
     this.state = state;
     this.root.dataset.state = state;
     this.trigger.dataset.state = state;
@@ -125,8 +128,6 @@ export class LiveVoiceDock {
       this.setOpen(true);
     } else if (state === 'connecting') {
       this.renderEmptyFeed();
-    } else if (state === 'idle') {
-      this.setOpen(false);
     }
   }
 
@@ -158,7 +159,7 @@ export class LiveVoiceDock {
   private renderEmptyFeed(): void {
     this.hasTranscript = false;
     this.feed.replaceChildren(
-      element('p', 'message', 'Try “Open Tsuru Tonkotsu Ramen” or “Show me two 3D dishes to compare.”'),
+      element('p', 'message', 'Try “Open Shu Daxia Hot Pot” or “Show me two 3D dishes to compare.”'),
     );
   }
 }

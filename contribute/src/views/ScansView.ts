@@ -1,5 +1,5 @@
 import type { JobStage } from '@faresight/shared';
-import { api } from '../api';
+import { api, ApiError, jobStatus } from '../api';
 import { button, el, errorText, haptic, icon, timeAgo } from '../dom';
 import { scans, type ScanRecord, type ScanState } from '../store';
 import { withCode } from '../ui/CodeSheet';
@@ -10,7 +10,7 @@ const stages: [JobStage, string][] = [
 ];
 const pills: Record<string, string> = {
   loading: 'Checking…', queued: 'Queued', generating: 'Building', downloading: 'Fetching', converting: 'Optimizing',
-  needs_review: 'In review', ready: 'Live', failed: 'Failed', missing: 'Gone',
+  needs_review: 'In review', ready: 'Live', rejected: 'Rejected', failed: 'Failed', missing: 'Gone',
 };
 
 interface Card {
@@ -109,9 +109,9 @@ export class ScansView {
 
   private update(card: Card, record: ScanRecord, state: ScanState) {
     const job = 'job' in state ? state.job : undefined;
-    const status = state.status === 'missing' ? 'missing' : job?.status ?? 'loading';
+    const status = state.status === 'missing' ? 'missing' : job ? jobStatus(job) : 'loading';
     const index = stages.findIndex(([stage]) => stage === status);
-    const settled = status === 'needs_review' || status === 'ready';
+    const settled = status === 'needs_review' || status === 'ready' || status === 'rejected';
     card.root.dataset.status = status;
     card.pill.textContent = pills[status] ?? status;
     const photos = `${record.photoCount} ${record.photoCount === 1 ? 'photo' : 'photos'}`;
@@ -130,26 +130,39 @@ export class ScansView {
       : status === 'loading' ? 'Checking on this scan…'
       : status === 'ready' ? 'Live in FareSight. Riders can now preview it in 3D.'
       : status === 'needs_review' ? 'Built. A FareSight admin reviews it before it goes live.'
+      : status === 'rejected' ? (job?.rejection_reason || job?.error || job?.status_message || 'This scan was rejected during review.')
       : status === 'failed' ? (job?.error || job?.status_message || 'The build stopped before it finished.')
       : `${job?.progress ?? 0}% · ${job?.status_message ?? ''}`
     ) + waiting;
 
-    const actionsFor = status === 'failed' ? 'failed' : status === 'missing' || status === 'ready' ? 'clear' : '';
+    const actionsFor = ['failed', 'missing', 'ready', 'rejected'].includes(status) ? status : '';
     if (card.actionsFor === actionsFor) return;
     card.actionsFor = actionsFor;
     card.actions.replaceChildren();
     if (actionsFor === 'failed') {
-      const retry = button('Try again', () => void this.retry(record.id, card, retry), 'primary small');
+      const retry = button('Try again', () => void this.retry(record, card, retry), 'primary small');
       retry.prepend(icon('retry'));
       card.actions.append(retry);
     }
     if (actionsFor) card.actions.append(button(status === 'ready' ? 'Clear' : 'Remove', () => scans.remove(record.id), 'ghost small'));
   }
 
-  private async retry(id: string, card: Card, control: HTMLButtonElement) {
+  private async retry(record: ScanRecord, card: Card, control: HTMLButtonElement) {
     control.disabled = true;
     try {
-      scans.update(await withCode((code) => api.retry(id, code)));
+      const job = await withCode((code) => api.retry(record.id, code)).catch(async (error) => {
+        const { captureId } = record;
+        if (!captureId || !(error instanceof ApiError) || error.status !== 404) throw error;
+        const state = scans.state(record.id);
+        const tier = 'job' in state ? state.job?.model_tier : undefined;
+        await withCode((code) => api.completeCapture(captureId, tier, code));
+        return api.captureJob(captureId);
+      });
+      if (job.id === record.id) scans.update(job);
+      else {
+        scans.remove(record.id);
+        scans.add({ ...record, id: job.id, createdAt: job.created_at }, job);
+      }
       haptic(10);
     } catch (error) {
       card.note.textContent = errorText(error);

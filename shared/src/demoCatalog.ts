@@ -18,7 +18,6 @@ type Listing = [
 
 const listings: Listing[][] = [
   [
-    ['bu-ramen-01', 'Tsuru Tonkotsu Ramen', 'restaurant', 42.35015, -71.10665, 85, 14.5, '11:30', '22:00', ['ramen', 'katsu', 'noodles'], 'Small ramen counter with table seating along the wall.', true, true],
     ['bu-pavement-01', 'Pavement Coffeehouse', 'study', 42.34985, -71.10721, 50, 9, '07:00', '19:00', ['coffee', 'bagels', 'study'], 'Bagels between lectures and a library nook for reading.', true],
     ['bu-nudpob-01', 'Nud Pob Thai Cuisine', 'restaurant', 42.34986, -71.10731, 60, 17, '11:30', '21:30', ['thai', 'noodles', 'curry'], 'Campus standby for pad see ew and Thai curries.', true, true],
     ['bu-halal-01', 'The Halal Shack at the GSU', 'restaurant', 42.35100, -71.10917, 225, 13, '11:00', '20:00', ['halal', 'rice bowls', 'shawarma'], 'Halal rice bowls and wraps in the George Sherman Union food hall.', true],
@@ -27,7 +26,6 @@ const listings: Listing[][] = [
     ['bu-starbucks-01', 'Starbucks (Warren Towers)', 'study', 42.34908, -71.10358, 290, 7.5, '07:00', '20:00', ['coffee', 'study', 'espresso'], 'Campus coffeehouse at Warren Towers on Commonwealth Ave with espresso bar and study seating.', true],
   ],
   [
-    ['allston-karaoke-01', 'Echo Box Karaoke Lounge', 'event_space', 42.35183, -71.12428, 60, 48, '16:00', '01:00', ['karaoke', 'private room', 'groups'], 'Private karaoke suite with a sofa wall and an open floor.', true, true],
     ['allston-brownsugar-01', 'Brown Sugar Cafe', 'restaurant', 42.35215, -71.12196, 280, 20, '11:30', '22:00', ['thai', 'curry', 'fried rice'], 'Shared Thai plates in a lively dining room.', true, true],
     ['allston-groovythrifty-01', 'Groovy Thrifty', 'shop', 42.35237, -71.12829, 290, 14, '12:00', '18:00', ['thrift', 'vintage', 'clothing'], 'Secondhand and vintage racks on Brighton Avenue.', true],
     ['allston-super88-01', 'Super 88 Market & Food Court', 'market', 42.35254, -71.12539, 100, 13, '09:00', '21:00', ['dumplings', 'boba', 'groceries'], 'Grocery aisles and a food court for groups with different cravings.', true],
@@ -76,43 +74,38 @@ const byId = (id: string) => demoPlaces.find((place) => place.id === id)!;
 export const demoAssets: Asset[] = [];
 
 type DemoAssetInput = Pick<Asset, 'id' | 'kind' | 'scale_status' | 'scale_label'> &
-  Partial<Pick<Asset, 'gaussian_count' | 'provenance' | 'provenance_label' | 'spawn_point' | 'plate_diameter_m'>> &
+  Partial<Pick<Asset, 'gaussian_count' | 'provenance' | 'provenance_label' | 'spawn_point' | 'plate_diameter_m' | 'source_photos'>> &
   { file: string };
 
 function addDemoAsset(input: DemoAssetInput): Asset {
   const { file, gaussian_count = 0, provenance = 'demo_splat',
-    provenance_label = 'Procedural demo room splat', ...fields } = input;
+    provenance_label = 'Procedural demo room splat', source_photos = [], ...fields } = input;
   const extension = file.split('.').at(-1);
   if (extension !== 'ply' && extension !== 'sog' && extension !== 'spz') throw new Error(`Unsupported demo asset: ${file}`);
   const url = `/assets-demo/${file}`;
   const asset: Asset = {
     ...fields, format: extension, url, captured_on: demoDate, gaussian_count, provenance, provenance_label,
-    scale_factor: 1, status: 'ready', source_photos: [], backend: 'prebuilt-demo',
+    scale_factor: 1, status: 'ready', source_photos, backend: 'prebuilt-demo',
     ...(extension === 'ply' ? { original_ply_url: url } : {}),
   };
   demoAssets.push(asset);
   return asset;
 }
 
-function markDemo(place: Place): void {
-  place.seed_status = 'demo_venue';
-  place.price_checked_on = demoDate;
-}
-
-function flagship(id: string, roomFile: string, spawn_point: Vector3, measured = false): Place {
+function flagship(id: string, roomFile: string, spawn_point: Vector3): Place {
   const place = byId(id);
-  markDemo(place);
+  place.seed_status = 'demo_venue';
   place.room_asset_id = addDemoAsset({
     id: `${id}-room`, kind: 'room', file: roomFile, spawn_point,
-    scale_status: measured ? 'measured' : 'approximate',
-    scale_label: measured ? 'Actual size (4.2 m × 3.4 m)' : 'Approximate size',
+    scale_status: 'approximate',
+    scale_label: 'Approximate size',
   }).id;
   return place;
 }
 
 function atlasRoom(id: string, file: string, gaussian_count: number): void {
   const place = byId(id);
-  markDemo(place);
+  place.seed_status = 'demo_venue';
   place.room_asset_id = addDemoAsset({
     id: `${id}-room`, kind: 'room', file, gaussian_count, spawn_point: [0, 1.55, 2],
     scale_status: 'approximate', scale_label: 'Approximate room size',
@@ -120,16 +113,7 @@ function atlasRoom(id: string, file: string, gaussian_count: number): void {
   }).id;
 }
 
-const ramen = flagship('bu-ramen-01', 'room-ramen-house.ply', [0, 1.55, 2]);
 const cafe = flagship('harvard-cafe-01', 'room-study-cafe.ply', [0, 1.55, 2.1]);
-const karaoke = flagship('allston-karaoke-01', 'room-karaoke-suite.ply', [0, 1.55, 2], true);
-karaoke.stated_capacity = 14;
-karaoke.rooms = (['seated', 'standing'] as const).map((seating) => ({
-  id: `echo-box-${seating}`, place_id: karaoke.id, name: `Private suite (${seating})`,
-  room_type: 'karaoke', stated_capacity: 14, floor_width_m: 4.2, floor_depth_m: 3.4,
-  seating, price: 48, price_unit: 'hour', asset_id: karaoke.room_asset_id,
-}));
-
 atlasRoom('kenmore-jefes-01', 'room-eljefes-atlas.sog', 344_961);
 atlasRoom('kenmore-shudaxia-01', 'room-shudaxia-atlas.sog', 349_370);
 atlasRoom('bu-starbucks-01', 'room-starbucks-atlas.sog', 349_990);
@@ -137,13 +121,14 @@ atlasRoom('bu-starbucks-01', 'room-starbucks-atlas.sog', 349_990);
 function addDish(
   place: Place, id: string, name: string, price: Dish['price'], diameter: number,
   file: string, portion_note: string,
-  preview: { vessel: string } | { splats: number },
+  preview: { vessel: string } | { splats: number; photoUrl: string },
 ): void {
   const size = `${Number((diameter * 100).toFixed(1))} cm`;
   const photo = 'splats' in preview;
   const asset = addDemoAsset({
     id: `${id}-splat`, kind: 'dish', file, plate_diameter_m: diameter,
     gaussian_count: photo ? preview.splats : undefined,
+    source_photos: photo ? [preview.photoUrl] : [],
     scale_status: photo ? 'approximate' : 'measured',
     scale_label: photo ? `Approximate size (~${size} wide)` : `Actual size (${size} ${preview.vessel})`,
     provenance: photo ? 'ai_spatial_preview' : 'demo_splat',
@@ -152,17 +137,14 @@ function addDish(
   place.dishes.push({ id, place_id: place.id, name, price, plate_diameter_m: diameter, portion_note, asset_id: asset.id });
 }
 
-addDish(ramen, 'bu-ramen-tonkotsu', 'Signature Tonkotsu Ramen', 14.5, 0.24, 'dish-tonkotsu-ramen.ply',
-  'One 24 cm bowl with pork, noodles and egg.', { vessel: 'bowl' });
-addDish(ramen, 'bu-ramen-katsu', 'Crispy Pork Katsu Curry', 15.75, 0.26, 'dish-katsu-curry.ply',
-  'One cutlet with rice and curry on a 26 cm plate.', { vessel: 'plate' });
 addDish(cafe, 'harvard-matcha-tiramisu', 'Ceremonial Matcha Tiramisu + Latte', 9.25, 0.18,
   'dish-matcha-tiramisu.ply', 'One slice of matcha tiramisu and a latte.', { vessel: 'plate' });
 
-for (const { venueId, dishes } of restaurantDishMenus) {
+for (const { venueId, pricingUrl, dishes } of restaurantDishMenus) {
   const place = byId(venueId);
-  for (const { id, name, price, diameter, file, portion, splats } of dishes) {
-    addDish(place, id, name, price, diameter, file, portion, { splats });
+  if (pricingUrl && dishes.some(({ price }) => price !== null)) place.price_checked_on = demoDate;
+  for (const { id, name, price, diameter, file, portion, splats, photoUrl } of dishes) {
+    addDish(place, id, name, price, diameter, file, portion, { splats, photoUrl });
   }
 }
 

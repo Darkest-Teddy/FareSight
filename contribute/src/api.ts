@@ -11,15 +11,29 @@ export class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
+export type ContributorJob = Omit<GenerationJob, 'status'> & {
+  status: GenerationJob['status'] | 'rejected';
+  rejection_reason?: string | null;
+};
+
+export function jobStatus(job: ContributorJob) {
+  if ((job.status === 'needs_review' || job.status === 'failed')
+    && (job.rejection_reason || job.status_message?.startsWith('Asset rejected'))) {
+    return 'rejected';
+  }
+  return job.status;
+}
+
 // Empty when the API shares this origin (the dev proxy, or a reverse proxy in front of both apps).
 // Set VITE_API_ORIGIN at build time when the subdomain talks to the API on another host.
 const apiOrigin = String(import.meta.env.VITE_API_ORIGIN ?? '').replace(/\/$/, '');
 
-async function request<T>(path: string, body?: object | FormData, code?: string): Promise<T> {
+async function request<T>(path: string, body?: object | FormData, code?: string, idempotencyKey?: string): Promise<T> {
   const multipart = body instanceof FormData;
   const headers = new Headers({ accept: 'application/json' });
   if (body && !multipart) headers.set('content-type', 'application/json');
-  if (code) headers.set('x-admin-passcode', code);
+  if (code) headers.set('X-Upload-Passcode', code);
+  if (idempotencyKey) headers.set('Idempotency-Key', idempotencyKey);
   let response: Response;
   try {
     response = await fetch(apiOrigin + '/api' + path, {
@@ -41,7 +55,7 @@ async function request<T>(path: string, body?: object | FormData, code?: string)
 }
 
 const pathId = (id: string) => encodeURIComponent(id);
-const unwrapJob = (result: GenerationJob | { job: GenerationJob }) => 'job' in result ? result.job : result;
+const unwrapJob = (result: ContributorJob | { job: ContributorJob }) => 'job' in result ? result.job : result;
 
 export interface JobRequest {
   kind: 'room' | 'dish';
@@ -86,12 +100,12 @@ export const api = {
     request<void>(`/captures/${pathId(captureId)}/frames`, { frames }, code),
 
   /** Starts the build once every file is in the bucket. Calling it again returns the same job. */
-  async completeCapture(captureId: string, tier: RoomModelTier, code: string) {
+  async completeCapture(captureId: string, tier: RoomModelTier | undefined, code: string) {
     return (await request<{ job_id: string }>(`/captures/${pathId(captureId)}/complete`, { model_tier: tier }, code)).job_id;
   },
 
   async captureJob(captureId: string) {
-    const { generation_job } = await request<{ generation_job: GenerationJob | null }>(`/captures/${pathId(captureId)}`);
+    const { generation_job } = await request<{ generation_job: ContributorJob | null }>(`/captures/${pathId(captureId)}`);
     if (!generation_job) throw new ApiError('This capture has not been sent yet.', 404);
     return generation_job;
   },
@@ -121,16 +135,18 @@ export const api = {
     return 'upload' in result ? result.upload : result;
   },
 
-  async generate(job: JobRequest, code: string) {
-    return unwrapJob(await request<GenerationJob | { job: GenerationJob }>('/jobs', job, code));
+  async generate(job: JobRequest, code: string, idempotencyKey: string) {
+    const result = unwrapJob(await request<ContributorJob | { job: ContributorJob }>('/jobs', job, code, idempotencyKey));
+    if (!result?.id) throw new ApiError('The server did not return a scan. Try starting the build again.', 0);
+    return result;
   },
 
   async job(id: string) {
-    return unwrapJob(await request<GenerationJob | { job: GenerationJob }>(`/jobs/${pathId(id)}`));
+    return unwrapJob(await request<ContributorJob | { job: ContributorJob }>(`/jobs/${pathId(id)}`));
   },
 
   async retry(id: string, code: string) {
-    return unwrapJob(await request<GenerationJob | { job: GenerationJob }>(`/jobs/${pathId(id)}/retry`, {}, code));
+    return unwrapJob(await request<ContributorJob | { job: ContributorJob }>(`/jobs/${pathId(id)}/retry`, {}, code));
   },
 
   vehicles: () => request<{ vehicles: MbtaVehicle[] }>('/mbta/vehicles'),

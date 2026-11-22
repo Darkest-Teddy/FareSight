@@ -5,12 +5,12 @@ import { pipelineProvider } from '../config.ts';
 import type { Config } from '../config.ts';
 import type { Store } from '../db/database.ts';
 import type { CaptureEvents } from '../services/captureEvents.ts';
-import { capturePrefix, frameKey, framesJsonKey, splatPrefix, uploadTarget } from '../services/captureKeys.ts';
+import { capturePrefix, frameKey, framesJsonKey, MAX_FRAMES_JSON_BYTES, splatPrefix, uploadTarget } from '../services/captureKeys.ts';
 import { captureView } from '../services/captures.ts';
 import type { CaptureEventType, CaptureJobRow, CaptureRow, CaptureView, Captures } from '../services/captures.ts';
 import { MAX_IMAGE_BYTES } from '../services/imagePrep.ts';
 import { PRESIGN_SECONDS } from '../services/objectStorage.ts';
-import { adminGuard } from './pipeline.ts';
+import type { PasscodeGuards } from '../services/passcodes.ts';
 
 interface FrameBody {
   seq: number;
@@ -35,14 +35,13 @@ const numbers = (length: number) => ({ type: ['array', 'null'], items: { type: '
 const optionalNumber = { type: ['number', 'null'] };
 const optionalSize = { type: ['integer', 'null'], minimum: 1, maximum: 100_000 };
 
-export function registerCaptures(app: FastifyInstance, store: Store, config: Config, captures: Captures | undefined, events: CaptureEvents | undefined) {
+export function registerCaptures(app: FastifyInstance, store: Store, config: Config, guards: PasscodeGuards, captures: Captures | undefined, events: CaptureEvents | undefined) {
   if (!captures || !events) {
     // The apps read /api/health first, so this only answers clients that skipped the check.
     app.all('/api/captures*', async (_request, reply) => reply.code(503).send({ error: 'Capture storage is not configured on this server' }));
     return;
   }
   const { pool, storage, settings } = captures;
-  const admin = adminGuard(config);
   const streams = new Set<() => void>();
   app.addHook('preClose', async () => { for (const end of [...streams]) end(); });
 
@@ -52,7 +51,7 @@ export function registerCaptures(app: FastifyInstance, store: Store, config: Con
   const open = (capture: CaptureRow) => capture.status === 'created' || capture.status === 'uploading';
 
   app.post<{ Body: { place_id: string; mode?: 'room'; device_info?: object } }>('/api/captures', {
-    preHandler: admin,
+    onRequest: guards.contributor,
     schema: { body: {
       type: 'object', required: ['place_id'],
       properties: {
@@ -71,7 +70,7 @@ export function registerCaptures(app: FastifyInstance, store: Store, config: Con
   });
 
   app.get<{ Querystring: { place_id?: string } }>('/api/captures', {
-    preHandler: admin,
+    onRequest: guards.admin,
     schema: { querystring: { type: 'object', properties: { place_id: { type: 'string', maxLength: 96 } } } },
   }, async ({ query }) => {
     const { rows } = await pool.query<{ id: string }>(
@@ -81,7 +80,7 @@ export function registerCaptures(app: FastifyInstance, store: Store, config: Con
   });
 
   app.post<Id & { Body: { files: { name: string; content_type: string; size: number }[] } }>('/api/captures/:id/upload-urls', {
-    preHandler: admin,
+    onRequest: guards.contributor,
     schema: { params, body: {
       type: 'object', required: ['files'],
       properties: { files: {
@@ -110,7 +109,7 @@ export function registerCaptures(app: FastifyInstance, store: Store, config: Con
   });
 
   app.post<Id & { Body: { frames: FrameBody[] } }>('/api/captures/:id/frames', {
-    preHandler: admin,
+    onRequest: guards.contributor,
     schema: { params, body: {
       type: 'object', required: ['frames'],
       properties: { frames: {
@@ -126,14 +125,16 @@ export function registerCaptures(app: FastifyInstance, store: Store, config: Con
       } },
     } },
   }, async ({ params: { id }, body }, reply) => {
-    const capture = await find(id);
-    if (!capture) return reply.code(404).send(missing);
-    if (!open(capture)) return reply.code(409).send(sealed);
     const wrong = body.frames.find((frame) => frame.key !== frameKey(id, frame.seq));
     if (wrong) return reply.code(400).send({ error: `Frame ${wrong.seq} must use the key ${frameKey(id, wrong.seq)}` });
     const client = await pool.connect();
     try {
       await client.query('begin');
+      const { rows: [capture] } = await client.query<CaptureRow>('select * from captures where id = $1 for update', [id]);
+      if (!capture || !open(capture)) {
+        await client.query('rollback');
+        return capture ? reply.code(409).send(sealed) : reply.code(404).send(missing);
+      }
       for (const frame of body.frames) {
         await client.query(`
           insert into frames (capture_id, seq, object_key, t_ms, orientation, pose, blur_score, parallax_score, width, height)
@@ -144,11 +145,15 @@ export function registerCaptures(app: FastifyInstance, store: Store, config: Con
         `, [id, frame.seq, frame.key, frame.t_ms ?? 0, frame.orientation ?? null, frame.pose ?? null,
           frame.blur ?? null, frame.parallax_px ?? null, frame.width ?? null, frame.height ?? null]);
       }
-      await client.query(`
+      const { rows: [{ frame_count }] } = await client.query<{ frame_count: number }>(`
         update captures set status = 'uploading', updated_at = now(),
           frame_count = (select count(*) from frames where capture_id = $1)
-        where id = $1
+        where id = $1 returning frame_count
       `, [id]);
+      if (frame_count > MAX_ROOM_PHOTOS) {
+        await client.query('rollback');
+        return reply.code(400).send({ error: `A capture can hold up to ${MAX_ROOM_PHOTOS} photos` });
+      }
       await client.query('commit');
     } catch (error) {
       await client.query('rollback');
@@ -160,7 +165,7 @@ export function registerCaptures(app: FastifyInstance, store: Store, config: Con
   });
 
   app.post<Id & { Body?: { model_tier?: RoomModelTier } }>('/api/captures/:id/complete', {
-    preHandler: admin,
+    onRequest: guards.contributor,
     schema: { params, body: { type: ['object', 'null'], properties: { model_tier: { enum: ROOM_MODEL_TIERS } } } },
   }, async ({ params: { id }, body }, reply) => {
     const { provider, missingKey } = pipelineProvider(config, 'room');
@@ -185,7 +190,9 @@ export function registerCaptures(app: FastifyInstance, store: Store, config: Con
         return await end(400, { error: `A capture needs ${settings.minFrames} to ${MAX_ROOM_PHOTOS} photos. This one has ${frames.length}.` });
       }
       const stored = new Map((await storage.list(settings.rawBucket, capturePrefix(id))).map(({ key, size }) => [key, size]));
-      if (!stored.has(framesJsonKey(id))) return await end(409, { error: 'frames.json has not been uploaded' });
+      const manifestBytes = stored.get(framesJsonKey(id));
+      if (!manifestBytes) return await end(409, { error: 'frames.json has not been uploaded' });
+      if (manifestBytes > MAX_FRAMES_JSON_BYTES) return await end(400, { error: 'frames.json exceeds 1 MiB' });
       for (const frame of frames) {
         const size = stored.get(frame.object_key);
         if (!size) return await end(409, { error: `Photo ${frame.seq + 1} has not been uploaded` });
@@ -255,7 +262,7 @@ export function registerCaptures(app: FastifyInstance, store: Store, config: Con
     push(first, 'snapshot');
   });
 
-  app.delete<Id>('/api/captures/:id', { preHandler: admin, schema: { params } }, async ({ params: { id } }, reply) => {
+  app.delete<Id>('/api/captures/:id', { onRequest: guards.admin, schema: { params } }, async ({ params: { id } }, reply) => {
     const capture = await find(id);
     if (!capture) return reply.code(404).send(missing);
     const { rows: jobs } = await pool.query<CaptureJobRow>('select * from jobs where capture_id = $1', [id]);

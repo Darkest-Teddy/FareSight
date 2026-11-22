@@ -72,9 +72,10 @@ export function blend(from: Pose, to: Pose, amount: number): Pose {
   return { right: mix(from.right, to.right), up: mix(from.up, to.up), forward: mix(from.forward, to.forward) };
 }
 
-// Pitch, count and yaw offset of each ring. A phone in portrait sees about 40° across and 64° top to bottom,
-// so 16 shots on the horizon overlap by roughly half and the two tilted rings cover the ceiling and the floor.
-const rings: [pitch: number, count: number, offset: number][] = [[0, 16, 0], [40, 8, 22.5], [-35, 8, 22.5]];
+// Reserve two photos for the poles so the tilted rings can overlap them and the horizon.
+const rings: [pitch: number, count: number, offset: number][] = [
+  [0, MAX_ROOM_PHOTOS - 20, 0], [45, 9, 10], [90, 1, 0], [-45, 9, 10], [-90, 1, 0],
+];
 
 /** The spots to capture, most important ring first, relative to the heading the scan started at. */
 export function createTargets(startYaw: number): Target[] {
@@ -85,7 +86,7 @@ export function createTargets(startYaw: number): Target[] {
       targets.push({ yaw, pitch, ring, direction: direction(startYaw + yaw, pitch) });
     }
   }
-  return targets.slice(0, MAX_ROOM_PHOTOS);
+  return targets;
 }
 
 /** Screen position of a world direction. `side` is its offset from the view axis, for pointing at targets off screen. */

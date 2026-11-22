@@ -44,7 +44,7 @@ small { color: var(--muted); }
 
 .app-shell {
   position: relative;
-  min-height: 100vh;
+  height: 100vh;
   height: 100dvh;
   isolation: isolate;
   overflow: hidden;
@@ -444,7 +444,8 @@ small { color: var(--muted); }
   top: calc(var(--command-height) + 3.05rem);
   right: var(--rail);
   width: min(22.5rem, calc(100% - 2 * var(--rail)));
-  max-height: min(26rem, calc(100% - var(--command-height) - 10rem));
+  max-height: min(26rem, calc(100% - var(--command-height) - 3.75rem));
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: .55rem;
@@ -609,7 +610,7 @@ small { color: var(--muted); }
 .moderation-row { display: grid; gap: .42rem; padding: .65rem; border: 1px solid var(--edge-soft); border-radius: .35rem; overflow-wrap: anywhere; }
 .credit-list { display: grid; gap: .45rem; margin: 0; padding-left: 1.15rem; }
 .dish-source-group { border-top: 1px solid var(--edge-soft); padding-block: .45rem; }
-.dish-source-group > summary { cursor: pointer; font-weight: 600; }
+.dish-source-group > summary { cursor: pointer; font-weight: 600; min-height: 44px; align-content: center; }
 .dish-source-group > :not(summary) { margin-top: .6rem; }
 .log-view { max-height: 35dvh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--canvas); border-radius: .35rem; padding: .7rem; margin: 0; color: var(--muted); }
 
@@ -734,7 +735,7 @@ small { color: var(--muted); }
     left: var(--rail);
     right: var(--rail);
     width: auto;
-    max-height: min(56dvh, calc(100% - var(--command-height) - var(--phone-bar) - 1rem));
+    max-height: min(56dvh, calc(100% - var(--command-height) - var(--phone-bar) - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
   }
   .voice-controls button, .voice-input-row button, .voice-input-row input { min-height: 44px; }
   .modal { width: calc(100% - 1rem); max-height: calc(100dvh - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }

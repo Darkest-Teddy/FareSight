@@ -109,6 +109,9 @@ export class IntroScene {
   private featuredProgress = -1;
   private focus = -1;
   private clock = 0;
+  private awakeUntil = 0;
+  private started = false;
+  private loadRoom?: () => void;
   private pointer = { x: 0, y: 0, easedX: 0, easedY: 0 };
   /** Whether the visitor can turn the camera right now, and whether they are dragging it. */
   lookReady = false;
@@ -129,9 +132,9 @@ export class IntroScene {
   /** `onFrame` runs once per rendered frame and returns the eased scroll progress, 0 to 1. */
   constructor(private canvas: HTMLCanvasElement, private onFrame: (dt: number) => number) {}
 
-  async init(): Promise<boolean> {
+  async init(onRoom: (ready: boolean) => void): Promise<void> {
     const app = new pc.Application(this.canvas, {
-      graphicsDeviceOptions: { antialias: true, alpha: false, preserveDrawingBuffer: false },
+      graphicsDeviceOptions: { antialias: false, alpha: false, preserveDrawingBuffer: false },
     });
     this.app = app;
     app.setCanvasFillMode(pc.FILLMODE_NONE);
@@ -153,15 +156,19 @@ export class IntroScene {
     this.roomRoot.enabled = false;
     const manifest = featured && offlineManifest(featured);
     this.roomSpawn.set(...(manifest?.spawn_point ?? [0, 1.55, 2]));
-    const room = this.splats.show('room', manifest?.room_asset, this.roomRoot);
-    this.splats.seekReveal('room', 0);
+
     const noop = () => undefined;
     this.map = new MapSculptureScene(app.root, app.graphicsDevice, this.models, this.reveal, log, noop, this.canvas, noop);
-    this.station = new StationDioramaScene(app, this.models, this.reveal, log, noop);
+
     this.map.root.setLocalPosition(0, mapHeight, 0);
     this.map.setImmersive(true);
     this.map.setStops(STOPS);
     this.map.setPlaces(offlineCatalog.places, this.allPlaces);
+    const sculpture = await this.models.load(`${assetBase}boston-map-sculpture.glb`);
+    if (this.app !== app) return;
+    if (!sculpture) throw new Error('The map sculpture could not be loaded');
+
+    this.station = new StationDioramaScene(app, this.models, this.reveal, log, noop);
     this.station.setPlaces(offlineCatalog.places, this.allPlaces);
     this.station.setPinsShown(false, true);
     this.station.seekReveal(0);
@@ -171,6 +178,7 @@ export class IntroScene {
     window.addEventListener('pointermove', (event) => {
       this.pointer.x = event.clientX / Math.max(1, window.innerWidth) * 2 - 1;
       this.pointer.y = event.clientY / Math.max(1, window.innerHeight) * 2 - 1;
+      if (!this.reducedMotion.matches && event.pointerType === 'mouse') this.wake();
       const drag = this.drag;
       if (!drag || event.pointerId !== drag.id) return;
       // The room follows the pointer one to one, as if the visitor held it and turned.
@@ -179,17 +187,24 @@ export class IntroScene {
       this.look.pitch = clamp(this.look.pitch + (event.clientY - drag.y) * degrees, -LOOK_PITCH_LIMIT, LOOK_PITCH_LIMIT);
       drag.x = event.clientX;
       drag.y = event.clientY;
+      this.wake();
     }, { signal, passive: true });
     window.addEventListener('pointerdown', (event) => {
       if (!this.lookReady || event.button !== 0 || (event.target as Element | null)?.closest?.('a, button')) return;
       this.drag = { id: event.pointerId, x: event.clientX, y: event.clientY };
+      this.wake();
     }, { signal, passive: true });
-    const release = (event: PointerEvent) => { if (this.drag?.id === event.pointerId) this.drag = undefined; };
+    const release = (event: PointerEvent) => {
+      if (this.drag?.id !== event.pointerId) return;
+      this.drag = undefined;
+      this.wake();
+    };
     window.addEventListener('pointerup', release, { signal, passive: true });
     window.addEventListener('pointercancel', release, { signal, passive: true });
     window.addEventListener('keydown', (event) => {
       if (!this.lookReady || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
       this.look.yaw += event.key === 'ArrowLeft' ? 15 : -15;
+      this.wake();
     }, { signal });
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(this.canvas);
@@ -197,20 +212,35 @@ export class IntroScene {
     app.on('update', (dt: number) => this.update(dt));
 
     const stop = STOPS.find((item) => item.stop_id === STOP_ID);
-    const [sculpture, , roomReady] = await Promise.all([
-      this.models.load(`${assetBase}boston-map-sculpture.glb`),
-      stop ? this.station.show(stop) : Promise.resolve(),
-      room,
-    ]);
-    if (!this.app) return false;
-    if (!sculpture) throw new Error('The map sculpture could not be loaded');
-    this.roomReady = roomReady;
-    this.findPins();
-    return roomReady;
+    const station = stop ? this.station.show(stop) : Promise.resolve();
+    void station.then(() => {
+      if (this.app !== app) return;
+      this.findPins();
+      this.cityProgress = this.pinsProgress = -1;
+      this.wake();
+    }).catch(() => {});
+    this.loadRoom = () => {
+      this.loadRoom = undefined;
+      void this.splats.show('room', manifest?.room_asset, this.roomRoot).then((roomReady) => {
+        if (this.app !== app) return;
+        this.roomReady = roomReady;
+        onRoom(roomReady);
+        this.wake();
+      });
+      this.splats.seekReveal('room', 0);
+    };
   }
 
   start(): void {
-    this.app?.start();
+    if (!this.app || this.started) return;
+    this.started = true;
+    this.app.start();
+    this.wake();
+  }
+
+  wake(): void {
+    this.awakeUntil = performance.now() + (this.reducedMotion.matches ? 200 : 2_000);
+    if (this.started && this.app && !this.app.frameRequestId) this.app.requestAnimationFrame();
   }
 
   private addLights(root: pc.Entity): void {
@@ -234,6 +264,7 @@ export class IntroScene {
     device.maxPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
     device.resizeCanvas(width, height);
     this.lens.fov = clamp(44 + (1 - width / height) * 38, 44, 74);
+    this.wake();
   }
 
   private parkStation(): void {
@@ -398,6 +429,7 @@ export class IntroScene {
   private update(dt: number): void {
     this.clock += dt;
     const scroll = clamp(this.onFrame(dt), 0, 1);
+    if (scroll > 0.67) this.loadRoom?.();
     const p = this.reducedMotion.matches ? reducedScene(scroll) : scroll;
     const dive = progressAt(p, ...DIVE);
     const initial = this.lastDive < 0;
@@ -430,6 +462,11 @@ export class IntroScene {
     this.map.update(dt, this.camera, this.lens, 0);
     if (this.station.root.enabled) this.station.update(this.reducedMotion.matches ? 1 : dt, this.camera);
     this.reveal.update(dt);
+    const app = this.app;
+    if (app?.frameRequestId && performance.now() >= this.awakeUntil) {
+      cancelAnimationFrame(app.frameRequestId);
+      app.frameRequestId = null;
+    }
   }
 
   destroy(): void {
@@ -438,6 +475,8 @@ export class IntroScene {
     this.drag = undefined;
     this.lookReady = this.lookHeld = false;
     this.lookAway = 0;
+    this.started = false;
+    this.loadRoom = undefined;
     this.resizeObserver?.disconnect();
     this.map?.destroy();
     this.station?.destroy();

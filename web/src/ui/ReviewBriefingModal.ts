@@ -1,5 +1,5 @@
 import type { BriefingAction, BriefingCard, BriefingFact, BriefingReview, BriefingSection } from '../data/reviewBriefing';
-import { button, element, link, modal } from './dom';
+import { button, element, link, modal, replacePreservingFocus } from './dom';
 
 interface BriefingActions {
   dismiss(cardId?: string): void;
@@ -27,7 +27,7 @@ export function renderBriefingReview(review: BriefingReview): HTMLElement {
   if (review.source) {
     const label = element('span', 'briefing-sample', review.source);
     if (review.url) {
-      try { label.replaceChildren(link(review.source, review.url)); } catch { /* Keep the text attribution. */ }
+      label.replaceChildren(link(review.source, review.url));
     }
     author.append(label);
   }
@@ -106,24 +106,26 @@ export class ReviewBriefingModal {
     if (!card) { this.hide(); return; }
     const changed = this.cardId !== card.id;
     this.cardId = card.id;
-    const focused = this.tabs.contains(document.activeElement);
     this.close.textContent = cards.length > 1 ? 'Dismiss all' : 'Dismiss';
     this.tabs.hidden = cards.length < 2;
-    this.tabs.replaceChildren();
+    const tabs: HTMLElement[] = [];
     let activeTab: HTMLButtonElement | undefined;
     if (!this.tabs.hidden) {
       for (const entry of cards) {
         const tab = element('div', 'briefing-tab');
         const select = button(entry.title, () => this.show(cards, entry.id));
         select.title = entry.title;
+        select.dataset.focusKey = `select:${entry.id}`;
         select.setAttribute('aria-pressed', String(entry.id === card.id));
         const dismiss = button('×', () => this.actions.dismiss(entry.id), 'briefing-tab-close');
+        dismiss.dataset.focusKey = `dismiss:${entry.id}`;
         dismiss.setAttribute('aria-label', `Close ${entry.title}`);
         tab.append(select, dismiss);
-        this.tabs.append(tab);
+        tabs.push(tab);
         if (entry.id === card.id) activeTab = select;
       }
     }
+    replacePreservingFocus(this.tabs, activeTab ?? this.close, ...tabs);
     this.title.textContent = card.title;
     this.kicker.textContent = card.kicker ?? '';
     this.kicker.hidden = !card.kicker;
@@ -139,9 +141,8 @@ export class ReviewBriefingModal {
       if (card.actions.some(({ kind }) => kind === 'compare-dishes')) body.splice(card.subtitle ? 1 : 0, 0, footer);
       else body.push(footer);
     }
-    this.panel.body.replaceChildren(...body);
+    replacePreservingFocus(this.panel.body, this.close, ...body);
     this.panel.open();
-    if (focused) (activeTab ?? this.close).focus();
     activeTab?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     if (changed) this.panel.body.scrollTop = 0;
   }

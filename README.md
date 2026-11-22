@@ -1,13 +1,13 @@
 # FareSight (BostonHacks 2026)
 
-**Try it before you ride:** explore Boston food spots, study cafés, karaoke suites, and live venues through the MBTA in 3D/WebXR on Meta Quest 3 (and 2D on any phone or laptop), filtered by craving, total budget including T fare, start stop, and group size.
+**Try it before you ride:** explore Boston food spots, study cafés and live venues through the MBTA in 3D/WebXR on Meta Quest 3 (and 2D on any phone or laptop), filtered by craving, total budget including T fare, start stop, and group size.
 
 ## Architecture
 
-- **`modeling/`** — Deterministic procedural glTF 2.0 (`.glb`) and binary 3D Gaussian Splat (`.ply`) generators (`node modeling/generate_all.mjs && node modeling/validate_assets.mjs`):
+- **`modeling/`** — Deterministic procedural glTF 2.0 (`.glb`) and binary 3D Gaussian Splat (`.ply`) generators:
   - **Boston Map Sculpture** (`boston-map-sculpture.glb`): a grounded base slab with an inlaid Charles River and street grid, MBTA Green (B/C/D/E), Red, Orange, and Blue tubes stacked in three shallow layers, white on-line stop markers, transfer posts at interchanges, raised drums for the five explorable stations, and `mbta-train-capsule.glb`.
   - **5 Floating-Island City Segment Dioramas** (`segment-place-*.glb`): BU Central, Packard's Corner, Kenmore, Harvard Square, and Chinatown, each an OpenStreetMap city block with Boston landmarks on a low-poly island of turf, earth and rock (`modeling/segment-island.mjs`).
-  - **6 Demo 3DGS `.ply` Assets**: Ramen house, karaoke suite, study café, tonkotsu ramen (`24 cm`), katsu curry (`26 cm`), and matcha tiramisu (`18 cm`), plus `table-pedestal.glb`.
+  - **2 Demo 3DGS `.ply` Assets**: Study café and matcha tiramisu (`18 cm`), plus `table-pedestal.glb`.
 - **`shared/`** (`@faresight/shared`) — Shared TypeScript domain types, Boston flat-earth sculpture projection, MBTA fare constants (`$2.40` subway / `$1.70` bus), precomputed ride times, and trip estimate math.
 - **`server/`** (`@faresight/server`) — Node + TypeScript + Fastify + built-in SQLite (`node:sqlite`) + persistent resumable job worker:
   - `POST /api/uploads` — Multipart/base64 image upload, orientation/dimension parsing, SHA-256 deduplication, original archival.
@@ -15,12 +15,12 @@
   - `POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/:id`, `POST /api/jobs/:id/retry` — Resumable `queued -> generating -> downloading -> converting -> needs_review -> ready` pipeline:
     - **Rooms** use [World Labs Atlas Developer API v2](https://docs.atlas.worldlabs.ai/) with 2–32 overlapping photos. Atlas first estimates camera poses and depth (`images2PosedRGBD`), then generates an SPZ Gaussian splat (`posedImages2Splats`). Choose `atlas-draft` (default, about 30 seconds for the splat step) or `atlas-refined` (about 15–21 minutes for the splat step). The worker saves both operation IDs and retries the same requests using stable idempotency keys.
     - **Dishes**: Replicate pinned `firtoz/trellis` (`e8f6c45206993f297372f5436b90350817bd9b4a0d52d2a76df50c1c8afa2b3c`) with immediate download of `output.gaussian_ply` and foreground preview before Replicate's 1-hour expiry.
-    - **Asset processing** uses `@playcanvas/splat-transform` to decimate and compress splats to `.sog`. Originals are retained as `.spz` for Atlas and `.ply` for TRELLIS and demo jobs. If conversion is unavailable, Atlas serves the original SPZ and PLY jobs serve the normalized PLY. Dish scaling uses the 5th–95th percentile of the splat bounds.
+    - **Asset processing** uses `@playcanvas/splat-transform` to decimate and compress splats to `.sog`. Originals are retained as `.spz` for Atlas and `.ply` for TRELLIS and demo jobs. If compression is unavailable, Atlas serves a viewer-compatible SPZ and PLY jobs serve the normalized PLY. Dish scaling uses the 5th–95th percentile of the splat bounds.
   - `POST /api/assets/:id/publish`, `GET /api/restaurants`, `GET /api/restaurants/:id/manifest`
   - `POST /api/restaurants/:id/reviews`, `GET/POST /api/admin/moderation`, `POST/GET /api/debug/logs`
   - `GET /api/mbta/{vehicles,predictions,alerts,schedules,trip}` — Cached MBTA V3 proxy (10s / 60s / 1h TTL) with realistic Boston simulation fallback.
-  - `GET /api/live/status` & `POST /api/live/sessions` — OpenAI **`gpt-live-1.1`** full-duplex WebRTC voice broker with `responses` delegation (`gpt-6-luna`) and 16 tools giving the assistant control over map highlights, station dioramas, 3D venue rooms, physical menu books, 3D dish tabletop previews/comparisons, filters, live MBTA queries, camera controls, modals, audio, and Quest pairing.
-  - `POST /api/realtime/session` — Mints a short-lived `gpt-realtime` credential for the app’s GPT Live button, XR Voice key, and Quest A/X shortcut. The server loads `OPENAI_API_KEY` from the environment, and the browser connects over WebRTC using the `ash` voice.
+  - `GET /api/live/status` reports the voice configuration. `POST /api/live/sessions` brokers the app’s GPT Live WebRTC connection using `gpt-live-1.1` and the `ballad` voice by default. A Responses backend (`gpt-6-luna` by default) handles catalog and transit queries and controls the app’s scenes, filters, and review clipboards.
+  - `POST /api/realtime/session` mints a short-lived `gpt-realtime` credential configured with the `ballad` voice. The server loads `OPENAI_API_KEY` from the environment for both endpoints.
   - `POST /api/pairing/create` & `WS /ws/pair/:code` — 4-digit Phone ↔ Quest headset handoff.
 - **`web/`** (`@faresight/web`) — PlayCanvas v2 + WebXR (`immersive-vr` & `immersive-ar` passthrough) 4-scene app with an animated map-to-station dive, 3D canvas panels, Web Audio synthesizer, responsive 2D Phone Companion, Upload & Pipeline Studio, Pairing, Moderation, and offline cache-first Service Worker (`/sw.js`).
 - **`contribute/`** (`@faresight/contribute`) — Mobile-first app for people who add the photos behind the 3D rooms and dishes, served from its own subdomain (`contribute.<domain>`). It has no 3D engine: the map sculpture and the station dioramas are drawn as flat, touch-driven SVG maps.
@@ -30,7 +30,7 @@
   - **360° scan**: for a space, the app can take the photos itself. The contributor turns on the spot while dots mark the directions still to capture; aiming at a dot and holding still takes that photo and pops the dot, and a round map shows what is left behind them. It needs the camera and motion sensors, which phones only open on HTTPS: `pnpm --filter @faresight/contribute dev:https` serves the app on `https://<your-LAN-IP>:5181` with a self-signed certificate.
   - **Place overview and reviews**: tapping a pin on the station map opens a short card about the place: what it is, whether its space and its menu are in 3D yet, and one line of what people say. From there a contributor can read the reviews and add one with a 1 to 5 star rating; like every review, it is published once an admin approves it in the main app.
   - **My scans**: live progress of each job started on the phone, through to "In review". Publishing stays with an admin in the main app.
-  - Uploads use the existing API. The contributor enters the `ADMIN_PASSCODE` once as an invite code and it is kept on the device.
+  - Uploads use the existing API. The contributor enters the `CONTRIBUTOR_PASSCODE` once as an invite code and it is kept on the device.
   - `pnpm --filter @faresight/contribute data` rebuilds `contribute/src/data/` from `modeling/output/` and `modeling/osm-data.json`. Run it after regenerating the models.
 
 ## Quick Start
@@ -47,7 +47,7 @@ pnpm dev                  # Starts Fastify server (:3001) + Vite web app (:5173)
 - An Atlas project API key needs `tasks.create`, `operations.read`, `assets.create`, and `assets.read`. Set `WLT_API_KEY` or leave it unset and use `WORLDLABS_API_KEY`. Override `WLT_API_BASE_URL` to use a different Atlas v2 endpoint.
 - Install a current `@playcanvas/splat-transform` CLI on the server's PATH to keep Atlas room previews within the 100,000-Gaussian conversion target. Large original SPZs can exceed the viewer's existing Gaussian safety limit.
 - Without API keys (`PIPELINE_MODE=auto`), the Upload 3D studio runs a labeled demo simulation through all pipeline stages (`Queued -> Generating -> Downloading -> Converting -> Needs review -> Ready`) and publishes into the live manifest.
-- Default moderation passcode when `ADMIN_PASSCODE` is unset: `bostonhacks2026`.
+- Set `ADMIN_PASSCODE` to enable moderation. Set `AUTO_PUBLISH=false` to hold builds for review.
 
 ## Capture storage (Tiger Data + Vultr Object Storage)
 
@@ -60,7 +60,7 @@ Optional. When `DATABASE_URL` and the `VULTR_S3_*` variables are set, room photo
 5. The finished splat is uploaded to the public splat bucket and its URL becomes the asset's URL. Review and publishing work as before, so the published capture becomes the restaurant's room.
 6. Each change is sent with Postgres `NOTIFY`; the API relays it to the phone as server-sent events (`GET /api/captures/:id/events`). `GET /api/captures/:id` returns the same state for page loads.
 
-`GET /api/captures` lists captures and `DELETE /api/captures/:id` removes a capture's rows and every object under its prefixes. Writes need the admin passcode, like the rest of the pipeline. Dishes and the web app's Upload studio keep using `POST /api/uploads`. Without these variables nothing changes: photos and splats stay on the server's disk.
+`GET /api/captures` lists captures and `DELETE /api/captures/:id` removes a capture's rows and every object under its prefixes. Listing and deleting require `X-Admin-Passcode`. Creating a capture, requesting upload URLs, registering frames, and completing a capture accept `X-Upload-Passcode`. Dishes and the web app's Upload studio keep using `POST /api/uploads`. Without these variables nothing changes: photos and splats stay on the server's disk.
 
 ```bash
 # Local stand-ins: Postgres on :54329 and MinIO on :9009
@@ -68,7 +68,7 @@ docker compose up -d
 # Copy the commented capture values from .env.example into .env, then:
 pnpm --filter @faresight/server buckets    # Create both buckets, set CORS and public read on the splat bucket
 pnpm --filter @faresight/server migrate    # Optional: the server also applies pending migrations when it starts
-node scripts/capture_flow.mjs bu-ramen-01 photo1.jpg photo2.jpg   # One capture through a running server
+node scripts/capture_flow.mjs harvard-cafe-01 photo1.jpg photo2.jpg   # One capture through a running server
 ```
 
 For production, use the pooled Tiger Data URL as `DATABASE_URL` and the direct one as `DATABASE_URL_DIRECT` (`LISTEN` does not work through a transaction pooler). Point `VULTR_S3_ENDPOINT` at the bucket's region, for example `https://ewr1.vultrobjects.com`, run `buckets` once, and set `APP_ORIGINS` to the app origins that may upload. Put a CDN in front of the splat bucket by setting `CDN_BASE_URL`. `pnpm --filter @faresight/server migrate down` reverts the last migration.
@@ -76,7 +76,8 @@ For production, use the pooled Tiger Data URL as `DATABASE_URL` and the direct o
 ## Build & Verify
 
 ```bash
-node modeling/generate_all.mjs && node modeling/validate_assets.mjs
+pnpm --filter @faresight/shared build
+node modeling/generate_all.mjs && pnpm assets:sync && node modeling/validate_assets.mjs
 pnpm typecheck
 pnpm build
 pnpm --filter @faresight/server test

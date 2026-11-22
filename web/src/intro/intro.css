@@ -107,7 +107,8 @@ h2 { font-size: clamp(2.1rem, 4.5vw, 4.1rem); }
   color: #c4f3ff; background: rgb(10 28 39 / 65%); font-size: .76rem;
 }
 
-.beat-hero { align-items: end; justify-items: start; }
+.beat-hero { align-items: end; justify-items: start; visibility: visible; }
+.beat-hero .copy { opacity: 1; }
 .beat-stops { align-items: end; justify-items: center; text-align: center; }
 .beat-stops .lead { margin-inline: auto; max-width: 44ch; }
 .beat-station { align-items: center; justify-items: start; }
@@ -127,8 +128,8 @@ body[data-room=ready] .look-hint { display: block; }
 :root[data-look] a { cursor: pointer; }
 
 .status {
-  position: fixed; inset: auto 0 clamp(2.5rem, 9vh, 6rem); z-index: 5;
-  text-align: center; font-size: .82rem; color: var(--faint); pointer-events: none;
+  position: fixed; inset: calc(var(--bar) + .8rem) var(--gutter) auto auto; z-index: 5;
+  text-align: right; font-size: .82rem; color: var(--faint); pointer-events: none;
 }
 body[data-state=loading] .status::after {
   content: ''; display: block; width: 7rem; height: 1px; margin: .9rem auto 0;

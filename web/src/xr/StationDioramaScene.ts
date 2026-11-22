@@ -29,6 +29,28 @@ interface OffDeckAnchor {
   compass: string;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isPosition(value: unknown): value is XYZ {
+  return Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
+}
+
+function isSegmentAnchor(value: unknown): value is SegmentAnchor {
+  if (!isRecord(value)) return false;
+  const { deckY, projection, placeAnchors, offDeck, stationAnchor, pinAnchors } = value;
+  if (!Number.isFinite(deckY) || !Array.isArray(pinAnchors) || !pinAnchors.every(isPosition)) return false;
+  if (projection !== undefined && (!isRecord(projection)
+    || !Number.isFinite(projection.centerLat) || !Number.isFinite(projection.centerLon)
+    || typeof projection.spanMeters !== 'number' || !Number.isFinite(projection.spanMeters) || projection.spanMeters <= 0
+    || typeof projection.deckSize !== 'number' || !Number.isFinite(projection.deckSize) || projection.deckSize <= 0)) return false;
+  if (placeAnchors !== undefined && (!isRecord(placeAnchors) || !Object.values(placeAnchors).every(isPosition))) return false;
+  if (offDeck !== undefined && (!isRecord(offDeck) || !Object.values(offDeck).every((anchor) =>
+    isRecord(anchor) && isPosition(anchor.position) && Number.isFinite(anchor.distanceM) && typeof anchor.compass === 'string'))) return false;
+  return stationAnchor === undefined || (isRecord(stationAnchor) && isPosition(stationAnchor.base) && Number.isFinite(stationAnchor.top));
+}
+
 interface Pin {
   place: XRPlaceData;
   root: pc.Entity;
@@ -111,7 +133,7 @@ export class StationDioramaScene {
   private locatorMesh: pc.Mesh;
   private model?: pc.Entity;
   private materials: pc.StandardMaterial[] = [];
-  private anchors: Record<string, SegmentAnchor> = {};
+  private anchors = new Map<string, SegmentAnchor>();
   private stop?: XRStopData;
   private places: XRPlaceData[] = [];
   private filtered = new Set<string>();
@@ -176,9 +198,16 @@ export class StationDioramaScene {
     });
     shape(this.fallback, 'Street', 'box', street, [0, 0.002, 0.11], [0.85, 0.004, 0.095]);
 
-    void fetchAssetJson<Record<string, SegmentAnchor>>(`${assetBase}segment-anchors.json`, this.abort.signal, log).then((data) => {
-      if (!data || !this.alive) return;
-      this.anchors = data;
+    void fetchAssetJson<unknown>(`${assetBase}segment-anchors.json`, this.abort.signal, log).then((data) => {
+      if (data === null || !this.alive) return;
+      if (!isRecord(data)) {
+        log('segment-anchors.json: expected a map of segment anchors', 'warn');
+        return;
+      }
+      for (const [id, record] of Object.entries(data)) {
+        if (isSegmentAnchor(record)) this.anchors.set(id, record);
+        else log(`segment-anchors.json: invalid anchor for ${id}`, 'warn');
+      }
       this.positionMarkers();
     });
   }
@@ -263,7 +292,7 @@ export class StationDioramaScene {
 
   seekMarker(progress: number): void {
     this.markerReveal = progress;
-    if (this.stop && this.anchors[this.stop.stop_id]?.projection) {
+    if (this.stop && this.anchors.get(this.stop.stop_id)?.projection) {
       this.reveal.seek(this.stationMarker, progress, jarvisPoints.detail);
     }
   }
@@ -376,7 +405,7 @@ export class StationDioramaScene {
 
   private positionMarkers(): void {
     const stop = this.stop;
-    const anchor = stop && this.anchors[stop.stop_id];
+    const anchor = stop && this.anchors.get(stop.stop_id);
     const projection = anchor?.projection;
     const deckY = anchor?.deckY ?? 0;
     const station = projection && projectToDeck(projection, stop?.lat, stop?.lon);

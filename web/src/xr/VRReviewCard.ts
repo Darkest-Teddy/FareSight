@@ -84,9 +84,9 @@ export class VRReviewCard {
     if (briefing === this.briefing) return;
     const content = JSON.stringify(briefing);
     const opening = !this.active;
+    if (opening || this.briefing?.id !== briefing.id) this.page = 0;
     this.briefing = briefing;
     if (content !== this.printed || opening) {
-      this.page = 0;
       this.printed = content;
       this.paint();
     }

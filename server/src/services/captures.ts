@@ -131,12 +131,14 @@ export function mirrorJobs(store: Store, captures: Captures, onError: (error: un
 
 /** Uploads a job's finished splat files to the splat bucket and records them. Returns each format's public URL. */
 export async function publishSplats(captures: Captures, captureId: string, jobId: string,
-  files: { path: string; format: SplatAssetRow['format']; count?: number }[]) {
+  files: { path: string; format: SplatAssetRow['format']; count?: number }[], assertCurrent: () => void) {
   const urls: Partial<Record<SplatAssetRow['format'], string>> = {};
   for (const file of files) {
     const key = splatKey(captureId, jobId, 'full', file.format);
     const body = await readFile(file.path);
+    assertCurrent();
     await captures.storage.put(captures.settings.splatBucket, key, body, 'application/octet-stream', { public: true });
+    assertCurrent();
     // Keyed by job, so a retried job overwrites its own files and rows.
     await captures.pool.query(`
       insert into splat_assets (capture_id, job_id, quality, format, object_key, bytes, splat_count)
@@ -146,6 +148,7 @@ export async function publishSplats(captures: Captures, captureId: string, jobId
     `, [captureId, jobId, file.format, key, body.length, file.count ?? null]);
     urls[file.format] = captures.assetUrl(key);
   }
+  assertCurrent();
   await captures.notify(captureId, 'asset');
   return urls;
 }

@@ -18,7 +18,7 @@ interface Screen { root: HTMLElement; destroy?(): void }
 
 const depth: Record<Route['name'], number> = { map: 0, scans: 0, stop: 1, place: 2 };
 const codeLabels = {
-  unknown: 'Invite code', open: 'No invite code needed', saved: 'Invite code saved', needed: 'Enter your invite code',
+  unknown: 'Upload code', open: 'No upload code needed', saved: 'Upload code saved', needed: 'Enter your upload code',
 };
 
 function parse(hash: string): Route {

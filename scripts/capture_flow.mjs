@@ -3,7 +3,7 @@
 //
 //   node scripts/capture_flow.mjs <place_id> <photo.jpg> <photo.jpg> [...]
 //
-// FARESIGHT_API (default http://localhost:3001) and ADMIN_PASSCODE (default bostonhacks2026) are read from the environment.
+// FARESIGHT_API (default http://localhost:3001) and CONTRIBUTOR_PASSCODE (or ADMIN_PASSCODE) are read from the environment.
 import { readFile } from 'node:fs/promises';
 
 const [placeId, ...photos] = process.argv.slice(2);
@@ -12,12 +12,12 @@ if (!placeId || photos.length < 2) {
   process.exit(1);
 }
 const origin = (process.env.FARESIGHT_API ?? 'http://localhost:3001').replace(/\/$/, '');
-const passcode = process.env.ADMIN_PASSCODE ?? 'bostonhacks2026';
+const passcode = process.env.CONTRIBUTOR_PASSCODE ?? process.env.ADMIN_PASSCODE;
 
 async function call(path, body) {
   const response = await fetch(origin + '/api' + path, {
     method: body ? 'POST' : 'GET',
-    headers: { 'x-admin-passcode': passcode, ...(body ? { 'content-type': 'application/json' } : {}) },
+    headers: { ...(passcode ? { 'x-upload-passcode': passcode } : {}), ...(body ? { 'content-type': 'application/json' } : {}) },
     body: body && JSON.stringify(body),
   });
   const text = await response.text();
