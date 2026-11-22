@@ -45,7 +45,7 @@ const DISH_TILT_SLACK = 7;
 /** Screen pixels the aiming ring slides per degree the phone is too low or too high. */
 const DISH_TILT_TRAVEL = 2.4;
 // Each shape as a small side view, for the card that asks what is being scanned.
-const dishGlyphs: Record<DishPlan['shape'], string> = {
+export const dishGlyphs: Record<DishPlan['shape'], string> = {
   plate: 'M4 15h24M7 15c1.5 3 5 4.5 9 4.5s7.5-1.5 9-4.5M9 12.5c2-1.7 4.5-2.5 7-2.5s5 .8 7 2.5',
   bowl: 'M5 11h22c0 6.5-4.5 11-11 11S5 17.5 5 11zM11 25h10M12 7.5c1-1.5 1-2.5 0-4M17 7.5c1-1.5 1-2.5 0-4',
   drink: 'M10 8h12l-1.5 18h-9L10 8zM9 8h14M16 8V3.5l4-1.5',
@@ -131,7 +131,7 @@ class GuidedScan {
 
   constructor(
     private readonly minimum: number, private readonly resolve: (files: File[]) => void,
-    subject: 'room' | 'dish' = 'room',
+    subject: 'room' | 'dish' = 'room', plan?: DishPlan,
   ) {
     this.dialog.setAttribute('aria-label', subject === 'dish' ? 'Guided dish scan' : '360° scan');
     this.video.playsInline = true;
@@ -164,7 +164,8 @@ class GuidedScan {
     document.body.append(this.dialog);
     this.dialog.showModal();
     this.update();
-    if (subject === 'dish') this.pickShape();
+    if (subject === 'dish' && plan) this.introduceDish(plan);
+    else if (subject === 'dish') this.pickShape();
     else this.show({
       title: 'Scan the space in 360°',
       lines: [
@@ -1057,7 +1058,10 @@ export function openGuidedScan(minimum: number): Promise<File[]> {
   return new Promise((resolve) => { new GuidedScan(minimum, resolve); });
 }
 
-/** Opens the guided scan of one dish or drink. Resolves with the photos it took, or with none when it is dismissed. */
-export function openDishScan(minimum = 1): Promise<File[]> {
-  return new Promise((resolve) => { new GuidedScan(minimum, resolve, 'dish'); });
+/**
+ * Opens the guided scan of one dish or drink. Resolves with the photos it took, or with none when it is dismissed.
+ * With a shape already picked, it skips the card that asks for one.
+ */
+export function openDishScan(minimum = 1, plan?: DishPlan): Promise<File[]> {
+  return new Promise((resolve) => { new GuidedScan(minimum, resolve, 'dish', plan); });
 }

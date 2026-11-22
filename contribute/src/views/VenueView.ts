@@ -7,7 +7,8 @@ import { button, el, errorText, haptic, icon, iconButton, motion, replay, svg, w
 import { prepareImage } from '../photos';
 import { drafts, scans, type PendingSubmission, type ScanDraft } from '../store';
 import { withCode } from '../ui/CodeSheet';
-import { openDishScan, openGuidedScan } from '../ui/GuidedScan';
+import { openGuidedScan } from '../ui/GuidedScan';
+import { openTwoPhotoScan } from '../ui/TwoPhotoScan';
 
 type Kind = 'room' | 'dish';
 interface Shot {
@@ -23,7 +24,7 @@ const NEW_DISH = '';
 // The 360° scan explains itself on its own first screen.
 const hints: Record<Kind, string> = {
   room: 'Let each photo overlap the last by about half.',
-  dish: 'Whole plate in frame, from about 45°.',
+  dish: 'Whole plate in frame. Two photos from different sides build best.',
 };
 const tiers: [RoomModelTier, string, string][] = [
   ['atlas-draft', 'Draft', 'Ready in about a minute'],
@@ -295,18 +296,18 @@ export class VenueView {
   private scanTile() {
     const tile = button('', () => void this.scan(), 'add-tile scan-tile');
     tile.disabled = this.locked;
-    tile.append(icon('locate'), el('span', '', this.kind === 'room' ? '360° scan' : 'Guided scan'));
+    tile.append(icon('locate'), el('span', '', this.kind === 'room' ? '360° scan' : 'Two photos'));
     return tile;
   }
 
-  /** Runs the guided scan for what is being scanned and adds the photos it took, like photos picked by hand. */
+  /** Runs the scan for what is being scanned and adds the photos it took, like photos picked by hand. */
   private async scan() {
     if (this.locked) return;
     const kind = this.kind;
-    const files = await (kind === 'room' ? openGuidedScan(MIN_ROOM_PHOTOS) : openDishScan());
+    const files = await (kind === 'room' ? openGuidedScan(MIN_ROOM_PHOTOS) : openTwoPhotoScan());
     if (!this.alive || this.kind !== kind || !files.length) return;
     if (kind === 'dish') {
-      // A guided scan is one complete set round one dish, so it takes the place of photos added before it.
+      // A scan is one complete set of one dish, so it takes the place of photos added before it.
       for (const shot of this.shots.dish.splice(0)) URL.revokeObjectURL(shot.url);
     }
     await this.add(files);
