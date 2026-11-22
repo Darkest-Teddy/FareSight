@@ -2,7 +2,11 @@
  * Backfills the menu prices missing from `shared/src/restaurantDishes.ts` with the price agent,
  * then rewrites that file in place with the prices and the page each one was read from.
  *
- *   node src/scripts/fillDishPrices.ts [--dry-run] [--venue <id>] [--batch 8] [--rounds 3] [--allow-third-party]
+ *   node src/scripts/fillDishPrices.ts [--dry-run] [--venue <id>] [--batch 8] [--rounds 3] [--allow-third-party] [--skip-db]
+ *
+ * Every price found is also written to `dish_prices` in Tiger Data, which is what the running
+ * server reads to fill a dish the compiled catalogue has no price for. `--skip-db` writes only the
+ * file, for a run with no DATABASE_URL set.
  *
  * By default only the venue's own menu, its ordering page or a first-party delivery listing counts.
  * `--allow-third-party` also accepts a cited menu-aggregator listing, which is how chains that publish
@@ -15,6 +19,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { demoPlaces, type Dish, type Place } from '@faresight/shared';
 import { getConfig, projectRoot } from '../config.ts';
+import { createPool, migrate } from '../db/pg.ts';
+import { saveDishPrices } from '../services/dishPrices.ts';
 import { lookupMenuPrices } from '../services/menuPrices.ts';
 
 const args = process.argv.slice(2);
@@ -28,6 +34,7 @@ const onlyVenue = value('venue');
 const batchSize = Math.max(1, Number(value('batch') ?? 8));
 const rounds = Math.max(1, Number(value('rounds') ?? 3));
 const allowThirdParty = flag('allow-third-party');
+const skipDb = flag('skip-db');
 
 const dataFile = resolve(projectRoot, 'shared/src/restaurantDishes.ts');
 const config = getConfig();
@@ -36,7 +43,7 @@ if (!config.openaiKey) {
   process.exit(1);
 }
 
-interface Found { price: number; source: string; url: string }
+interface Found { price: number; source: string; url: string; placeId: string }
 const found = new Map<string, Found>();
 const reasons = new Map<string, string>();
 
@@ -59,7 +66,7 @@ async function priceVenue(place: Place, wanted: Dish[]) {
       });
       if (!result) continue;
       for (const { dish_id, price, source, url } of result.prices) {
-        if (!found.has(dish_id)) found.set(dish_id, { price, source, url });
+        if (!found.has(dish_id)) found.set(dish_id, { price, source, url, placeId: place.id });
         reasons.delete(dish_id);
       }
       for (const { dish_id, reason } of result.unpriced) {
@@ -110,6 +117,35 @@ for (const place of venues) {
 if (!dryRun && written) writeFileSync(dataFile, file);
 
 console.log(`\n${written} price${written === 1 ? '' : 's'} ${dryRun ? 'would be written' : 'written'} to shared/src/restaurantDishes.ts`);
+
+// The file only reaches a reader after a rebuild and a redeploy. Tiger Data reaches the running
+// server on its next request, so every price found is recorded there too.
+if (!dryRun && !skipDb && found.size) {
+  const databaseUrl = config.accounts?.databaseUrlDirect;
+  if (!databaseUrl) {
+    console.warn('DATABASE_URL is not set, so no price was written to Tiger Data. Pass --skip-db to silence this.');
+  } else {
+    const pool = createPool(databaseUrl);
+    try {
+      await migrate(pool);
+      const byPlace = new Map<string, { dish_id: string; price: number; source: string; url: string }[]>();
+      for (const [dish_id, { price, source, url, placeId }] of found) {
+        const list = byPlace.get(placeId) ?? [];
+        list.push({ dish_id, price, source, url });
+        byPlace.set(placeId, list);
+      }
+      let stored = 0;
+      for (const [placeId, prices] of byPlace) {
+        stored += await saveDishPrices(pool, placeId, prices, allowThirdParty);
+      }
+      console.log(`${stored} price${stored === 1 ? '' : 's'} written to dish_prices in Tiger Data`);
+    } catch (error) {
+      console.error(`Could not write to Tiger Data: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      await pool.end();
+    }
+  }
+}
 for (const place of venues) {
   const still = place.dishes.filter((dish) => dish.price == null && !found.has(dish.id));
   if (!still.length) continue;

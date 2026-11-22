@@ -319,7 +319,7 @@ export const restaurantDishMenus: readonly RestaurantDishMenu[] = [
       },
       {
         id: 'bu-starbucks-hot-chocolate', name: 'Hot Chocolate',
-        price: null, diameter: 0.09, portion: 'One serving.',
+        price: 3.55, priceSource: 'Menu With Price', priceUrl: 'https://www.menuwithprice.com/menu/starbucks/massachusetts/boston/132956/', diameter: 0.09, portion: 'One serving.',
         file: 'dish-starbucks-hot-chocolate.sog', splats: 60_000,
         photoUrl: 'https://cloudassets.starbucks.com/is/image/sbuxcorp/SBX20190617_SignatureHotChocolate',
       },

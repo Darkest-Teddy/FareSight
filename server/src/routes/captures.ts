@@ -11,6 +11,8 @@ import type { CaptureEventType, CaptureJobRow, CaptureRow, CaptureView, Captures
 import { MAX_IMAGE_BYTES } from '../services/imagePrep.ts';
 import { PRESIGN_SECONDS } from '../services/objectStorage.ts';
 import type { PasscodeGuards } from '../services/passcodes.ts';
+import type { Accounts } from '../services/accounts.ts';
+import { resolvePlace } from '../services/places.ts';
 
 interface FrameBody {
   seq: number;
@@ -35,7 +37,7 @@ const numbers = (length: number) => ({ type: ['array', 'null'], items: { type: '
 const optionalNumber = { type: ['number', 'null'] };
 const optionalSize = { type: ['integer', 'null'], minimum: 1, maximum: 100_000 };
 
-export function registerCaptures(app: FastifyInstance, store: Store, config: Config, guards: PasscodeGuards, captures: Captures | undefined, events: CaptureEvents | undefined) {
+export function registerCaptures(app: FastifyInstance, store: Store, config: Config, guards: PasscodeGuards, captures: Captures | undefined, events: CaptureEvents | undefined, accounts?: Accounts) {
   if (!captures || !events) {
     // The apps read /api/health first, so this only answers clients that skipped the check.
     app.all('/api/captures*', async (_request, reply) => reply.code(503).send({ error: 'Capture storage is not configured on this server' }));
@@ -62,7 +64,9 @@ export function registerCaptures(app: FastifyInstance, store: Store, config: Con
       },
     } },
   }, async ({ body }, reply) => {
-    if (!store.get('places', body.place_id)) return reply.code(404).send({ error: 'Place not found' });
+    if (!(await resolvePlace(store, accounts, body.place_id)).exists) {
+      return reply.code(404).send({ error: 'Place not found' });
+    }
     const { rows } = await pool.query<{ id: string }>(
       'insert into captures (place_id, mode, device_info) values ($1, $2, $3) returning id',
       [body.place_id, body.mode ?? 'room', JSON.stringify(body.device_info ?? {})]);

@@ -123,15 +123,15 @@ export async function createApp(config: Config = getConfig(), options: { logger?
   registerDiscover(app, store, config, auth, accounts, discover, discoverEvents, googlePlaces);
   registerCatalog(app, store, config, accounts);
   registerAdminAndCommunity(app, store, guards);
-  registerPipeline(app, store, config, guards);
-  registerCaptures(app, store, config, guards, captures, captureEvents);
+  registerPipeline(app, store, config, guards, accounts);
+  registerCaptures(app, store, config, guards, captures, captureEvents, accounts);
   registerMbta(app, config, store);
   registerLive(app, store, config);
   registerRealtime(app, config);
   registerPairing(app);
   if (options.worker !== false) {
     app.addHook('onReady', async () => {
-      stopWorker = startJobWorker(store, config, logError, captures);
+      stopWorker = startJobWorker(store, config, logError, captures, accounts);
       if (captures) stopBridge = startCaptureBridge(store, config, captures, logError);
     });
   }

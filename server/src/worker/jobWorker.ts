@@ -12,6 +12,8 @@ import { findDemoAsset } from '../services/demoAssets.ts';
 import { MAX_IMAGE_BYTES } from '../services/imagePrep.ts';
 import { downloadFile, ProviderHttpError, TerminalProviderError, type CommitFile } from '../services/providerHttp.ts';
 import { publishAsset } from '../services/publish.ts';
+import type { Accounts } from '../services/accounts.ts';
+import { resolvePlace } from '../services/places.ts';
 import { convertSplat, measureScale } from '../services/splatProcessor.ts';
 import { pollTrellis, submitTrellis } from '../services/trellisClient.ts';
 
@@ -39,7 +41,7 @@ async function copyAtomically(source: string, destination: string, commit: Commi
   }
 }
 
-async function advance(store: Store, config: Config, initialJob: JobRecord, lease: WorkerLease, captures?: Captures) {
+async function advance(store: Store, config: Config, initialJob: JobRecord, lease: WorkerLease, captures?: Captures, accounts?: Accounts) {
   let job = initialJob;
   const assertCurrent = () => store.assertWorker(lease);
   const commit: CommitFile = (temporary, destination) => store.transaction(() => {
@@ -57,7 +59,12 @@ async function advance(store: Store, config: Config, initialJob: JobRecord, leas
   };
 
   try {
-    if (!store.get('places', job.place_id)) throw new TerminalProviderError('The job venue is no longer in the catalog');
+    // Either store: a place added from the phone is a Postgres row and is deliberately absent
+    // from the SQLite catalogue, so checking only there failed every contributed build with
+    // "The job venue is no longer in the catalog".
+    if (!(await resolvePlace(store, accounts, job.place_id)).exists) {
+      throw new TerminalProviderError('The job venue is no longer in the catalog');
+    }
     if (String(job.provider) === 'marble-1.1') throw new Error('This Marble job used a retired API. Create a new Atlas room job.');
     if (job.status === 'queued') {
       next('generating', 'Generating spatial preview', job.provider === 'demo-sim' ? { provider_task_id: `demo-${job.id}` } : {});
@@ -247,7 +254,7 @@ async function advance(store: Store, config: Config, initialJob: JobRecord, leas
   }
 }
 
-export function startJobWorker(store: Store, config: Config, onError: (error: unknown) => void = console.error, captures?: Captures) {
+export function startJobWorker(store: Store, config: Config, onError: (error: unknown) => void = console.error, captures?: Captures, accounts?: Accounts) {
   mkdirSync(config.uploads, { recursive: true });
   mkdirSync(config.outputs, { recursive: true });
   const owner = randomUUID();
@@ -258,7 +265,7 @@ export function startJobWorker(store: Store, config: Config, onError: (error: un
       if (!lease || running) return;
       const job = store.nextJob();
       if (job) {
-        running = advance(store, config, job, lease, captures).catch(onError).finally(() => { running = undefined; });
+        running = advance(store, config, job, lease, captures, accounts).catch(onError).finally(() => { running = undefined; });
       }
     } catch (error) {
       onError(error);

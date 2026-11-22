@@ -315,16 +315,32 @@ export function createDiscover(accounts: Accounts, store: Store) {
     /**
      * Discover lists only what somebody can actually step into in 3D.
      *
-     * An asset counts only once it is `ready`: a build that is still converting, or one an admin
-     * rejected, is not something to send a visitor to. For a contributed place the pipeline sets
-     * `asset_id` exactly when its splat is finished, so its presence is the same signal.
+     * An asset counts only once it is `ready`: a build still converting, or one an admin
+     * rejected, is not somewhere to send a visitor.
      */
-    const explorable = (place: Place) =>
-      assetIds(place).some((id) => store.get('assets', id)?.status === 'ready');
+    const ready = (id: string | null | undefined) =>
+      Boolean(id) && store.get('assets', id!)?.status === 'ready';
+
+    /**
+     * Places a finished build belongs to, keyed by the place the job names.
+     *
+     * A contributed place is not in the SQLite catalogue, so `publishAsset` never writes back to
+     * it and `contributed_places.asset_id` stays null forever. Without this a place added from
+     * the phone could never appear here, however many photographs were uploaded. The job record
+     * carries the place id for both upload paths, so it is the one signal that covers both.
+     */
+    const builtFor = new Map<string, string>();
+    for (const job of store.all('jobs')) {
+      if (job.asset_id && ready(job.asset_id)) builtFor.set(job.place_id, job.asset_id);
+    }
+
+    const explorable = (place: Place) => assetIds(place).some(ready) || builtFor.has(place.id);
 
     const places = [
       ...store.all('places').filter(explorable).map((place: Place) => fromCatalog(place, catalogEpoch)),
-      ...contributedPlaces.filter((place) => place.asset_id),
+      ...contributedPlaces
+        .filter((place) => place.asset_id || builtFor.has(place.id))
+        .map((place) => (place.asset_id ? place : { ...place, asset_id: builtFor.get(place.id)! })),
     ].map((place) => {
       // What the backfill found from several sites beats a single hand-researched figure, because
       // it is both more current and weighted across more reviews. The hand-researched entry stays

@@ -82,9 +82,13 @@ export class Store {
         data TEXT NOT NULL,
         sha256 TEXT GENERATED ALWAYS AS (json_extract(data, '$.sha256')) STORED UNIQUE
       ) STRICT;
+      -- place_id deliberately has no foreign key to places: a place somebody added from the
+      -- phone lives in Postgres, not here, and must stay out of this table because everything
+      -- reading it also draws the station maps. The routes check that a place exists in either
+      -- store before an upload is accepted.
       CREATE TABLE IF NOT EXISTS upload_places (
         upload_id TEXT NOT NULL REFERENCES uploads(id),
-        place_id TEXT NOT NULL REFERENCES places(id),
+        place_id TEXT NOT NULL,
         PRIMARY KEY (upload_id, place_id)
       ) STRICT;
       CREATE TABLE IF NOT EXISTS jobs (
@@ -102,6 +106,24 @@ export class Store {
     this.transaction(() => {
       if (!this.sqlite.prepare("SELECT 1 FROM pragma_table_info('worker_lease') WHERE name = 'generation'").get()) {
         this.sqlite.exec('ALTER TABLE worker_lease ADD COLUMN generation INTEGER NOT NULL DEFAULT 0');
+      }
+      // SQLite cannot drop a foreign key, so an existing upload_places is rebuilt without the one
+      // to places. Until this ran, photographing a place added from the phone failed with
+      // "FOREIGN KEY constraint failed" because that place is a Postgres row.
+      const uploadPlacesRow = this.sqlite.prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'upload_places'",
+      ).get() as { sql?: string } | undefined;
+      if (String(uploadPlacesRow?.sql ?? '').includes('REFERENCES places(id)')) {
+        this.sqlite.exec(`
+          CREATE TABLE upload_places_rebuilt (
+            upload_id TEXT NOT NULL REFERENCES uploads(id),
+            place_id TEXT NOT NULL,
+            PRIMARY KEY (upload_id, place_id)
+          ) STRICT;
+          INSERT INTO upload_places_rebuilt SELECT upload_id, place_id FROM upload_places;
+          DROP TABLE upload_places;
+          ALTER TABLE upload_places_rebuilt RENAME TO upload_places;
+        `);
       }
       for (const asset of demoAssets) {
         const stored = this.get('assets', asset.id);

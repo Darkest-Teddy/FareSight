@@ -11,6 +11,8 @@ import { places } from '../db/seed.ts';
 import { selectReferencePhotos } from '../services/geminiSelector.ts';
 import { decodeImageBase64, MAX_IMAGE_BYTES, prepareImage } from '../services/imagePrep.ts';
 import type { PasscodeGuards } from '../services/passcodes.ts';
+import type { Accounts } from '../services/accounts.ts';
+import { resolvePlace } from '../services/places.ts';
 import { publishAsset } from '../services/publish.ts';
 import type { PublishOptions } from '../services/publish.ts';
 
@@ -35,7 +37,7 @@ const dishPrice = { type: 'number', exclusiveMinimum: 0, maximum: 500 };
 
 const multipartLimit = MAX_IMAGE_BYTES + 64 * 1024;
 
-export function registerPipeline(app: FastifyInstance, store: Store, config: Config, guards: PasscodeGuards) {
+export function registerPipeline(app: FastifyInstance, store: Store, config: Config, guards: PasscodeGuards, accounts?: Accounts) {
   app.post<{ Body: UploadBody }>('/api/uploads', {
     onRequest: guards.contributor,
     bodyLimit: Math.ceil(MAX_IMAGE_BYTES * 4 / 3) + 16 * 1024,
@@ -95,9 +97,9 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
     if (typeof input.place_id !== 'string' || !input.place_id || !input.filename.trim()) {
       return reply.code(400).send({ error: 'Provide place_id and a filename' });
     }
-    const place = store.get('places', input.place_id);
-    if (!place) return reply.code(404).send({ error: 'Place not found' });
-    if (input.dish_id !== undefined && !place.dishes.some((dish) => dish.id === input.dish_id)) {
+    const { exists, place } = await resolvePlace(store, accounts, input.place_id);
+    if (!exists) return reply.code(404).send({ error: 'Place not found' });
+    if (input.dish_id !== undefined && !place?.dishes.some((dish) => dish.id === input.dish_id)) {
       return reply.code(400).send({ error: 'dish_id must refer to a dish at this place' });
     }
     if (input.source_url !== undefined && (typeof input.source_url !== 'string' || input.source_url.length > 2048)) {
@@ -119,7 +121,9 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
       properties: { place_id: idSchema, upload_ids: idList(MAX_ROOM_PHOTOS + 1) },
     } },
   }, async ({ body }, reply) => {
-    if (!store.get('places', body.place_id)) return reply.code(404).send({ error: 'Place not found' });
+    if (!(await resolvePlace(store, accounts, body.place_id)).exists) {
+      return reply.code(404).send({ error: 'Place not found' });
+    }
     const uploads = store.uploadsForPlace(body.place_id, body.upload_ids);
     if (!uploads) return reply.code(400).send({ error: 'All uploads must belong to this place' });
     return selectReferencePhotos(config, body.place_id, uploads);
@@ -145,6 +149,10 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
       body.kind, body.place_id, body.upload_ids, body.dish_id, body.dish_name, body.dish_price,
       body.plate_diameter_m, body.model_tier,
     ])).digest('hex');
+    // Resolved before the transaction opens: the SQLite transaction callback is synchronous and
+    // a contributed place has to be looked up in Postgres.
+    const { exists, place } = await resolvePlace(store, accounts, body.place_id);
+    if (!exists) return reply.code(404).send({ error: 'Place not found' });
     return store.transaction(() => {
       if (keyHeader) {
         const prior = store.jobByIdempotencyKey(keyHeader);
@@ -153,14 +161,13 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
           return reply.code(202).send(publicJob(prior));
         }
       }
-      const place = store.get('places', body.place_id);
-      if (!place) return reply.code(404).send({ error: 'Place not found' });
       const uploads = store.uploadsForPlace(body.place_id, body.upload_ids);
       if (!uploads) return reply.code(400).send({ error: 'All uploads must belong to this place' });
       const dishName = body.dish_name?.trim();
       const dishId = body.dish_id ?? (!dishName ? uploads[0].dish_id : null);
-      const dish = dishId ? place.dishes.find((entry) => entry.id === dishId)
-        : place.dishes.find((entry) => entry.name.toLowerCase() === dishName?.toLowerCase());
+      const dishes = place?.dishes ?? [];
+      const dish = dishId ? dishes.find((entry) => entry.id === dishId)
+        : dishes.find((entry) => entry.name.toLowerCase() === dishName?.toLowerCase());
       if (body.kind === 'dish' && (uploads.length !== 1 || (body.dish_id && !dish))) {
         return reply.code(400).send({ error: 'Dish generation requires one image and any supplied dish_id must belong to the place' });
       }
@@ -176,7 +183,7 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
       if (missingKey) return reply.code(503).send({ error: `Missing API credentials for ${provider}` });
       const now = new Date().toISOString();
       const job: JobRecord = {
-        id: randomUUID(), kind: body.kind, place_id: place.id,
+        id: randomUUID(), kind: body.kind, place_id: place?.id ?? body.place_id,
         dish_id: body.kind === 'dish' ? dish?.id ?? null : null,
         dish_name: body.kind === 'dish' ? dish?.name ?? (dishName || 'Untitled dish') : null,
         dish_price: body.kind === 'dish' ? body.dish_price ?? null : null,
@@ -198,11 +205,16 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
     return publicJob(job);
   });
   app.post<{ Params: { id: string } }>('/api/jobs/:id/retry', { onRequest: guards.contributor }, async ({ params }, reply) => {
+    // Resolved before the transaction opens, since the SQLite transaction callback is
+    // synchronous and a contributed place lives in Postgres.
+    const existing = store.get('jobs', params.id);
+    if (existing && !(await resolvePlace(store, accounts, existing.place_id)).exists) {
+      return reply.code(409).send({ error: 'The job venue is no longer in the catalog' });
+    }
     return store.transaction(() => {
       const job = store.get('jobs', params.id);
       if (!job) return reply.code(404).send({ error: 'Job not found' });
       if (job.status !== 'failed') return reply.code(409).send({ error: 'Only failed jobs can be retried' });
-      if (!store.get('places', job.place_id)) return reply.code(409).send({ error: 'The job venue is no longer in the catalog' });
       if (job.terminal_failure) return reply.code(409).send({ error: job.error ?? 'This job cannot be retried' });
       if (job.submission_pending && !job.provider_task_id && job.provider !== 'atlas-v2') {
         return reply.code(409).send({ error: job.error });
