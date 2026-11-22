@@ -1,4 +1,4 @@
-.filter-summary, .chip-indicator, .gps svg, .venue-stats { display: none; }
+.filter-summary, .gps svg, .venue-stats { display: none; }
 .place-drawer:not([data-paired=true]) .pairing-actions,
 .place-drawer:not([data-xr-capable=true]) .table-background-field { display: none; }
 
@@ -94,9 +94,7 @@
 .place-row .price, .menu-row .price, .budget-field output, .rotation-field output { font-variant-numeric: tabular-nums; }
 .rotation-field > span { display: flex; justify-content: space-between; gap: 8px; }
 
-.filter-chip-row { display: flex; align-items: start; gap: 4px; min-width: 0; }
-.filter-chip-row .chips { flex: 1; min-width: 0; }
-.filter-chip-row .filter-reset { flex: none; min-height: 44px; padding-inline: 4px; color: var(--muted); font-size: 12px; }
+.filter-reset { justify-self: end; min-height: 44px; padding-inline: 4px; color: var(--muted); font-size: 12px; }
 .budget-field small { font-size: 11px; }
 
 @media (min-width: 769px) {
@@ -107,49 +105,7 @@
     overflow-y: auto;
     scrollbar-width: thin;
   }
-  [data-scene=venue] .filter-chip-row, [data-scene=dish] .filter-chip-row { display: none; }
-  /* Desktop: the grid spans the full width; Reset, shown only when filters differ from defaults, sits under it. */
-  .filter-chip-row { display: grid; gap: 2px; }
-  .filter-chip-row .filter-reset { justify-self: end; min-height: 24px; padding: 2px 4px; }
-  /* The cravings form one segmented control: an even 4 × 2 grid on a single track. */
-  .filter .chips {
-    position: relative;
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 2px;
-    padding: 3px;
-    border-radius: 12px;
-    background: var(--fill-1);
-    isolation: isolate;
-  }
-  .chip-indicator[data-ready] {
-    display: block;
-    position: absolute;
-    z-index: -1;
-    inset: 0 auto auto 0;
-    pointer-events: none;
-    border-radius: 9px;
-    background: var(--fill-3);
-    transition: transform 320ms var(--ease-spring),
-      width 320ms var(--ease-spring),
-      height 320ms var(--ease-spring);
-  }
-  .filter .chip, .filter .chip[aria-pressed=true] {
-    min-width: 0;
-    min-height: 30px;
-    padding: 4px 2px;
-    border: 0;
-    border-radius: 9px;
-    white-space: nowrap;
-    text-align: center;
-    background: transparent;
-    color: var(--muted);
-    font-size: 12px;
-    font-weight: 600;
-  }
-  .filter .chip:hover:not(:disabled) { color: var(--text); background: var(--fill-2); }
-  .filter .chip[aria-pressed=true] { color: var(--text); }
-  .filter .chip:focus-visible { outline-offset: -2px; }
+  .filter-reset { min-height: 24px; padding: 2px 4px; }
 
   .filter[data-compact=true] .filter-summary {
     display: flex;
@@ -171,7 +127,7 @@
     gap: 6px 12px;
     padding-top: 4px;
   }
-  .origin-controls, .budget-field { grid-column: 1 / -1; }
+  .craving-field, .origin-controls, .budget-field, .filter-reset { grid-column: 1 / -1; }
   .origin-controls { gap: 8px; }
   .origin-controls .field { min-width: 0; }
   .filter .gps {
@@ -349,7 +305,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chip-indicator[data-ready], .station-places .place-row { transition: none; }
+  .station-places .place-row { transition: none; }
   .venue-stats dd[data-loading]::after { animation: none; }
 }
 

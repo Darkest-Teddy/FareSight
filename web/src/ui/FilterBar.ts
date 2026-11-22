@@ -2,11 +2,6 @@ import { MBTA_SUBWAY_FARE, type Stop } from '@faresight/shared';
 import { button, element, field, icon, option } from './dom';
 import { cravings, initialFilters, type Craving, type Filters } from './state';
 
-// One or two words each, so the eight cravings sit in an even 4 × 2 grid; the full name stays the accessible label.
-const shortCraving: Record<Craving, string> = {
-  all: 'All', ramen: 'Ramen', cheap: 'Cheap eats', study: 'Study', groups: 'Karaoke', music: 'Music', shops: 'Shops', parks: 'Parks',
-};
-
 export class FilterBar {
   readonly root = element('section', 'filter panel');
   private readonly start = element('select');
@@ -15,14 +10,11 @@ export class FilterBar {
   private readonly group = element('output');
   private readonly family = element('input');
   private readonly reset: HTMLButtonElement;
-  private readonly chipStrip = element('div', 'chips');
-  private readonly indicator = element('span', 'chip-indicator');
-  private readonly chips = new Map<Filters['craving'], HTMLButtonElement>();
+  private readonly craving = element('select');
   private readonly summary: HTMLButtonElement;
   private readonly summaryText = element('span');
   private readonly minus: HTMLButtonElement;
   private readonly plus: HTMLButtonElement;
-  private readonly desktop = matchMedia('(min-width: 769px)');
   private filters: Filters;
 
   constructor(filters: Filters, update: (patch: Partial<Filters>) => void, locate: () => void, close: () => void) {
@@ -31,23 +23,11 @@ export class FilterBar {
     this.reset = button('Reset', () => update(initialFilters), 'quiet filter-reset');
     this.reset.setAttribute('aria-label', 'Reset filters');
     this.reset.hidden = true;
-    const chipRow = element('div', 'filter-chip-row');
-    chipRow.append(this.chipStrip, this.reset);
 
-    this.chipStrip.setAttribute('role', 'group');
-    this.chipStrip.setAttribute('aria-label', 'Craving');
-    this.indicator.setAttribute('aria-hidden', 'true');
-    this.chipStrip.append(this.indicator);
-    const chipSizes = new ResizeObserver(() => this.alignIndicator());
-    chipSizes.observe(this.chipStrip);
-    for (const [id, title] of cravings) {
-      const chip = button(shortCraving[id], () => update({ craving: id }), 'chip');
-      chip.setAttribute('aria-label', title);
-      chip.title = title;
-      this.chips.set(id, chip);
-      this.chipStrip.append(chip);
-      chipSizes.observe(chip);
-    }
+    this.craving.append(...cravings.map(([id, title]) => option(id, id === 'all' ? 'Anything' : title)));
+    this.craving.addEventListener('change', () => update({ craving: this.craving.value as Craving }));
+    const lookingFor = field('Looking for', this.craving);
+    lookingFor.classList.add('craving-field');
     this.start.addEventListener('change', () => update({ startStopId: this.start.value }));
     const origin = element('div', 'origin-controls');
     const gps = button('', locate, 'quiet gps');
@@ -92,8 +72,8 @@ export class FilterBar {
     this.summary.append(this.summaryText, icon('chevron-right'));
     const group = element('div', 'group-controls');
     group.append(element('span', 'field-caption', 'Group size'), stepper);
-    controls.append(origin, budgetField, group, family);
-    this.root.append(button('Close', close, 'quiet mobile-only filter-close'), chipRow, this.summary, controls);
+    controls.append(lookingFor, origin, budgetField, group, family, this.reset);
+    this.root.append(button('Close', close, 'quiet mobile-only filter-close'), this.summary, controls);
   }
 
   /** Desktop only: collapse the controls to a one-line trip summary outside the map overview. */
@@ -120,26 +100,17 @@ export class FilterBar {
     this.minus.disabled = filters.groupSize === 1;
     this.plus.disabled = filters.groupSize === 20;
     this.family.checked = filters.familyVisit;
-    for (const [id, chip] of this.chips) chip.setAttribute('aria-pressed', String(id === filters.craving));
+    this.craving.value = filters.craving;
     const resetFocused = document.activeElement === this.reset;
     this.reset.hidden = (Object.keys(initialFilters) as (keyof Filters)[]).every((key) => filters[key] === initialFilters[key]);
-    if (this.reset.hidden && resetFocused) this.chips.get(filters.craving)?.focus({ preventScroll: true });
+    if (this.reset.hidden && resetFocused) this.craving.focus({ preventScroll: true });
     this.updateSummary();
-    this.alignIndicator();
   }
 
   private updateSummary() {
     const stop = this.start.selectedOptions[0]?.textContent;
-    const { maxBudget, groupSize, familyVisit } = this.filters;
-    this.summaryText.textContent = `${stop ? `From ${stop} · ` : ''}Under $${maxBudget} · ${groupSize} ${groupSize === 1 ? 'person' : 'people'}${familyVisit ? ' · Family' : ''}`;
-  }
-
-  private alignIndicator() {
-    const chip = this.chips.get(this.filters.craving);
-    if (!this.desktop.matches || !chip?.offsetWidth) return;
-    this.indicator.style.width = `${chip.offsetWidth}px`;
-    this.indicator.style.height = `${chip.offsetHeight}px`;
-    this.indicator.style.transform = `translate(${chip.offsetLeft}px, ${chip.offsetTop}px)`;
-    this.indicator.setAttribute('data-ready', '');
+    const { craving, maxBudget, groupSize, familyVisit } = this.filters;
+    const looking = craving === 'all' ? '' : `${cravings.find(([id]) => id === craving)?.[1]} · `;
+    this.summaryText.textContent = `${looking}${stop ? `From ${stop} · ` : ''}Under $${maxBudget} · ${groupSize} ${groupSize === 1 ? 'person' : 'people'}${familyVisit ? ' · Family' : ''}`;
   }
 }
