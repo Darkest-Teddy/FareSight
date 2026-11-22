@@ -77,7 +77,7 @@ export interface Dish {
   id: string;
   place_id: string;
   name: string;
-  price: number;
+  price: number | null;
   portion_note: string;
   plate_diameter_m?: number;
   asset_id?: string | null;

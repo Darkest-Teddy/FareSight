@@ -5,6 +5,7 @@ import { registerRealtime } from '../dist/routes/realtime.js';
 
 const url = '/api/realtime/session';
 const openaiBaseUrl = 'https://api.openai.com/v1';
+const realtimeModel = 'gpt-realtime';
 
 test('Realtime sessions require server credentials', async (t) => {
   const app = Fastify();
@@ -23,13 +24,13 @@ test('Realtime session minting returns only the ephemeral credential, expiration
   const response = await app.inject({ method: 'POST', url });
   assert.equal(response.statusCode, 200);
   assert.equal(response.headers['cache-control'], 'no-store');
-  assert.deepEqual(response.json(), { client_secret: 'mock-ephemeral', expires_at: 1_900_000_000, model: 'gpt-realtime' });
+  assert.deepEqual(response.json(), { client_secret: 'mock-ephemeral', expires_at: 1_900_000_000, model: realtimeModel });
   assert.equal(mint.mock.callCount(), 1);
   const [endpoint, init] = mint.mock.calls[0].arguments;
   assert.equal(endpoint, `${openaiBaseUrl}/realtime/client_secrets`);
   assert.equal(init.method, 'POST');
   assert.equal(init.headers.Authorization, 'Bearer mock-server-key');
-  assert.deepEqual(JSON.parse(init.body), { session: { type: 'realtime', model: 'gpt-realtime', audio: { output: { voice: 'ash' } } } });
+  assert.deepEqual(JSON.parse(init.body), { session: { type: 'realtime', model: realtimeModel, audio: { output: { voice: 'ballad' } } } });
 });
 
 test('Realtime minting does not forward upstream error details', async (t) => {

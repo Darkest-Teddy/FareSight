@@ -41,7 +41,7 @@ export interface XRDishData {
   id: string;
   place_id: string;
   name: string;
-  price: number;
+  price: number | null;
   portion_note: string;
   plate_diameter_m?: number | null;
   asset_id?: string | null;

@@ -26,11 +26,13 @@ async function warmDemoCache() {
   try {
     const index = await fetch('/assets-demo/cache-list.json');
     if (!index.ok) return;
-    const files = await index.json();
+    const files = (await index.json()).filter((path) =>
+      typeof path === 'string' && path.startsWith('/assets-demo/') &&
+      !/\/dish-[^/]+\.sog$/i.test(new URL(path, self.location.origin).pathname),
+    );
     for (let i = 0; i < files.length; i += 4) {
-      await Promise.allSettled(files.slice(i, i + 4).filter((path) =>
-        typeof path === 'string' && path.startsWith('/assets-demo/'),
-      ).map((path) => cacheFirst(DEMO, new Request(new URL(path, self.location.origin)))));
+      await Promise.allSettled(files.slice(i, i + 4)
+        .map((path) => cacheFirst(DEMO, new Request(new URL(path, self.location.origin)))));
     }
   } catch { /* Development and older deployments can cache demo files on demand. */ }
 }

@@ -14,14 +14,14 @@ export function registerCatalog(app: FastifyInstance, store: Store, config: Conf
     if (asset?.status !== 'ready') return null;
     if (asset.backend !== 'prebuilt-demo') return asset;
     const file = findDemoAsset(config, asset.url.slice('/assets-demo/'.length));
-    if (!file) return asset;
+    if (!file?.endsWith('.ply')) return asset;
     let count = demoCounts.get(file);
     if (count === undefined) {
       const descriptor = openSync(file, 'r');
       try {
         const header = Buffer.alloc(4096);
         readSync(descriptor, header);
-        count = Number(header.toString('ascii').match(/^element vertex (\d+)\r?$/m)?.[1] ?? 0);
+        count = Number(header.toString('ascii').match(/^element vertex (\d+)\r?$/m)?.[1] ?? asset.gaussian_count);
         demoCounts.set(file, count);
       } finally {
         closeSync(descriptor);

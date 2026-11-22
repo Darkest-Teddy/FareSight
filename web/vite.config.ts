@@ -1,5 +1,5 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 
@@ -30,6 +30,7 @@ export default defineConfig({
       if (!existsSync(destination)) return;
       const cacheList = readdirSync(destination, { recursive: true, encoding: 'utf8' })
         .filter((name) => /\.(?:glb|ply|sog|webp|png|jpe?g|json)$/i.test(name))
+        .filter((name) => !/^dish-.*\.sog$/i.test(basename(name)))
         .filter((name) => name !== 'cache-list.json' && statSync(resolve(destination, name)).isFile())
         .map((name) => demoPrefix + name.split('/').map(encodeURIComponent).join('/'));
       writeFileSync(resolve(destination, 'cache-list.json'), JSON.stringify(cacheList));

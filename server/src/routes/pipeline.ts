@@ -216,7 +216,7 @@ export function registerPipeline(app: FastifyInstance, store: Store, config: Con
       const name = job.dish_name!;
       let dish = place.dishes.find((entry) => entry.id === job.dish_id || entry.name.toLowerCase() === name.toLowerCase());
       if (!dish) {
-        dish = { id: `${place.id}-dish-${job.id}`, place_id: place.id, name, price: place.typical_price, portion_note: '' } satisfies Dish;
+        dish = { id: `${place.id}-dish-${job.id}`, place_id: place.id, name, price: null, portion_note: '' } satisfies Dish;
         place.dishes.push(dish);
       }
       dish.asset_id = asset.id;

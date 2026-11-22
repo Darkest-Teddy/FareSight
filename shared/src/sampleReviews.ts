@@ -1,6 +1,8 @@
 import type { Review } from './types.js';
 
 const notes: Record<string, [string, string]> = {
+  'kenmore-shudaxia-01': ['Hot pot works well when everyone orders a few ingredients to share. Decide on broth and a per-person budget before you start ordering.', 'I’d leave more time for a group dinner than for a quick bite. The shared pot makes it easy to linger while everyone cooks.'],
+  'bu-starbucks-01': ['I’d leave a little time for the espresso line when classes let out. It’s a practical stop for coffee to go on Commonwealth Avenue.', 'For a short study break, I’d look for a seat before ordering. If the tables are full, it’s easy to take the drink back to campus.'],
   'bu-ramen-01': ['The tonkotsu bowl is a full meal on its own. The counter makes a solo lunch easy if you only have one break between classes.', 'Katsu curry is the bigger order. For four people I’d go before the dinner rush because the wall tables are limited.'],
   'bu-pavement-01': ['A bagel sandwich and coffee are enough for breakfast before class. I’d eat there for a short break and take it to go when the line grows.', 'The reading nook works for one person with a laptop. For group work I’d meet elsewhere if we need space to spread out.'],
   'bu-nudpob-01': ['Pad see ew travels well and the portion makes a solid lunch. It’s an easy stop when we’re already on Commonwealth Avenue.', 'The curries are a good share order for two. I’d leave more time during the class-change rush if we want a table.'],

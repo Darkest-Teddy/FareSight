@@ -1,4 +1,4 @@
-import { computeTripEstimate, type MbtaSource, type Place, type Stop } from '@faresight/shared';
+import { computeTripEstimate, formatDishPrice, type Dish, type MbtaSource, type Place, type Stop } from '@faresight/shared';
 import { api, type Alert, type Prediction } from '../api/client';
 import { oneWayCost, type Filters } from '../ui/state';
 import { has3D, has3DRoom, hasDishPreview, isSplat } from './preview3D';
@@ -59,7 +59,7 @@ export interface PlaceDecision {
     source: MbtaSource | 'checking' | 'unavailable'; arrivals: Prediction[]; alerts: Alert[];
     alertsAvailable: boolean;
   };
-  dishes: { id: string; name: string; price: number; portionNote: string; has3D: boolean }[];
+  dishes: (Pick<Dish, 'id' | 'name' | 'price'> & { priceLabel: string; portionNote: string; has3D: boolean })[];
   rooms: { name: string; statedCapacity: number; seating: string; price: number; priceUnit: string; has3D: boolean }[];
   reviews: { id: string; author_label: string; text: string; created_at: string; sample: boolean }[];
   /** Researched public facts: hours note, awards, aggregate ratings and review highlights. */
@@ -121,7 +121,8 @@ export function placeDecision(place: Place, stop: Stop, filters: Filters, now = 
     },
     transit: { source: 'checking', arrivals: [], alerts: [], alertsAvailable: false },
     dishes: place.dishes.map((dish) => ({
-      id: dish.id, name: dish.name, price: dish.price, portionNote: dish.portion_note, has3D: hasDishPreview(dish),
+      id: dish.id, name: dish.name, price: dish.price, priceLabel: formatDishPrice(dish.price),
+      portionNote: dish.portion_note, has3D: hasDishPreview(dish),
     })),
     rooms: place.rooms.map((room) => ({
       name: room.name, statedCapacity: room.stated_capacity, seating: room.seating, price: room.price,
@@ -186,7 +187,7 @@ export function buildComparisonBriefingCard(decisions: PlaceDecision[], startSto
   }];
   if (reviews.length) sections.push({ kind: 'reviews', heading: 'Diner reviews', items: reviews });
   if (picks.length) sections.push({ kind: 'list', heading: 'Menu picks', items: picks.map(({ entry, dish }) => ({
-    label: `${dish.name} · ${money(dish.price)}`, detail: entry.name, badge: dish.has3D ? '3D' : undefined,
+    label: `${dish.name} · ${dish.priceLabel}`, detail: entry.name, badge: dish.has3D ? '3D' : undefined,
   })) });
   const alerts = [...new Set(decisions.flatMap(({ transit }) => transit.alerts.map(({ header }) => header)))];
   if (alerts.length) sections.push({ kind: 'list', heading: 'Service alerts', items: alerts.map((label) => ({ label })) });
@@ -220,7 +221,7 @@ export function buildPlaceBriefingCard(details: PlaceDecision): BriefingCard {
     author: review.author_label, text: review.text, sample: review.sample,
   })) } : { kind: 'text', heading: 'Diner Reviews', body: 'No approved reviews yet.' });
   if (details.dishes.length) sections.push({ kind: 'list', heading: 'Menu Highlights', items: details.dishes.map((dish) => ({
-    label: `${dish.name} · ${money(dish.price)}`, detail: dish.portionNote, badge: dish.has3D ? '3D' : undefined,
+    label: `${dish.name} · ${dish.priceLabel}`, detail: dish.portionNote, badge: dish.has3D ? '3D' : undefined,
   })) });
   if (details.rooms.length) sections.push({ kind: 'list', heading: 'Rooms', items: details.rooms.map((room) => ({
     label: room.name, detail: `${room.statedCapacity} ${room.seating} · ${money(room.price)} ${room.priceUnit}`,
