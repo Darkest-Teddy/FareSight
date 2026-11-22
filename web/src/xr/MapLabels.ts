@@ -1,6 +1,5 @@
 import * as pc from 'playcanvas';
-import { describe3DCount, type StopPreviewCounts } from '../data/preview3D';
-import { previewBadge } from '../ui/dom';
+import type { StopPreviewCounts } from '../data/preview3D';
 import type { XRStopData } from './bridgeTypes';
 
 interface Label {
@@ -8,7 +7,6 @@ interface Label {
   node: HTMLButtonElement;
   stem: HTMLSpanElement;
   count: HTMLSpanElement;
-  preview: HTMLSpanElement;
   width: number;
   height: number;
   slot: number;
@@ -80,13 +78,11 @@ export class MapLabels {
       dot.className = 'map-label-dot';
       const name = document.createElement('strong');
       name.textContent = stop.name;
-      const preview = previewBadge();
-      preview.hidden = true;
       const count = document.createElement('span');
       count.className = 'map-label-count';
       const stem = document.createElement('span');
       stem.className = 'map-label-stem';
-      node.append(dot, name, preview, count, stem);
+      node.append(dot, name, count, stem);
       node.addEventListener('click', () => this.select(stop.stop_id));
       node.addEventListener('pointerenter', () => this.hover(stop.stop_id));
       node.addEventListener('pointerleave', () => this.hover(undefined));
@@ -94,7 +90,7 @@ export class MapLabels {
       node.addEventListener('blur', () => this.hover(undefined));
       this.root.append(node);
       this.sizes.observe(node);
-      return { stop, node, stem, count, preview, width: 0, height: 0, slot: 0, shown: false };
+      return { stop, node, stem, count, width: 0, height: 0, slot: 0, shown: false };
     });
     this.mark();
   }
@@ -104,11 +100,9 @@ export class MapLabels {
       const previews = counts.get(label.stop.stop_id);
       const count = previews?.matching ?? 0;
       const text = `${count} ${count === 1 ? 'spot' : 'spots'}`;
-      const hasPreview = Boolean(previews?.published3D);
-      const name = `${label.stop.name}, ${count} matching ${count === 1 ? 'place' : 'places'}${describe3DCount(previews)}. Open station.`;
-      if (label.count.textContent === text && label.preview.hidden === !hasPreview && label.node.ariaLabel === name) continue;
+      const name = `${label.stop.name}, ${count} matching ${count === 1 ? 'place' : 'places'}. Open station.`;
+      if (label.count.textContent === text && label.node.ariaLabel === name) continue;
       label.count.textContent = text;
-      label.preview.hidden = !hasPreview;
       label.node.ariaLabel = name;
       label.node.dataset.empty = String(count === 0);
       label.width = 0;

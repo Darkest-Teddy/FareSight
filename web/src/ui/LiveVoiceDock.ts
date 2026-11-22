@@ -8,6 +8,8 @@ export interface LiveVoiceDockActions {
   sendText(text: string): boolean;
   /** Called when the transcript dock opens, so the shell can make room for it. */
   opened?(): void;
+  /** Takes the keyboard when the dock closes while its trigger is tucked inside the closed menu. */
+  returnFocus?(): void;
 }
 
 const stateLabels: Record<VoiceState, string> = {
@@ -54,7 +56,7 @@ export class LiveVoiceDock {
     const head = element('header', 'voice-head');
     const titleWrap = element('div', 'voice-title-wrap');
     titleWrap.append(this.statusBadge, this.modelMeta);
-    this.closeBtn = button('Hide', () => { this.setOpen(false); this.trigger.focus(); }, 'quiet');
+    this.closeBtn = button('Hide', () => { this.setOpen(false); this.focusTrigger(); }, 'quiet');
     this.closeBtn.setAttribute('aria-label', 'Hide transcript');
     head.append(titleWrap, this.closeBtn);
     this.statusBadge.setAttribute('role', 'status');
@@ -89,13 +91,15 @@ export class LiveVoiceDock {
     });
 
     this.root.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') {
-        this.setOpen(false);
-        this.trigger.focus();
-      }
+      if (event.key !== 'Escape') return;
+      // The key closes the dock and goes no further, so it does not also step the scene back.
+      event.stopPropagation();
+      this.setOpen(false);
+      this.focusTrigger();
     });
 
     this.root.append(head, this.errorNote, controls, this.feed, this.form);
+    this.describeTrigger();
     this.renderEmptyFeed();
   }
 
@@ -117,12 +121,18 @@ export class LiveVoiceDock {
     this.root.hidden = !open;
     this.trigger.setAttribute('aria-expanded', String(open));
     this.describeTrigger();
-    if (restore) this.trigger.focus({ preventScroll: true });
+    if (restore) this.focusTrigger();
     if (open && changed) this.actions.opened?.();
+  }
+
+  private focusTrigger(): void {
+    if (this.trigger.offsetParent) this.trigger.focus({ preventScroll: true });
+    else this.actions.returnFocus?.();
   }
 
   private describeTrigger(): void {
     const started = live(this.state) || this.state === 'connecting';
+    // The menu row names its state; the tooltip says what pressing it does next.
     this.trigger.title = this.state === 'error' ? 'Retry GPT Live'
       : !started ? 'Talk to GPT Live' : this.root.hidden ? 'Show transcript' : 'End GPT Live session';
   }

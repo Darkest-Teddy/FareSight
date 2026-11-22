@@ -6,7 +6,10 @@ import type { Store } from '../db/database.ts';
 import { demoAlerts, demoPredictions, demoSchedules, demoVehicles, serviceDate } from './mbtaDemo.ts';
 
 type Service = 'vehicles' | 'predictions' | 'alerts' | 'schedules';
-const ttl: Record<Service, number> = { vehicles: 10_000, predictions: 10_000, alerts: 60_000, schedules: 3600_000 };
+// Vehicles are cached just under the app's poll interval, so every poll gets fresh positions.
+const ttl: Record<Service, number> = { vehicles: 5_000, predictions: 10_000, alerts: 60_000, schedules: 3600_000 };
+/** How long the last real vehicle positions stand in for a failed request before simulation takes over. */
+const vehicleGrace = 90_000;
 const routes = Object.keys(ROUTE_COLORS);
 type Query = { stop?: string; route?: string; direction?: number; date?: string };
 type TripQuery = {
@@ -68,6 +71,8 @@ const querySchema = {
 
 export function registerMbta(app: FastifyInstance, config: Config, store: Store) {
   const cache = new Map<string, { expires: number; data: Promise<{ source: MbtaSource; items: unknown[] }> }>();
+  /** The last real vehicle positions for each query, kept to ride out a brief upstream failure. */
+  const lastVehicles = new Map<string, { at: number; items: unknown[] }>();
 
   let inFlight = 0;
   let cooldownUntil = 0;
@@ -126,10 +131,22 @@ export function registerMbta(app: FastifyInstance, config: Config, store: Store)
     async function resolve(): Promise<{ source: MbtaSource; items: T[] }> {
       try {
         const result = await live();
-        if (Array.isArray(result)) return { source: 'live', items: result };
+        if (Array.isArray(result)) {
+          if (service === 'vehicles') lastVehicles.set(id, { at: Date.now(), items: result });
+          return { source: 'live', items: result };
+        }
         entry.expires = Date.now() + 10_000;
         return { source: 'live', items: result.partial };
       } catch {
+        // One slow or refused request must not swap the real trains for simulated ones and back
+        // again a few seconds later. While the last real positions are still recent they are
+        // served as they are, and MBTA is asked again shortly. The simulation is for when the
+        // API has actually been out of reach for a while, or was never reached at all.
+        const recent = service === 'vehicles' ? lastVehicles.get(id) : undefined;
+        if (recent && Date.now() - recent.at < vehicleGrace) {
+          entry.expires = Date.now() + 4_000;
+          return { source: 'live', items: recent.items as T[] };
+        }
         entry.expires = Date.now() + Math.min(ttl[service], 10_000);
         return { source: 'simulated', items: demo() };
       }

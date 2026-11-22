@@ -73,6 +73,12 @@ interface Train {
   from: number;
   to: number;
   elapsed: number;
+  /** Seconds the current move from `from` to `to` should take: the gap between the last two fixes. */
+  duration: number;
+  /** `clock` at the last position fix, to time the next move. */
+  seenAt: number;
+  /** A hair of extra height, different per train, so two parked on one spot never z-fight. */
+  lift: number;
 }
 
 interface LineSurface {
@@ -82,7 +88,14 @@ interface LineSurface {
   level: number;
 }
 
-const pollInterval = 18; // AppShell polls live vehicles every 18 seconds.
+/**
+ * How long a train takes to glide to a new fix, in seconds. It is measured per train as the gap
+ * between its last two fixes, so the motion keeps pace with whatever rate the app polls at; these
+ * only bound it. The first is also the pace used before a second fix has arrived.
+ */
+const defaultGlide = 8;
+const minGlide = 2;
+const maxGlide = 30;
 // Trains ride on top of the plate rather than inside it. Half the plate thickness clears it; the
 // old 0.0102 was sized for the swept tube the lines used to be and now floats them well above it.
 const trainLift = 0.0014;
@@ -94,16 +107,27 @@ const trainLift = 0.0014;
  *
  * Length is the binding constraint. At this scale a consist already covers nine tenths of the
  * average Green Line B stop gap (0.072 units), so it cannot grow without spanning whole stations.
- * The cross-section is therefore lifted instead, by a little under 1.8x.
+ * The cross-section is lifted instead.
  *
- * That ratio is a deliberate middle ground. Uniform scaling is faithful but leaves the body so
- * slim that its livery is invisible from the map's usual angle, where mostly roof is in view. An
- * earlier attempt at 3x went too far the other way and the cars came out visibly stubby. At 1.8x
- * the consist still reads as a tram -- about 9:1 overall -- while the green band along its lower
- * body is actually legible.
+ * The width is set by the line plate, which is 0.0084 across. A train narrower than that -- the
+ * old 0.0065 -- sits inside its own line and, being the line's colour, disappears into it. At
+ * 0.0036 the body is 0.0097 wide, a little proud of the plate on both sides, so its edge is drawn
+ * against the paper. Height is scaled less than width: at the same factor the cars came out as
+ * tall as a mid-rise and visibly stubby, and it is the roof, not the side, that the map's usual
+ * angle shows.
  */
 const trainScaleLength = 0.0014;
-const trainScaleCross = 0.0024;
+const trainScaleWidth = 0.0036;
+const trainScaleHeight = 0.0027;
+/**
+ * The pale sled under every train: a flat pill a little larger than the consist. A train is its
+ * line's colour and so is the plate it runs on; this is the edge that separates the two, the same
+ * job the white ring does for a station dot.
+ */
+const sledHalfWidth = 0.0068;
+const sledHalfLength = 0.0335;
+const sledHeight = 0.0011;
+const sledTone = '#FFFDF8';
 
 /**
  * No floor offset: the model's own geometry already starts at y=0, so its origin is its railhead.
@@ -115,6 +139,13 @@ const trainScaleCross = 0.0024;
  */
 const trainFloorOffset = 0;
 const maxSnapError = 0.03 ** 2;
+/** How much nearer another branch's track must be before a train is drawn on it, not its own. */
+const ownTrackBias = 0.004;
+/**
+ * A fix this close to the last one (about 8 m of ground) is a standing train and GPS wobble, not
+ * travel. It must not turn the train around.
+ */
+const steadyDistance = 0.0012;
 const burstTime = 0.7;
 /** Mesh name of the translucent ground in boston-map-sculpture.glb (modeling/ground.mjs). */
 const groundPlate = 'Ground plate';
@@ -171,6 +202,41 @@ function headingFromBearing(track: Track, distance: number, bearing: number): nu
   return delta > 90 ? -1 : 1;
 }
 
+/** A flat pill lying along Z with its underside on y=0: the outline of a train's sled. */
+function pillGeometry(halfWidth: number, halfLength: number, height: number): pc.Geometry {
+  const arc = 8;
+  const outline: [number, number][] = [];
+  for (const end of [1, -1]) {
+    for (let i = 0; i <= arc; i++) {
+      const angle = (end > 0 ? 0 : Math.PI) + (Math.PI * i) / arc;
+      outline.push([halfWidth * Math.cos(angle), end * (halfLength - halfWidth) + halfWidth * Math.sin(angle)]);
+    }
+  }
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+  // Top face, as a fan. The underside rests on the plate and is never seen.
+  for (const [x, z] of outline) {
+    positions.push(x, height, z);
+    normals.push(0, 1, 0);
+  }
+  for (let i = 1; i < outline.length - 1; i++) indices.push(0, i + 1, i);
+  // Wall, with its own vertices so the rim stays a crisp edge.
+  outline.forEach(([x, z], i) => {
+    const [nextX, nextZ] = outline[(i + 1) % outline.length];
+    const first = positions.length / 3;
+    const length = Math.hypot(nextX - x, nextZ - z) || 1;
+    positions.push(x, 0, z, nextX, 0, nextZ, nextX, height, nextZ, x, height, z);
+    for (let n = 0; n < 4; n++) normals.push((nextZ - z) / length, 0, -(nextX - x) / length);
+    indices.push(first, first + 2, first + 1, first, first + 3, first + 2);
+  });
+  const geometry = new pc.Geometry();
+  geometry.positions = positions;
+  geometry.normals = normals;
+  geometry.indices = indices;
+  return geometry;
+}
+
 function sampleTrack(track: Track, distance: number, position: pc.Vec3): void {
   let low = 1;
   let high = track.distances.length - 1;
@@ -197,6 +263,8 @@ export class MapSculptureScene {
   private labels: MapLabels;
   private lineSurfaces = new Map<string, LineSurface>();
   private tracks = new Map<string, Track[]>();
+  /** Every track of a line family (all four Green branches, say), for trains off their own branch. */
+  private familyTracks = new Map<string, Track[]>();
   private anchors = new Map<string, StationAnchor>();
   /** Landmark boxes in map space, and the same corners in world space for the labels to avoid. */
   private landmarks: pc.Vec3[][] = [];
@@ -210,6 +278,9 @@ export class MapSculptureScene {
    * heavy rail car -- so each is its own glb, painted in its own livery.
    */
   private trainModels = new Map<string, pc.ContainerResource>();
+  /** Every train's sled shares this mesh and material. */
+  private sledMesh: pc.Mesh;
+  private sledSurface: pc.StandardMaterial;
   private medallionModel: Promise<pc.ContainerResource | null>;
   private alive = true;
   private abort = new AbortController();
@@ -244,6 +315,15 @@ export class MapSculptureScene {
     this.ringMesh = pc.Mesh.fromGeometry(device, new pc.TorusGeometry({ tubeRadius: 0.035, ringRadius: 0.5, segments: 48, sides: 8 }));
     // Rings share this mesh; hold a reference so rebuilding the stops does not free it.
     this.ringMesh.incRefCount();
+    this.sledMesh = pc.Mesh.fromGeometry(device, pillGeometry(sledHalfWidth, sledHalfLength, sledHeight));
+    // Trains come and go with the feed; hold a reference so the last one leaving does not free it.
+    this.sledMesh.incRefCount();
+    // Unlit, so the sled stays the same crisp card white whichever way its train is pointing.
+    this.sledSurface = material(sledTone, 1);
+    this.sledSurface.useLighting = false;
+    this.sledSurface.diffuse.set(0, 0, 0);
+    this.sledSurface.update();
+    this.materials.push(this.sledSurface);
     this.labels = new MapLabels(canvas, (id) => this.selectStop(id), hoverStop);
 
     const deck = material('#CFCDC7');
@@ -279,6 +359,8 @@ export class MapSculptureScene {
           routes.push(track);
           this.tracks.set(key, routes);
         }
+        const family = familyOf(line.routeId);
+        this.familyTracks.set(family, [...(this.familyTracks.get(family) ?? []), track]);
       }
       this.setVehicles(this.vehicles);
     });
@@ -482,13 +564,32 @@ export class MapSculptureScene {
     for (const { stop, panel } of this.beacons) {
       const previews = counts.get(stop.stop_id);
       const count = previews?.matching ?? 0;
-      const matching3D = previews?.matching3D ?? 0;
-      const published3D = previews?.published3D ?? 0;
-      const detail = matching3D ? ` · ${matching3D} in 3D` : published3D ? ' · 3D outside filters' : '';
-      panel.setCallout(stop.name, `${count} matching ${count === 1 ? 'spot' : 'spots'}${detail}`,
-        { lineColor: stop.primary_color, selected: this.selected === stop.stop_id, has3D: published3D > 0 });
+      panel.setCallout(stop.name, `${count} matching ${count === 1 ? 'spot' : 'spots'}`,
+        { lineColor: stop.primary_color, selected: this.selected === stop.stop_id });
     }
     this.labels.setCounts(counts);
+  }
+
+  /**
+   * The modelled track a vehicle is on, and how far along it.
+   *
+   * A vehicle is matched to its own route's track first. But the branches are only modelled out to
+   * where they join: the shared Green Line trunk through downtown exists once, on the B branch's
+   * path. A C, D or E train there is nowhere near its own track, so it is matched against the rest
+   * of its family instead -- without that, every Green Line train east of Kenmore that was not a B
+   * was thrown away as off the map. Its own track keeps a small advantage so a train does not hop
+   * to a neighbouring branch where two run side by side.
+   */
+  private locate(routeId: string, x: number, z: number): { track: Track; distance: number } | undefined {
+    const own = this.tracks.get(routeId) ?? [];
+    let best: { track: Track; distance: number; error: number; score: number } | undefined;
+    for (const track of new Set([...own, ...(this.familyTracks.get(familyOf(routeId)) ?? [])])) {
+      const { distance, error } = snapToTrack(track, x, z);
+      const score = Math.sqrt(error) + (own.includes(track) ? 0 : ownTrackBias);
+      if (!best || score < best.score) best = { track, distance, error, score };
+    }
+    // Only draw trains that sit on a modelled line; anything else would float off the map.
+    return best && best.error <= maxSnapError ? best : undefined;
   }
 
   setVehicles(vehicles: XRVehicleData[]): void {
@@ -498,46 +599,54 @@ export class MapSculptureScene {
       if (!Number.isFinite(vehicle.lat) || !Number.isFinite(vehicle.lon)) continue;
       const [x, z] = project(vehicle.lat, vehicle.lon);
       if (Math.abs(x) > 0.78 || Math.abs(z) > 0.55) continue;
-      const candidates = this.tracks.get(vehicle.route_id) ?? [];
-      let snap: ReturnType<typeof snapToTrack> | undefined;
-      let track: Track | undefined;
-      for (const candidate of candidates) {
-        const hit = snapToTrack(candidate, x, z);
-        if (!snap || hit.error < snap.error) {
-          snap = hit;
-          track = candidate;
-        }
-      }
-      // Only draw trains that sit on a modelled line; anything else would float off the map.
-      if (!track || !snap || snap.error > maxSnapError) continue;
+      const fix = this.locate(vehicle.route_id, x, z);
+      if (!fix) continue;
+      const { track } = fix;
       seen.add(vehicle.id);
       const family = familyOf(vehicle.route_id);
       let train = this.trains.get(vehicle.id);
       const isNew = !train;
       if (!train) {
         const root = child(this.trainRoot, vehicle.label || vehicle.id);
-        train = { root, family, elapsed: pollInterval, from: 0, to: 0, heading: 1 };
+        // The id decides the lift, so a train keeps its place in a stack from one fix to the next.
+        let hash = 0;
+        for (const letter of vehicle.id) hash = (hash * 31 + letter.charCodeAt(0)) >>> 0;
+        train = { root, family, from: fix.distance, to: fix.distance, heading: 1,
+          elapsed: defaultGlide, duration: defaultGlide, seenAt: this.clock, lift: (hash % 7) * 0.00006 };
         this.trains.set(vehicle.id, train);
         this.attachTrainModel(train);
       } else if (train.family !== family) {
         this.reveal.finish(train.root, false);
-        train.root.children[0]?.destroy();
+        for (const part of [...train.root.children]) part.destroy();
         train.family = family;
         this.attachTrainModel(train);
       }
-      if (train.track === track) {
-        train.from = pc.math.lerp(train.from, train.to, clamp(train.elapsed / pollInterval, 0, 1));
-      } else train.from = snap.distance;
-      const stationary = Math.abs(snap.distance - train.from) < 1e-5;
-      if (Number.isFinite(vehicle.bearing) && (isNew || stationary)) {
-        train.heading = headingFromBearing(track, snap.distance, vehicle.bearing as number);
+
+      // Start the next move from wherever the train is drawn right now, not from where the last
+      // fix said it would end up, so a fix that arrives mid-glide never makes it jump.
+      let from = isNew ? fix.distance
+        : pc.math.lerp(train.from, train.to, clamp(train.elapsed / train.duration, 0, 1));
+      if (!isNew && train.track !== track) {
+        // It has crossed onto another modelled track (a branch joining the trunk). Carry its drawn
+        // position over; if the two tracks do not meet there, it simply appears at the new fix.
+        const here = train.root.getLocalPosition();
+        const carried = snapToTrack(track, here.x, here.z);
+        from = carried.error <= maxSnapError ? carried.distance : fix.distance;
       }
-      train.to = snap.distance;
+      const moved = fix.distance - from;
+      if (isNew || train.track !== track || Math.abs(fix.distance - train.to) > 1e-6) {
+        train.duration = isNew ? defaultGlide : clamp(this.clock - train.seenAt, minGlide, maxGlide);
+        train.from = from;
+        train.to = fix.distance;
+        train.elapsed = isNew ? train.duration : 0;
+      }
+      train.seenAt = this.clock;
       train.track = track;
-      train.elapsed = 0;
-      if (Math.abs(train.to - train.from) < 0.00001 && vehicle.bearing != null) {
-        // Compass bearings start at north (-Z), the same forward axis as lookAt.
-        train.root.setLocalEulerAngles(0, -vehicle.bearing, 0);
+      // A train faces the way it is travelling. One that has not moved -- most are standing at a
+      // platform at any given moment -- has no travel to read, so it takes MBTA's compass bearing.
+      if (Math.abs(moved) > steadyDistance) train.heading = Math.sign(moved);
+      else if (Number.isFinite(vehicle.bearing)) {
+        train.heading = headingFromBearing(track, fix.distance, vehicle.bearing as number);
       }
       if (isNew) this.updateTrain(train, 0);
     }
@@ -551,16 +660,18 @@ export class MapSculptureScene {
   private attachTrainModel(train: Train): void {
     const source = this.trainModels.get(train.family);
     if (!source || train.root.children.length) return;
+    const sled = child(train.root, 'Sled');
+    sled.addComponent('render', { castShadows: false, meshInstances: [new pc.MeshInstance(this.sledMesh, this.sledSurface, sled)] });
     const model = source.instantiateRenderEntity();
-    // Materials are left alone on purpose: each model already carries its own livery, window band
-    // and roof trim. Overriding them would flatten all of that back to one colour.
+    // Materials are left alone on purpose: each model already carries its line's livery, window
+    // band and roof stripe. Overriding them would flatten all of that back to one colour.
     //
     // The nose is +Z -- measured on the vendored model, whose headlight sits at z=+22.5 and
     // taillight at z=-22.5 -- while lookAt points the root's -Z along the track. Without the flip
     // every train runs backwards.
     model.setLocalEulerAngles(0, 180, 0);
-    model.setLocalScale(trainScaleCross, trainScaleCross, trainScaleLength);
-    model.setLocalPosition(0, trainFloorOffset, 0);
+    model.setLocalScale(trainScaleWidth, trainScaleHeight, trainScaleLength);
+    model.setLocalPosition(0, sledHeight + trainFloorOffset, 0);
     train.root.addChild(model);
     if (this.detailsVisible) this.reveal.show(train.root, 0.38, jarvisPoints.detail);
     else this.reveal.finish(train.root, false);
@@ -569,17 +680,16 @@ export class MapSculptureScene {
   private updateTrain(train: Train, dt: number): void {
     if (!train.track) return;
     train.elapsed += dt;
-    const progress = clamp(train.elapsed / pollInterval, 0, 1);
+    const progress = clamp(train.elapsed / train.duration, 0, 1);
     const distance = pc.math.lerp(train.from, train.to, progress);
     sampleTrack(train.track, distance, this.trainPosition);
-    this.trainPosition.y += trainLift;
+    this.trainPosition.y += trainLift + train.lift;
     train.root.setLocalPosition(this.trainPosition);
 
     // Orient every frame, whether or not the train is moving. This used to be skipped when
     // `to === from`, which is exactly the case for anything STOPPED_AT a platform -- and most
     // trains are stopped most of the time -- so those kept their default rotation and lay across
     // the line at an angle instead of along it.
-    if (Math.abs(train.to - train.from) > 1e-5) train.heading = Math.sign(train.to - train.from);
     const length = train.track.distances[train.track.distances.length - 1];
     // Sample a little along the track and face that way. Near an end the step would fall off the
     // track and collapse to zero, so it flips to look back from the other side instead.
@@ -591,7 +701,7 @@ export class MapSculptureScene {
       flip = -1;
     }
     sampleTrack(train.track, ahead, this.trainLookAt);
-    this.trainLookAt.y += trainLift;
+    this.trainLookAt.y = this.trainPosition.y;
     if (flip < 0) {
       // Mirror the sample through the train so it still faces along its heading.
       this.trainLookAt.set(
@@ -690,6 +800,8 @@ export class MapSculptureScene {
     this.root.destroy();
     this.ringMesh.decRefCount();
     this.ringMesh.destroy();
+    this.sledMesh.decRefCount();
+    this.sledMesh.destroy();
     for (const surface of this.materials) surface.destroy();
     this.trains.clear();
   }

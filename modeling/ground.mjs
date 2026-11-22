@@ -16,8 +16,9 @@
 // plate is its own surface ('Ground plate'); the renderer draws it after everything opaque and
 // without writing depth.
 //
-// The Charles is in the sheet too (water.mjs): a blue tint at the plate's own level, drawn after
-// the plate and before the shadows.
+// The water is in the sheet too (water.mjs): the Charles and the harbour as a blue tint at the
+// plate's own level, with a darker line of the same blue along every shore, drawn after the plate
+// and before the shadows.
 //
 // The same surface carries the contact shadows: a soft strip under each track and a halo round the
 // foot of each building. They are darker ink on the same sheet, lifted a hair above it, and they
@@ -55,11 +56,31 @@ const SOLID = SKIRT * 0.55;
 const RIM_STEPS = [3, 3];
 
 /**
- * The river. A soft map blue, well short of the Blue Line's, laid into the plate at this opacity
+ * The water. A soft map blue, well short of the Blue Line's, laid into the plate at this opacity
  * where the plate is solid; like everything else on the plate it fades out with the rim.
  */
 export const WATER_COLOUR = '#4F86C6';
 export const WATER_ALPHA = 0.5;
+
+/**
+ * The shoreline: a deeper blue, strongest at the bank and gone this far out into the water. It is
+ * what a printed map does with a coast -- without it the river is a tint with no edge, and on a
+ * gray plate a tint with no edge reads as a stain. A narrow river is all shore, so it comes out
+ * darker than the open basin, which is what keeps the upper Charles legible.
+ */
+export const SHORE_COLOUR = '#2C5E9E';
+export const SHORE_ALPHA = 0.42;
+export const SHORE_REACH = 0.0034;
+
+/**
+ * How far the water's opacity may stray, anywhere along an edge of one of its triangles, from the
+ * plate's own fade at that spot, and the longest an edge may be where the plate is fading at all.
+ * Opacity is written per vertex and interpolates in straight lines, so a triangle reaching from
+ * the solid plate out past the rim would carry the water's tint across the fade as a wedge; edges
+ * that stray further than this are split until they do not.
+ */
+const WATER_FADE_ERROR = 0.035;
+const WATER_LONGEST_EDGE = 0.09;
 
 /** Ink of every contact shadow. Neutral and near black, so it darkens without tinting. */
 export const SHADOW_INK = '#22252B';
@@ -210,22 +231,99 @@ export function groundPlate(surface, lines, y) {
     coverage,
 
     /**
-     * Water, as `points` ([x, z]) and `triangles` over them (water.mjs). It is a tint in the sheet
-     * itself, at the plate's own level, so call this before anything casts a shadow: the shadows
-     * then fall across the water as they do across the ground.
+     * Water, as `points` ([x, z]), `triangles` over them and the `shores` that bound them
+     * (water.mjs). It is a tint in the sheet itself, at the plate's own level, so call this before
+     * anything casts a shadow: the shadows then fall across the water as they do across the ground.
      */
-    water({ points, triangles }) {
+    water({ points, triangles, shores = [] }) {
+      points = [...points];
       const cover = points.map(([x, z]) => coverage(x, z));
+      // Break up every triangle that crosses the plate's fade. An edge is split or not on its own
+      // length and where it lies, never on which triangle it belongs to, so the two triangles
+      // either side of it always agree and the mesh stays closed.
+      const halves = new Map();
+      const half = (a, b) => {
+        const key = a < b ? a + ':' + b : b + ':' + a;
+        if (halves.has(key)) return halves.get(key);
+        const [p, q] = [points[a], points[b]];
+        const middle = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+        const over = coverage(middle[0], middle[1]);
+        const length = Math.hypot(q[0] - p[0], q[1] - p[1]);
+        const settled = (cover[a] === 1 && cover[b] === 1 && over === 1) || (cover[a] === 0 && cover[b] === 0 && over === 0);
+        let stray = 0;
+        for (const t of [0.25, 0.5, 0.75]) {
+          const real = t === 0.5 ? over : coverage(p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t);
+          stray = Math.max(stray, Math.abs(real - (cover[a] + (cover[b] - cover[a]) * t)));
+        }
+        let index = -1;
+        if (length > 0.01 && (stray > WATER_FADE_ERROR || (length > WATER_LONGEST_EDGE && !settled))) {
+          index = points.push(middle) - 1;
+          cover.push(over);
+        }
+        halves.set(key, index);
+        return index;
+      };
+      const queue = triangles.map((t) => [...t]);
+      const fine = [];
+      while (queue.length) {
+        const [a, b, c] = queue.pop();
+        const [ab, bc, ca] = [half(a, b), half(b, c), half(c, a)];
+        const cut = (ab >= 0) + (bc >= 0) + (ca >= 0);
+        if (cut === 0) fine.push([a, b, c]);
+        else if (cut === 3) queue.push([a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]);
+        else if (cut === 1) {
+          if (ab >= 0) queue.push([a, ab, c], [ab, b, c]);
+          else if (bc >= 0) queue.push([a, b, bc], [a, bc, c]);
+          else queue.push([a, b, ca], [ca, b, c]);
+        } else if (ab < 0) queue.push([a, b, bc], [a, bc, ca], [ca, bc, c]);
+        else if (bc < 0) queue.push([a, ab, ca], [ab, b, c], [ab, c, ca]);
+        else queue.push([a, ab, c], [ab, bc, c], [ab, b, bc]);
+      }
+
       const placed = new Map();
       const corner = (i) => {
         if (!placed.has(i))
           placed.set(i, surface.vertex([points[i][0], y, points[i][1]], UP, WATER_COLOUR, undefined, WATER_ALPHA * cover[i]));
         return placed.get(i);
       };
-      for (const [a, b, c] of triangles) {
+      for (const [a, b, c] of fine) {
         // Past the rim there is no plate to tint, and nothing to draw.
         if (cover[a] + cover[b] + cover[c] === 0) continue;
         triUp(surface, corner(a), corner(b), corner(c));
+      }
+
+      // The shoreline: a band along every shore and round every island, darkest at the bank and
+      // fading out into the water. A shore runs counter-clockwise in (x, z) and an island
+      // clockwise, so the water is on the same hand of both.
+      for (const ring of shores) {
+        const count = ring.length;
+        const inward = ring.map((a, i) => {
+          const b = ring[(i + 1) % count];
+          const length = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+          return [-(b[1] - a[1]) / length, (b[0] - a[0]) / length];
+        });
+        const bank = [];
+        const deep = [];
+        for (let i = 0; i < count; i++) {
+          const before = inward[(i + count - 1) % count];
+          const after = inward[i];
+          let mx = before[0] + after[0];
+          let mz = before[1] + after[1];
+          const length = Math.hypot(mx, mz);
+          if (length < 1e-6) [mx, mz] = after;
+          else [mx, mz] = [mx / length, mz / length];
+          // Held short at a sharp corner, so the band never reaches across to the far bank.
+          const stretch = Math.min(1.4, 1 / Math.max(1e-6, mx * after[0] + mz * after[1]));
+          const [x, z] = ring[i];
+          const over = coverage(x, z);
+          bank.push(over > 0 ? surface.vertex([x, y, z], UP, SHORE_COLOUR, undefined, SHORE_ALPHA * over) : -1);
+          deep.push(over > 0 ? surface.vertex([x + mx * SHORE_REACH * stretch, y, z + mz * SHORE_REACH * stretch], UP, SHORE_COLOUR, undefined, 0) : -1);
+        }
+        for (let i = 0; i < count; i++) {
+          const j = (i + 1) % count;
+          if (bank[i] < 0 || bank[j] < 0) continue;
+          quadUp(surface, bank[i], bank[j], deep[j], deep[i]);
+        }
       }
     },
 

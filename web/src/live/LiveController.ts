@@ -5,8 +5,8 @@ import { api, type Alert, type Prediction, type Trip } from '../api/client';
 import { has3D, has3DDish, has3DRoom, isSplat, measuredRoomForAsset } from '../data/preview3D';
 import { composeBriefingCard } from '../data/composeBriefing';
 import { catalogReviewSnapshots, loadLiveReviews, loadPlaceDecision, nextTrainLabel, reviewFacts, type BriefingCard, type BriefingMode, type PlaceDecision } from '../data/reviewBriefing';
-import { cravings, initialFilters, matchingPlaces, oneWayCost, type Craving, type Filters } from '../ui/state';
-import type { Seating } from '../ui/PlaceDrawer';
+import { cravings, initialFilters, matchesCraving, matchingPlaces, oneWayCost, type Craving, type Filters } from '../ui/state';
+import type { Seating } from '../ui/viewState';
 import type { SceneMode } from '../xr';
 import { realtimeTools, validToolValue, type RealtimeToolName } from '../voice/tools';
 
@@ -24,12 +24,12 @@ export interface AppControlSurface {
     comparePlaceId?: string;
     inside: boolean;
     fit: boolean;
+    /** The head count the will-we-fit preview seats. It belongs to that preview, not to the filters. */
+    fitGroupSize: number;
     seating: Seating;
     rotation: number;
     virtualTable: boolean;
     muted: boolean;
-    drawerOpen: boolean;
-    sheetExpanded: boolean;
     filterOpen: boolean;
     xrMode: 'none' | 'vr' | 'ar';
     manifest?: RestaurantManifest;
@@ -48,8 +48,7 @@ export interface AppControlSurface {
   setHighlightedPlaces(placeIds: string[]): void;
   setHighlightedDish(dishId: string | undefined): void;
   clearHighlights(): void;
-  focusMenu(dishId?: string): void;
-  setFit(enabled: boolean, seating: Seating): Promise<void>;
+  setFit(enabled: boolean, seating: Seating, groupSize?: number): Promise<void>;
   showReviewCard(card: BriefingCard, mode?: BriefingMode): void;
   dismissReviewCard(cardId?: string): void;
   setDishRotation(degrees: number): void;
@@ -57,7 +56,6 @@ export interface AppControlSurface {
   orbitCamera(yawDeltaDeg: number, pitchDeltaDeg: number, zoomFactor?: number): void;
   focusMapStopCamera(stopId: string): void;
   resetCamera(): void;
-  setDrawerState(action: 'open' | 'close' | 'expand' | 'collapse'): void;
   setFilterOpen(open: boolean): void;
   setAudioSfx(enabled: boolean): void;
   openModal(name: 'none' | 'upload' | 'pair' | 'credits' | 'debug'): void;
@@ -190,21 +188,20 @@ export class LiveController {
         return { result: { ok: true, currentView: this.describeContext() } };
       case 'list_places': {
         if (args.stopId !== undefined && !stop) return { result: { ok: false, error: 'Unknown stop ID.' } };
-        const craving = cravings.find(([id]) => id === args.craving)?.[0] ?? state.filters.craving;
+        const craving = cravings.find(([id]) => id === args.craving)?.[0] ?? 'all';
         const maxBudget = typeof args.maxBudget === 'number' && Number.isFinite(args.maxBudget) ? args.maxBudget : state.filters.maxBudget;
-        const places = matchingPlaces(state.places, { ...state.filters, craving, maxBudget })
-          .filter((place) => (!stop || place.stop_id === stop.stop_id) && (args.only3D !== true || has3D(place)))
+        const places = matchingPlaces(state.places, { ...state.filters, maxBudget })
+          .filter((place) => matchesCraving(place, craving) && (!stop || place.stop_id === stop.stop_id) && (args.only3D !== true || has3D(place)))
           .map((place) => ({
             id: place.id, name: place.name, stopId: place.stop_id,
-            fareInclusiveCost: Number(oneWayCost(place, state.filters.startStopId, state.filters.groupSize).toFixed(2)),
+            fareInclusiveCost: Number(oneWayCost(place, state.filters.startStopId).toFixed(2)),
             walkMeters: place.walk_from_stop_m, has3D: has3D(place),
             dishes: place.dishes.map(({ id, name }) => ({ id, name })),
           }));
         return { result: { ok: true, places } };
       }
       case 'set_filters':
-        return this.setFilters({ craving: args.craving, max_budget: args.maxBudget, start_stop: args.startStopId,
-          group_size: args.groupSize, family_visit: args.familyVisit });
+        return this.setFilters({ max_budget: args.maxBudget, start_stop: args.startStopId });
       case 'focus_stop':
         if (!stop) return { result: { ok: false, error: 'Unknown stop ID.' } };
         return this.openStation({ stop: args.stopId });
@@ -293,6 +290,10 @@ export class LiveController {
         catch (error) { return { result: { ok: false, error: error instanceof Error ? error.message : 'Invalid briefing.' } }; }
         const updated = state.briefings.some(({ id }) => id === cardId);
         this.app.showReviewCard(card, mode);
+        // Clipboards stand only in a headset. A flat screen keeps the card for when VR starts, but shows nothing.
+        if (state.xrMode === 'none') {
+          return { result: { ok: true, cardId, shown: false, note: 'Clipboards appear only in a headset. Give the answer aloud.', ...this.openBriefingIds() } };
+        }
         return { result: { ok: true, cardId, ...this.openBriefingIds() },
           actionLabel: `${updated ? 'Updated' : 'Opened'} briefing: ${card.title}` };
       }
@@ -343,7 +344,7 @@ export class LiveController {
       state.place ? `Place: ${state.place.name} (${state.place.id})` : 'Place: none',
       state.dish ? `Dish on table: ${state.dish.name} (${state.dish.id})` : '',
       state.compareId ? `Comparing dish ID: ${state.compareId}` : '',
-      `Filters: craving=${state.filters.craving}, maxBudget=$${state.filters.maxBudget}, start=${state.filters.startStopId}, group=${state.filters.groupSize}, family=${state.filters.familyVisit} (${state.filtered.length} matching places)`,
+      `Filters: maxBudget=$${state.filters.maxBudget}, start=${state.filters.startStopId} (${state.filtered.length} matching places)`,
       state.highlightedStops.length ? `Highlighted stops: ${state.highlightedStops.join(', ')}` : '',
       state.highlightedPlaces.length ? `Highlighted places: ${state.highlightedPlaces.join(', ')}` : '',
       state.highlightedDishId ? `Highlighted dish: ${state.highlightedDishId}` : '',
@@ -427,7 +428,7 @@ export class LiveController {
       active_dish: state.dish ? { id: state.dish.id, name: state.dish.name, ...dishPrice(state.dish) } : null,
       compare_dish_id: state.compareId || null,
       inside_room: state.inside,
-      will_we_fit: { enabled: state.fit, seating: state.seating, group_size: state.filters.groupSize },
+      will_we_fit: { enabled: state.fit, seating: state.seating, group_size: state.fitGroupSize },
       dish_rotation_deg: state.rotation,
       table_mode: state.virtualTable ? 'virtual' : 'passthrough',
       filters: state.filters,
@@ -435,7 +436,6 @@ export class LiveController {
       highlighted_stops: state.highlightedStops,
       highlighted_places: state.highlightedPlaces,
       highlighted_dish_id: state.highlightedDishId ?? null,
-      drawer_open: state.drawerOpen,
       audio_sfx_on: !state.muted,
       xr_mode: state.xrMode,
       trip_estimate: state.trip ?? null,
@@ -452,12 +452,8 @@ export class LiveController {
     const maxBudget = typeof args.max_budget === 'number' && Number.isFinite(args.max_budget) ? args.max_budget : 999;
     const minCapacity = typeof args.min_capacity === 'number' && Number.isFinite(args.min_capacity) ? args.min_capacity : 0;
 
-    let candidates = matchingPlaces(state.places, {
-      ...state.filters,
-      craving,
-      maxBudget,
-      familyVisit: args.family_friendly === true,
-    });
+    let candidates = matchingPlaces(state.places, { ...state.filters, maxBudget })
+      .filter((place) => matchesCraving(place, craving) && (args.family_friendly !== true || place.family_friendly));
 
     if (stopFilter) candidates = candidates.filter((place) => place.stop_id === stopFilter.stop_id);
     if (args.has_3d_room === true) candidates = candidates.filter((place) => has3DRoom(place));
@@ -488,7 +484,7 @@ export class LiveController {
 
     const results = candidates.slice(0, 12).map((place) => {
       const stop = state.stops.find((s) => s.stop_id === place.stop_id);
-      const oneWay = oneWayCost(place, state.filters.startStopId, state.filters.groupSize);
+      const oneWay = oneWayCost(place, state.filters.startStopId);
       const fare = place.stop_id === state.filters.startStopId ? 0 : MBTA_SUBWAY_FARE;
       return {
         id: place.id,
@@ -693,7 +689,6 @@ export class LiveController {
       if (found && found.place.id === place.id) {
         highlightedDish = found.dish;
         this.app.setHighlightedDish(found.dish.id);
-        this.app.focusMenu(found.dish.id);
       }
     }
 
@@ -751,7 +746,6 @@ export class LiveController {
     if (state.place?.id !== targetPlace.id || (state.mode !== 'venue' && state.mode !== 'dish')) {
       await this.app.showVenue(targetPlace, { inside: true });
     }
-    this.app.setDrawerState('open');
     state = this.app.getState();
     const menuItems = state.manifest?.menu_items ?? targetPlace.dishes.map((dish) => ({ dish, dish_asset: dish.asset ?? null }));
 
@@ -763,7 +757,6 @@ export class LiveController {
         this.app.setHighlightedDish(match.dish.id);
       }
     }
-    this.app.focusMenu(highlighted?.id);
 
     return {
       result: {
@@ -812,7 +805,6 @@ export class LiveController {
     const manifestItem = updated.manifest?.menu_items.find((entry) => entry.dish.id === match.dish.id);
     if (!manifestItem?.dish_asset) {
       this.app.setHighlightedDish(match.dish.id);
-      this.app.focusMenu(match.dish.id);
       return {
         result: {
           ok: false,
@@ -927,9 +919,6 @@ export class LiveController {
     if (args.reset === true) {
       Object.assign(patch, initialFilters);
     }
-    if (typeof args.craving === 'string' && cravings.some(([id]) => id === args.craving)) {
-      patch.craving = args.craving as Craving;
-    }
     if (typeof args.max_budget === 'number' && Number.isFinite(args.max_budget)) {
       patch.maxBudget = Math.max(8, Math.min(50, Math.round(args.max_budget)));
     }
@@ -943,22 +932,12 @@ export class LiveController {
       }
       patch.startStopId = stop.stop_id;
     }
-    if (typeof args.group_size === 'number' && Number.isFinite(args.group_size)) {
-      patch.groupSize = Math.max(1, Math.min(20, Math.round(args.group_size)));
-    }
-    if (typeof args.family_visit === 'boolean') {
-      patch.familyVisit = args.family_visit;
-    }
 
     this.app.updateFilters(patch);
     const updated = this.app.getState();
-    const cravingLabel = cravings.find(([id]) => id === updated.filters.craving)?.[1] ?? updated.filters.craving;
     const summaryParts: string[] = [];
     if (args.reset) summaryParts.push('reset');
-    if (patch.craving) summaryParts.push(cravingLabel);
     if (patch.maxBudget !== undefined) summaryParts.push(`$${patch.maxBudget} max`);
-    if (patch.groupSize !== undefined) summaryParts.push(`${patch.groupSize} ${patch.groupSize === 1 ? 'person' : 'people'}`);
-    if (patch.familyVisit !== undefined) summaryParts.push(patch.familyVisit ? 'family visit' : 'all venues');
     if (patch.startStopId) {
       const stopName = updated.stops.find((s) => s.stop_id === patch.startStopId)?.name ?? patch.startStopId;
       summaryParts.push(`from ${stopName}`);
@@ -973,7 +952,7 @@ export class LiveController {
           id: p.id,
           name: p.name,
           stop_id: p.stop_id,
-          one_way_cost: Number(oneWayCost(p, updated.filters.startStopId, updated.filters.groupSize).toFixed(2)),
+          one_way_cost: Number(oneWayCost(p, updated.filters.startStopId).toFixed(2)),
         })),
       },
       actionLabel: `Filters: ${summaryParts.join(' · ') || 'updated'} (${updated.filtered.length} match)`,
@@ -986,10 +965,10 @@ export class LiveController {
       const place = resolvePlace(state.places, args.place, state.stop?.stop_id);
       if (place) await this.app.showVenue(place, { inside: true });
     }
-    if (typeof args.group_size === 'number' && Number.isFinite(args.group_size)) {
-      this.app.updateFilters({ groupSize: Math.max(1, Math.min(20, Math.round(args.group_size))) });
-    }
     state = this.app.getState();
+    const groupSize = typeof args.group_size === 'number' && Number.isFinite(args.group_size)
+      ? Math.max(1, Math.min(20, Math.round(args.group_size)))
+      : state.fitGroupSize;
     if (!state.place) {
       const venueWithRooms = state.places.find((p) => p.rooms.length > 0);
       if (!venueWithRooms) return { result: { ok: false, error: 'Open a venue with a measured room first.' }, actionLabel: 'No room open' };
@@ -999,7 +978,7 @@ export class LiveController {
 
     const enabled = args.enabled !== false;
     const seating: Seating = args.seating === 'standing' ? 'standing' : args.seating === 'seated' ? 'seated' : state.seating;
-    await this.app.setFit(enabled, seating);
+    await this.app.setFit(enabled, seating, groupSize);
 
     const updated = this.app.getState();
     const rooms = updated.manifest?.rooms ?? updated.place?.rooms ?? [];
@@ -1009,7 +988,7 @@ export class LiveController {
     const floorCap = room ? Math.floor(room.floor_width_m / spacing) * Math.floor(room.floor_depth_m / spacing) : null;
     const statedCap = room?.stated_capacity ?? updated.place?.stated_capacity ?? null;
     const fits = floorCap !== null
-      ? Math.min(floorCap, statedCap ?? floorCap) >= updated.filters.groupSize
+      ? Math.min(floorCap, statedCap ?? floorCap) >= updated.fitGroupSize
       : null;
 
     return {
@@ -1017,14 +996,14 @@ export class LiveController {
         ok: true,
         enabled,
         place: updated.place?.name,
-        group_size: updated.filters.groupSize,
+        group_size: updated.fitGroupSize,
         seating,
         floor_space_capacity: floorCap,
         stated_capacity: statedCap,
         fits,
       },
       actionLabel: enabled
-        ? `Will we fit: ${updated.filters.groupSize} ${seating}`
+        ? `Will we fit: ${updated.fitGroupSize} ${seating}`
         : 'Hid group-fit preview',
     };
   }
@@ -1122,10 +1101,6 @@ export class LiveController {
 
   private async controlUi(args: Record<string, unknown>): Promise<{ result: Record<string, unknown>; actionLabel: string }> {
     const notes: string[] = [];
-    if (args.drawer === 'open' || args.drawer === 'close' || args.drawer === 'expand' || args.drawer === 'collapse') {
-      this.app.setDrawerState(args.drawer);
-      notes.push(`drawer ${args.drawer}`);
-    }
     if (args.filter_panel === 'open' || args.filter_panel === 'close') {
       this.app.setFilterOpen(args.filter_panel === 'open');
       notes.push(`filters ${args.filter_panel}`);

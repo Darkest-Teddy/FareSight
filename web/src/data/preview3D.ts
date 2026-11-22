@@ -29,13 +29,6 @@ export interface StopPreviewCounts {
   published3D: number;
 }
 
-export function describe3DCount(counts: StopPreviewCounts | undefined): string {
-  if (!counts?.published3D) return '';
-  const { matching3D, published3D } = counts;
-  const published = `${published3D} ${published3D === 1 ? 'place has' : 'places have'} 3D previews`;
-  return matching3D === published3D ? `, ${published}` : `, ${published}, ${matching3D} match current filters`;
-}
-
 export function countPreviewsByStop(places: readonly XRPlaceData[], matched: ReadonlySet<string>): Map<string, StopPreviewCounts> {
   const byStop = new Map<string, StopPreviewCounts>();
   for (const place of places) {

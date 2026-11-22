@@ -5,8 +5,15 @@ import './styles/app.css';
 const root = document.querySelector<HTMLElement>('#app');
 if (!root) throw new Error('FareSight requires a main app element.');
 
+// In-scene labels are painted onto canvases once, so the UI font has to be loaded before the 3D
+// scene starts or they keep the fallback face. The wait is capped so an offline font never blocks.
+const fontReady = Promise.race([
+  document.fonts.load('600 16px Switzer'),
+  new Promise((resolve) => setTimeout(resolve, 1500)),
+]).catch(() => undefined);
+
 const app = new AppShell(root);
-void app.start();
+void fontReady.then(() => app.start());
 
 // The offline cache is a production feature. In development it only serves stale models: the
 // generators rewrite the glb files in place under the same names, so a cached copy wins over the

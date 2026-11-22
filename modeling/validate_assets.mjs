@@ -3,7 +3,7 @@ import { places } from '../server/src/db/seed.ts';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ringDistance } from './landmarks.mjs';
-import { charlesRiver, inWater } from './water.mjs';
+import { inWater, water } from './water.mjs';
 
 const dir = fileURLToPath(new URL('output/', import.meta.url));
 const { areas } = JSON.parse(
@@ -227,8 +227,9 @@ function parseModel(name) {
     ? [1, 39999, 16]
     : name.startsWith('boston')
       // Floor lowered from 15000: the sculpture now uses flat track plates instead of swept
-      // tubes and has no deck, street grid or river, so the honest triangle count is far lower.
-      // The ceiling is the one that matters for performance and is unchanged. Thirteen primitives:
+      // tubes and has no deck or street grid, so the honest triangle count is far lower. The
+      // water is inlaid in the ground plate, about 7k of its 14k triangles; the whole sculpture is
+      // about 51k. The ceiling is the one that matters for performance and is unchanged. Thirteen primitives:
       // the twelve opaque surfaces and the translucent ground plate, which has to be its own.
       ? [4000, 55000, 13]
       : uiModels.includes(name)
@@ -449,10 +450,11 @@ for (const [color, count] of offsets) {
         }
   }
 }
-// The Charles is the surveyed river, in the right place: points known to be on the water are in
-// it, points known to be on its banks are not, and no landmark but the bridge stands in it.
+// The water is the surveyed water, in the right place: points known to be on the river or the
+// harbour are in it, points known to be on their banks are not, and no landmark but the bridge
+// stands in it. The Charles and the harbour are two bodies, parted by the dam.
 {
-  const river = charlesRiver();
+  const { bodies } = water();
   const at = (lat, lon) => [
     ((lon + 71.095) * 111320 * Math.cos((42.354 * Math.PI) / 180)) / 6500,
     (-(lat - 42.354) * 110540) / 6500,
@@ -462,14 +464,61 @@ for (const [color, count] of offsets) {
     ['mid-span of the Harvard Bridge', 42.3545, -71.0915, true],
     ['the basin off MIT', 42.3555, -71.09, true],
     ['the Weeks Footbridge', 42.3683, -71.1187, true],
+    ['the river under the BU Bridge', 42.3527, -71.1105, true],
+    ['the river under the Zakim', 42.3687, -71.0632, true],
+    ['the harbour between Aquarium and Maverick', 42.3643, -71.0452, true],
+    ['the harbour off Long Wharf', 42.3605, -71.0455, true],
+    ['Fort Point Channel at the Summer Street bridge', 42.3515, -71.0517, true],
     ['the MIT Great Dome', 42.359756, -71.092061, false],
     ['the Hatch Shell', 42.3573, -71.0737, false],
     ['Kenmore station', 42.348949, -71.095169, false],
+    ['Boston Common', 42.355, -71.0655, false],
+    ['Aquarium station', 42.359784, -71.051652, false],
+    ['Maverick Square', 42.36912, -71.03953, false],
+    ['the Bunker Hill Monument', 42.37635, -71.06077, false],
   ])
-    assert.equal(inWater(river.reaches, ...at(lat, lon)), wet, name + (wet ? ' should be water' : ' should be land'));
+    assert.equal(inWater(bodies, ...at(lat, lon)), wet, name + (wet ? ' should be water' : ' should be land'));
+  // The basin is the wide water: more than 500 m across at the Harvard Bridge, and the river a
+  // fifth of that above the BU Bridge.
+  const width = (lat, lon, bearing) => {
+    const [x, z] = at(lat, lon);
+    const [dx, dz] = [Math.sin((bearing * Math.PI) / 180), -Math.cos((bearing * Math.PI) / 180)];
+    let reach = 0;
+    for (const sign of [-1, 1]) {
+      let step = 0;
+      while (step < 400 && inWater(bodies, x + (dx * sign * step) / 6500, z + (dz * sign * step) / 6500)) step += 2;
+      reach += step;
+    }
+    return reach;
+  };
+  const basin = width(42.3545, -71.0915, 335);
+  const upstream = width(42.3683, -71.1187, 20);
+  assert.ok(basin > 500 && basin < 700, 'the basin is ' + basin + ' m across at the Harvard Bridge');
+  assert.ok(upstream > 50 && upstream < 130, 'the river is ' + upstream + ' m across at the Weeks Footbridge');
   for (const l of load('landmark-anchors'))
     if (l.id !== 'zakim')
-      for (const [x, z] of l.foot.flat()) assert.ok(!inWater(river.reaches, x, z), l.id + ' stands in the river');
+      for (const [x, z] of l.foot.flat()) assert.ok(!inWater(bodies, x, z), l.id + ' stands in the water');
+}
+// The city is the surveyed city: ninety real buildings, each within the plate, none in the water
+// and none on a line. Checked on the mesh itself, a vertex at a time.
+{
+  const { bodies } = water();
+  const city = map.meshes.get('City blocks');
+  assert.ok(city, 'city blocks');
+  const p = city.positions;
+  let wet = 0;
+  for (let i = 0; i < p.length; i += 3) {
+    assert.ok(p[i + 1] >= 0.04 - 1e-6 && p[i + 1] <= 0.125, 'city height ' + p[i + 1]);
+    if (inWater(bodies, p[i], p[i + 2])) wet++;
+    for (const line of paths)
+      for (let k = 1; k < line.points.length; k++) {
+        const [a, b] = [line.points[k - 1], line.points[k]];
+        const [vx, vz] = [b[0] - a[0], b[2] - a[2]];
+        const t = Math.max(0, Math.min(1, ((p[i] - a[0]) * vx + (p[i + 2] - a[2]) * vz) / (vx * vx + vz * vz || 1)));
+        assert.ok(Math.hypot(a[0] + vx * t - p[i], a[2] + vz * t - p[i + 2]) > 0.0054, 'a building stands on ' + line.name);
+      }
+  }
+  assert.equal(wet, 0, wet + ' city vertices stand in the water');
 }
 function topAt(meshes, x, z) {
   let height = -Infinity;

@@ -3,7 +3,7 @@ import { has3D } from '../data/preview3D';
 import type { XRFilterSummary, XRPlaceData, XRStopData } from './bridgeTypes';
 import { PhysicalPlaque } from './CanvasPanel3D';
 import { jarvisPoints, type JarvisReveal } from './JarvisReveal';
-import { assetBase, brass, child, clamp, damp, fetchAssetJson, highlightInk, ink, ivory, material, pickBounds, shape, sunflower,
+import { assetBase, child, clamp, damp, fetchAssetJson, ink, ivory, material, pickBounds, shape, sunflower, target,
   type DebugLog, type HitTarget, type ModelLibrary, type PickBounds, type XYZ } from './sceneSupport';
 
 interface SegmentProjection {
@@ -51,13 +51,29 @@ function isSegmentAnchor(value: unknown): value is SegmentAnchor {
   return stationAnchor === undefined || (isRecord(stationAnchor) && isPosition(stationAnchor.base) && Number.isFinite(stationAnchor.top));
 }
 
+/**
+ * A venue marker, drawn the way a map marks a place: a dot on the spot, a hairline up from it, and
+ * a paper label on top. Three parts, two colours.
+ *
+ * Its states are told apart by shape and fill, never by glow, which does not read on paper:
+ * - every venue has a paper dot ringed in ink;
+ * - a venue with a 3D room has a larger dot with an ink bullseye, and a "3D" chip on its label;
+ * - the venue being pointed at fills its dot and its label with sunflower, stands taller on a
+ *   heavier needle, and sends ink rings out across the ground;
+ * - a venue the filters rule out sinks and fades to grey.
+ */
 interface Pin {
   place: XRPlaceData;
   root: pc.Entity;
   panel: PhysicalPlaque;
-  stem: pc.Entity;
-  stemSurface: pc.StandardMaterial;
-  locator?: VenueBeacon;
+  needle: pc.Entity;
+  /** The dot on the venue's spot: an ink disc, a smaller fill on it, and the bullseye. */
+  foot: pc.Entity;
+  bullseye: pc.Entity;
+  /** Needle, ring and bullseye. One material per pin, so a filtered-out venue can fade alone. */
+  inkSurface: pc.StandardMaterial;
+  fillSurface: pc.StandardMaterial;
+  pulse?: FootPulse;
   targets: HitTarget[];
   index: number;
   matched: boolean;
@@ -66,36 +82,101 @@ interface Pin {
   visibility: number;
 }
 
-interface VenueBeacon {
+/** The ring that travels outward from the venue being pointed at. */
+interface FootPulse {
   entity: pc.Entity;
   surface: pc.StandardMaterial;
-  pulse: pc.Entity;
-  pulseSurface: pc.StandardMaterial;
-  sleeve: pc.Entity;
-  sleeveSurface: pc.StandardMaterial;
   phase: number;
 }
 const oneWayFare = 2.4;
-const nearbyPinDistance = 0.15;
-const labelClearance = 0.22;
-const labelTierSpacing = 0.16;
+// Labels that would cover one another as seen from the table are stacked at different heights.
+const labelClearance = 0.11;
+/** How far a label climbs per try while it still covers one it has to clear. */
+const labelClimb = 0.006;
+const labelMaxRise = 0.2;
+/** Clear space kept between two labels on screen, as a fraction of a label's own size there. */
+const labelGap = 0.06;
+/**
+ * Where the viewer stands, in deck space, at the default framing. Overlap is judged from here: a
+ * label further back looks higher and smaller, so two labels can cover each other without being
+ * anywhere near each other on the deck. The viewer never moves for a transition, so this holds.
+ */
+const viewerAt = new pc.Vec3(0.086, 0.831, 0.856);
+const viewForward = new pc.Vec3(-0.065, -0.758, -0.649).normalize();
+const viewRight = new pc.Vec3().cross(viewForward, pc.Vec3.UP).normalize();
+const viewUp = new pc.Vec3().cross(viewRight, viewForward).normalize();
 // Segment anchors include this clearance above the sampled roof or ground.
 const anchorClearance = 0.018;
-const stemWidth = 0.006;
+// The label is venue-pin-flag.glb: a 204 x 64 mm face inside a 2.4 mm ink edge.
+const labelWidth = 0.204;
+const labelHeight = 0.064;
+const labelEdge = 0.0024;
+const needleWidth = 0.0032;
+const footRadius = 0.0105;
+const footRadius3D = 0.0145;
+const footLift = 0.0025;
+/** How much of the foot's radius is its ink ring; the rest is fill. */
+const footRing = 0.26;
+const pulseRadius = 0.024;
+const pulsePeriod = 1.5;
 const pinStagger = 0.07;
 const pinRevealTime = 0.45;
 const stationRevealTime = 1.48;
-const stemColor = new pc.Color().fromString(brass);
-const mutedColor = new pc.Color().fromString('#93979c');
-// A 3D-venue locator is an ink ring under a sunflower column: the ring gives it an edge on any
-// roof or street colour, the column gives it the warmth. Neither relies on glow, which does not
-// read against the paper backdrop.
-const ringColor = new pc.Color().fromString(ink);
-const columnColor = new pc.Color().fromString(sunflower);
-const highlightColor = new pc.Color().fromString(highlightInk);
+const inkColor = new pc.Color().fromString(ink);
+const paperColor = new pc.Color().fromString('#FFFDF8');
+const sunflowerColor = new pc.Color().fromString(sunflower);
+// A filtered-out venue: still there, but as quiet as the paper allows.
+const mutedInk = new pc.Color().fromString('#A9A59B');
+const mutedPaper = new pc.Color().fromString('#ECE6DA');
 const fallbackGrabSize: XYZ = [0.914, 0.54, 0.98];
 const fallbackGrabCenter: XYZ = [0, 0.09, 0.02];
-const defaultFilters: XRFilterSummary = { craving: '', maxBudget: 20, startStopId: '', groupSize: 1, familyVisit: false };
+const defaultFilters: XRFilterSummary = { maxBudget: 20, startStopId: '' };
+
+/** A label's extent as the viewer sees it: x and y are view-plane directions over distance. */
+interface LabelRect {
+  left: number;
+  right: number;
+  bottom: number;
+  top: number;
+}
+
+const viewCorner = new pc.Vec3();
+
+/**
+ * The screen box around the label centred at height y over (x, z), seen from where the viewer
+ * stands. The label stands upright and turns to face the viewer, so off to one side it looks
+ * tilted; the box holds all four of its corners.
+ */
+function labelRect(x: number, y: number, z: number): LabelRect {
+  const toViewerX = viewerAt.x - x;
+  const toViewerZ = viewerAt.z - z;
+  const flat = Math.hypot(toViewerX, toViewerZ) || 1;
+  const halfWidth = labelWidth / 2 + labelEdge;
+  const halfHeight = labelHeight / 2 + labelEdge;
+  // The label's own left-to-right, level and square to the line towards the viewer.
+  const alongX = (toViewerZ / flat) * halfWidth;
+  const alongZ = (-toViewerX / flat) * halfWidth;
+  const rect = { left: Infinity, right: -Infinity, bottom: Infinity, top: -Infinity };
+  for (const side of [-1, 1]) {
+    for (const end of [-1, 1]) {
+      viewCorner.set(x + side * alongX, y + end * halfHeight, z + side * alongZ).sub(viewerAt);
+      const depth = Math.max(0.05, viewCorner.dot(viewForward));
+      const across = viewCorner.dot(viewRight) / depth;
+      const up = viewCorner.dot(viewUp) / depth;
+      rect.left = Math.min(rect.left, across);
+      rect.right = Math.max(rect.right, across);
+      rect.bottom = Math.min(rect.bottom, up);
+      rect.top = Math.max(rect.top, up);
+    }
+  }
+  return rect;
+}
+
+function overlaps(a: LabelRect, b: LabelRect): boolean {
+  const padX = (a.right - a.left) * labelGap / 2;
+  const padY = (a.top - a.bottom) * labelGap / 2;
+  return a.left - padX < b.right && b.left < a.right + padX && a.bottom - padY < b.top && b.bottom < a.top + padY;
+}
 
 function projectToDeck(proj: SegmentProjection, lat?: number, lon?: number): [number, number] | undefined {
   if (lat === undefined || lon === undefined || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
@@ -112,10 +193,11 @@ function categoryTag(place: XRPlaceData & { cravings?: readonly string[] }): str
   return category.replaceAll('_', ' ').toUpperCase();
 }
 
-function beaconMaterial(opacity = 1): pc.StandardMaterial {
-  const surface = material(ink, 0.94, opacity);
+/** A flat, unlit colour: the marker is a drawing on the map, so it does not take the scene's shading. */
+function flat(color: pc.Color, opacity = 1): pc.StandardMaterial {
+  const surface = material('#000000', 0, opacity);
   surface.useLighting = false;
-  surface.diffuse.set(0, 0, 0);
+  surface.emissive.copy(color);
   surface.update();
   return surface;
 }
@@ -132,7 +214,7 @@ export class StationDioramaScene {
   private stationColor: pc.StandardMaterial;
   private fallback: pc.Entity;
   private pinModel: Promise<pc.ContainerResource | null>;
-  private locatorMesh: pc.Mesh;
+  private pulseMesh: pc.Mesh;
   private model?: pc.Entity;
   private materials: pc.StandardMaterial[] = [];
   private anchors = new Map<string, SegmentAnchor>();
@@ -161,10 +243,10 @@ export class StationDioramaScene {
     this.deckContent = child(this.base, 'Station segment and markers');
     this.fallback = child(this.hero, 'Station model fallback');
     this.pinModel = models.load(`${assetBase}venue-pin-flag.glb`);
-    this.locatorMesh = pc.Mesh.fromGeometry(device, new pc.TorusGeometry({
-      ringRadius: 0.024, tubeRadius: 0.0022, segments: 48, sides: 6,
+    this.pulseMesh = pc.Mesh.fromGeometry(device, new pc.TorusGeometry({
+      ringRadius: pulseRadius, tubeRadius: 0.0016, segments: 48, sides: 6,
     }));
-    this.locatorMesh.incRefCount();
+    this.pulseMesh.incRefCount();
 
     const grass = material('#7fa35a');
     const earth = material('#7a5a3c');
@@ -266,10 +348,7 @@ export class StationDioramaScene {
 
   setHighlightedPlaces(placeIds: string[]): void {
     this.highlighted = new Set(placeIds);
-    for (const pin of this.pins) {
-      this.setLocator(pin, has3D(pin.place) || this.highlighted.has(pin.place.id));
-      this.applyPinPose(pin);
-    }
+    for (const pin of this.pins) this.applyPinPose(pin);
     this.updatePinLabels();
   }
 
@@ -327,13 +406,23 @@ export class StationDioramaScene {
       if (pin) previous.delete(place.id);
       else {
         const root = child(this.deckContent, place.name, undefined, this.app);
-        const panel = new PhysicalPlaque(this.app.graphicsDevice, root, place.name, 0.225, 0.075, 'flag', this.pinModel, this.reveal);
-        const stemSurface = material(brass);
-        shape(root, 'Roof collar', 'cylinder', stemSurface, [0, 0.002, 0], [0.023, 0.004, 0.023], this.app);
-        const stem = shape(root, 'Brass stem', 'cylinder', stemSurface, [0, 0, 0], [stemWidth, 1, stemWidth], this.app);
+        const panel = new PhysicalPlaque(this.app.graphicsDevice, root, place.name, labelWidth, labelHeight, 'flag', this.pinModel, this.reveal);
+        const inkSurface = flat(inkColor);
+        const fillSurface = flat(paperColor);
+        // The foot is three discs of unit radius, each a little smaller and a little taller than
+        // the one under it, so from above they read as ring, fill and bullseye. It is scaled as
+        // one to the size its venue calls for. It floats a hair above the sampled roof so a spot
+        // on a roof edge or a sloped parapet is not half swallowed by it.
+        const foot = child(root, 'Foot', [0, footLift, 0], this.app);
+        shape(foot, 'Ink ring', 'cylinder', inkSurface, [0, 0.0008, 0], [2, 0.0016, 2], this.app);
+        shape(foot, 'Fill', 'cylinder', fillSurface, [0, 0.0011, 0], [2 * (1 - footRing), 0.0022, 2 * (1 - footRing)], this.app);
+        const bullseye = shape(foot, 'Bullseye', 'cylinder', inkSurface, [0, 0.0014, 0], [0.72, 0.0028, 0.72], this.app);
+        const needle = shape(root, 'Needle', 'cylinder', inkSurface, [0, 0, 0], [needleWidth, 1, needleWidth], this.app);
+        for (const render of root.findComponents('render') as pc.RenderComponent[]) render.castShadows = false;
         const select = () => this.selectPlace(place.id);
-        pin = { place, root, panel, stem, stemSurface,
-          targets: [panel.hit(select)],
+        pin = { place, root, panel, needle, foot, bullseye, inkSurface, fillSurface,
+          // The label is the obvious thing to click; the dot on the venue's own spot works too.
+          targets: [panel.hit(select), target(root, [0.05, 0.016, 0.05], select)],
           index, matched, height: labelClearance, visibility: matched ? 1 : 0 };
         if (this.pinsShown) this.reveal.show(root, pinRevealTime, jarvisPoints.detail, index * pinStagger);
         else root.enabled = false;
@@ -341,7 +430,6 @@ export class StationDioramaScene {
       pin.place = place;
       pin.index = place.pin_index ?? index;
       pin.matched = matched;
-      this.setLocator(pin, has3D(place) || this.highlighted.has(place.id));
       return pin;
     });
     for (const pin of previous.values()) this.destroyPin(pin);
@@ -349,60 +437,32 @@ export class StationDioramaScene {
     this.updatePinLabels();
   }
 
-  private setLocator(pin: Pin, shown: boolean): void {
-    if (shown === !!pin.locator) return;
-    if (!shown) {
-      this.removeLocator(pin);
+  /** Give the venue being pointed at its travelling ring, or take it away again. */
+  private setPulse(pin: Pin, shown: boolean): void {
+    if (shown === !!pin.pulse) return;
+    if (pin.pulse) {
+      pin.pulse.entity.destroy();
+      pin.pulse.surface.destroy();
+      pin.pulse = undefined;
       return;
     }
-    const entity = child(pin.root, '3D venue inner halo', [0, 0.007, 0], this.app);
-    const surface = beaconMaterial();
-    entity.addComponent('render', { castShadows: false, meshInstances: [new pc.MeshInstance(this.locatorMesh, surface, entity)] });
-    const pulse = child(pin.root, '3D venue pulse halo', [0, 0.007, 0], this.app);
-    const pulseSurface = beaconMaterial(0.53);
-    // The translucent locator stays readable from street level, where surrounding blocks can cover the collar.
-    pulseSurface.depthTest = false;
-    pulse.addComponent('render', { castShadows: false, meshInstances: [new pc.MeshInstance(this.locatorMesh, pulseSurface, pulse)] });
-    const sleeveSurface = beaconMaterial(0.48);
-    sleeveSurface.depthTest = false;
-    const sleeve = shape(pin.root, '3D venue beacon sleeve', 'cylinder', sleeveSurface,
-      [0, 0.069, 0], [0.020, 0.126, 0.020], this.app);
-    sleeve.render!.castShadows = false;
-    pin.locator = { entity, surface, pulse, pulseSurface, sleeve, sleeveSurface, phase: 0.28 };
-    this.updateLocator(pin, 0);
+    const entity = child(pin.root, 'Pointed-at ring', [0, footLift + 0.003, 0], this.app);
+    const surface = flat(inkColor, 0.99);
+    entity.addComponent('render', { castShadows: false, meshInstances: [new pc.MeshInstance(this.pulseMesh, surface, entity)] });
+    pin.pulse = { entity, surface, phase: 0 };
+    this.updatePulse(pin, 0);
   }
 
-  private updateLocator(pin: Pin, dt: number): void {
-    const locator = pin.locator;
-    if (!locator) return;
-    const isHighlighted = this.highlighted.has(pin.place.id);
-    const brightness = isHighlighted ? 1 : pc.math.lerp(0.15, 1, pin.visibility);
-    const tint = isHighlighted ? highlightColor : ringColor;
-    locator.surface.emissive.copy(tint);
-    locator.pulseSurface.emissive.copy(tint);
-    locator.sleeveSurface.emissive.copy(columnColor);
-    locator.surface.emissiveIntensity = isHighlighted ? 1.35 : brightness;
-    locator.surface.update();
-    locator.sleeveSurface.opacity = (isHighlighted ? 0.82 : 0.56) * brightness;
-    locator.sleeveSurface.update();
-    const speed = isHighlighted ? 1.05 : 1.85;
-    locator.phase = this.reveal.enabled ? (locator.phase + dt / speed) % 1 : 0.34;
-    const scale = (isHighlighted ? 1.45 : 1.28) + (isHighlighted ? 1.6 : 1.2) * locator.phase;
-    locator.pulse.setLocalScale(scale, 0.7, scale);
-    locator.pulseSurface.opacity = (1 - locator.phase) * (isHighlighted ? 0.85 : 0.61) * brightness;
-    locator.pulseSurface.update();
-  }
-
-  private removeLocator(pin: Pin): void {
-    const locator = pin.locator;
-    if (!locator) return;
-    locator.entity.destroy();
-    locator.pulse.destroy();
-    locator.sleeve.destroy();
-    locator.surface.destroy();
-    locator.pulseSurface.destroy();
-    locator.sleeveSurface.destroy();
-    pin.locator = undefined;
+  /** The ring leaves the foot's rim at full ink and thins out as it travels. */
+  private updatePulse(pin: Pin, dt: number): void {
+    const pulse = pin.pulse;
+    if (!pulse) return;
+    // With motion turned down the ring holds still, part-way out.
+    pulse.phase = this.reveal.enabled ? (pulse.phase + dt / pulsePeriod) % 1 : 0.4;
+    const reach = pc.math.lerp(pin.foot.getLocalScale().x / pulseRadius, 2.3, 1 - (1 - pulse.phase) ** 2);
+    pulse.entity.setLocalScale(reach, 1, reach);
+    pulse.surface.opacity = (1 - pulse.phase) ** 1.5;
+    pulse.surface.update();
   }
 
   private positionMarkers(): void {
@@ -440,17 +500,20 @@ export class StationDioramaScene {
         : projected ? [projected[0], deckY + 0.08, projected[1]]
           : [(pin.index % 3 - 1) * 0.25, 0.11, Math.floor(pin.index / 3) * 0.23 - 0.08];
       return { pin, position };
-    }).sort((a, b) => a.position[1] - b.position[1] || a.pin.index - b.pin.index);
+    });
 
-    const labels: { x: number; y: number; z: number }[] = [];
+    // Nearest the viewer first: a label further back then climbs until it shows above the ones in
+    // front of it, which is also where it looks most natural.
+    placements.sort((a, b) => b.position[2] - a.position[2] || a.pin.index - b.pin.index);
+    const labels: LabelRect[] = [];
     for (const { pin, position: [x, baseY, z] } of placements) {
-      const nearbyHeights = labels.filter((label) => Math.hypot(x - label.x, z - label.z) <= nearbyPinDistance)
-        .map((label) => label.y).sort((a, b) => a - b);
       let labelY = baseY + labelClearance;
-      for (const height of nearbyHeights) {
-        if (Math.abs(labelY - height) < labelTierSpacing) labelY = height + labelTierSpacing;
+      let rect = labelRect(x, labelY, z);
+      while (labelY < baseY + labelClearance + labelMaxRise && labels.some((other) => overlaps(rect, other))) {
+        labelY += labelClimb;
+        rect = labelRect(x, labelY, z);
       }
-      labels.push({ x, y: labelY, z });
+      labels.push(rect);
 
       pin.root.setLocalPosition(x, baseY, z);
       pin.height = labelY - baseY;
@@ -463,7 +526,7 @@ export class StationDioramaScene {
     for (const pin of this.pins) {
       const fare = this.filters.startStopId === pin.place.stop_id ? 0 : oneWayFare;
       const hourlyRoom = pin.place.rooms.find((room) => /hour/i.test(room.price_unit));
-      const subtotal = hourlyRoom ? hourlyRoom.price / Math.max(1, this.filters.groupSize) : pin.place.typical_price;
+      const subtotal = hourlyRoom ? hourlyRoom.price : pin.place.typical_price;
       const total = subtotal + fare;
       pin.panel.setCallout(pin.place.name, `$${total.toFixed(2)} incl. fare`, {
         category: pin.offDeck ? `${pin.offDeck.distanceM} M ${pin.offDeck.compass}` : categoryTag(pin.place),
@@ -481,28 +544,43 @@ export class StationDioramaScene {
         pin.visibility = Math.abs(pin.visibility - goal) < 0.01 ? goal : pc.math.lerp(pin.visibility, goal, fade);
         this.applyPinPose(pin);
       }
-      this.updateLocator(pin, dt);
+      this.updatePulse(pin, dt);
       pin.panel.faceYaw(camera, dt);
     }
   }
 
+  /** Size, place and colour one marker for its venue's state. */
   private applyPinPose(pin: Pin): void {
     const isHighlighted = this.highlighted.has(pin.place.id);
-    const labelY = pin.height - 0.065 * (1 - pin.visibility) + (isHighlighted ? 0.032 : 0);
-    const stemHeight = Math.max(stemWidth, labelY - pin.panel.faceHeight);
-    pin.stem.setLocalPosition(0, stemHeight / 2, 0);
-    pin.stem.setLocalScale(stemWidth, stemHeight, stemWidth);
-    pin.stemSurface.diffuse.lerp(mutedColor, isHighlighted ? highlightColor : stemColor, isHighlighted ? 1 : pin.visibility);
-    pin.stemSurface.update();
-    pin.panel.entity.setLocalPosition(0, stemHeight, 0);
-    pin.panel.setMuted(isHighlighted ? 0 : 1 - pin.visibility);
+    const presence = isHighlighted ? 1 : pin.visibility;
+    const labelY = pin.height - 0.065 * (1 - pin.visibility) + (isHighlighted ? 0.014 : 0);
+    const panelY = Math.max(needleWidth, labelY - pin.panel.faceHeight);
+    pin.panel.entity.setLocalPosition(0, panelY, 0);
+    pin.panel.setMuted(1 - presence);
+
+    // The needle runs from the venue's spot into the underside of the label.
+    const width = needleWidth * (isHighlighted ? 1.6 : 1);
+    const reach = panelY + pin.panel.faceHeight - labelHeight / 2 - labelEdge / 2;
+    pin.needle.setLocalPosition(0, reach / 2, 0);
+    pin.needle.setLocalScale(width, reach, width);
+
+    const radius = (has3D(pin.place) ? footRadius3D : footRadius) * (isHighlighted ? 1.3 : 1);
+    pin.foot.setLocalScale(radius, 1, radius);
+    pin.bullseye.enabled = has3D(pin.place);
+
+    pin.inkSurface.emissive.lerp(mutedInk, inkColor, presence);
+    pin.inkSurface.update();
+    pin.fillSurface.emissive.lerp(mutedPaper, isHighlighted ? sunflowerColor : paperColor, presence);
+    pin.fillSurface.update();
+    this.setPulse(pin, isHighlighted);
   }
 
   private destroyPin(pin: Pin): void {
-    this.removeLocator(pin);
+    this.setPulse(pin, false);
     pin.panel.destroy();
     pin.root.destroy();
-    pin.stemSurface.destroy();
+    pin.inkSurface.destroy();
+    pin.fillSurface.destroy();
   }
 
   destroy(): void {
@@ -511,8 +589,8 @@ export class StationDioramaScene {
     this.abort.abort();
     for (const pin of this.pins) this.destroyPin(pin);
     this.root.destroy();
-    this.locatorMesh.decRefCount();
-    this.locatorMesh.destroy();
+    this.pulseMesh.decRefCount();
+    this.pulseMesh.destroy();
     for (const surface of this.materials) surface.destroy();
   }
 }
